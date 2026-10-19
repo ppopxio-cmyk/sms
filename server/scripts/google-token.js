@@ -1,15 +1,16 @@
 // One-time helper that prints the refresh token the Gmail API needs.
 //
-//   npm run google:token
+//   npm run google:token                    (listens on 5000)
+//   npm run google:token -- --port=53682    (when the API dev server holds 5000)
 //
-// It listens on the port that is registered as the redirect URI
-// (http://localhost:5000/oauth2callback), so the API dev server must be stopped while it
-// runs. The token it prints goes into server/.env and into Render's environment.
+// The port must match one of the redirect URIs registered for the OAuth client in
+// Google Cloud. The token it prints goes into server/.env and into Render's environment.
 import 'dotenv/config';
 import http from 'node:http';
 import { exec } from 'node:child_process';
 
-const PORT = 5000;
+const portArg = process.argv.find((value) => value.startsWith('--port='));
+const PORT = Number(portArg ? portArg.split('=')[1] : 0) || 5000;
 const CALLBACK = `http://localhost:${PORT}/oauth2callback`;
 const SCOPE = 'https://www.googleapis.com/auth/gmail.send';
 
@@ -89,7 +90,8 @@ const server = http.createServer(async (req, res) => {
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`\nPort ${PORT} is busy. Stop the API dev server (the one on port ${PORT}) and run this again.\n`);
+    console.error(`\nPort ${PORT} is busy. Try another registered port, for example:`);
+    console.error('  npm run google:token -- --port=53682\n');
   } else {
     console.error('\n' + err.message + '\n');
   }
@@ -97,8 +99,10 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, () => {
-  console.log('\nOpen this address, sign in as the school Gmail account, and press Allow:\n');
+  console.log(`\nWaiting for the redirect on ${CALLBACK}`);
+  console.log('(that exact address must be listed as an authorised redirect URI)\n');
+  console.log('Open this address, sign in as the school Gmail account, and press Allow:\n');
   console.log(authUrl.toString());
-  console.log('\nWaiting for the redirect...\n');
+  console.log('');
   if (process.platform === 'win32') exec(`start "" "${authUrl}"`);
 });
