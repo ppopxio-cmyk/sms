@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { deviceFingerprint } from './fingerprint';
+import { primeDeviceInfo } from './device-info';
 
 // Vite proxies /api to the Express server, so this stays same-origin in dev
 // and works unchanged if the built site is served by the API in production.
@@ -58,6 +59,9 @@ export const api = axios.create({
   withCredentials: true,
   headers: { 'X-Requested-With': 'sms-web', 'X-Device-Fingerprint': deviceFingerprint() },
 });
+
+// What the browser will say about its own system, once it has answered (see device-info).
+primeDeviceInfo(api);
 
 api.interceptors.request.use((config) => {
   if (accessToken) {

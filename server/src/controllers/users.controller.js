@@ -158,9 +158,13 @@ export const resendUserCode = asyncHandler(async (req, res) => {
   if (user.emailVerified && !user.mustChangePassword) {
     throw new AppError(400, 'ALREADY_VERIFIED', 'This email is already confirmed. Send a reset link instead.');
   }
-  const sent = await deliverVerifyLink(user);
-  if (!sent) {
-    throw new AppError(429, 'WAIT_BEFORE_RESEND', 'A link went out a moment ago. Please wait before sending another.');
+  try {
+    await deliverVerifyLink(user);
+  } catch (err) {
+    if (err.code === 'WAIT_BEFORE_RESEND') {
+      throw new AppError(429, 'WAIT_BEFORE_RESEND', 'A link went out a moment ago. Please wait before sending another.');
+    }
+    throw err;
   }
   audit({ req, action: 'admin.user_verify_link_resent', targetType: 'user', targetId: user._id });
   res.json({ message: user.mustChangePassword ? 'A new setup link is on its way.' : 'A new confirmation link is on its way.' });

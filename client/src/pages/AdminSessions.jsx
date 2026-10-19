@@ -79,6 +79,7 @@ export default function AdminSessions() {
             value={term}
             onChange={(e) => setTerm(e.target.value)}
           />
+          <p className="-mt-1 text-xs text-slate-500">Places are estimated from the IP address and may not always be accurate.</p>
 
           {all.isLoading ? (
             <>
@@ -118,7 +119,11 @@ export default function AdminSessions() {
                       </div>
                       <p className="mt-0.5 truncate text-xs text-slate-500">{s.user?.email}</p>
                       <p className="mt-0.5 truncate text-xs text-slate-500">
-                        {s.browser} on {s.os} · {s.ip} · {s.location || 'Unknown place'}
+                        {s.deviceName ? `${s.deviceName} · ` : ''}
+                        {s.browser} on {s.os}
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-slate-500">
+                        {s.location || 'Unknown place'} · {s.ip}
                       </p>
                       <p className="mt-0.5 text-xs text-slate-400">
                         Started {formatEthiopian(s.createdAt, { time: true })} · last active {timeAgo(s.lastSeenAt)}

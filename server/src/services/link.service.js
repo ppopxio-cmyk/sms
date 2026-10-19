@@ -5,10 +5,9 @@ import { AppError } from '../utils/AppError.js';
 import { resendWaitMessage } from './code.service.js';
 import { signTicket, readTicket } from './token.service.js';
 
-// Confirming an email is done with a link, not a six-digit code. The link is a signed
-// ticket that carries a random id (jti); the hash of that id sits in the
-// VerificationCode row, which is what makes the link single use and what remembers
-// when it was last sent, so the same two-minute wait applies as for codes.
+// Confirming an email is done with a link, never a code. The row that remembers the link
+// stays until it expires (see consumeVerifyLink), so the same two-minute wait applies as
+// for codes without a scanner's first visit killing the link.
 const VERIFY_PURPOSE = 'email_verify_link';
 const RESEND_WAIT_MS = env.CODE_RESEND_WAIT_SECONDS * 1000;
 const sha = (value) => crypto.createHash('sha256').update(value).digest('hex');
@@ -60,7 +59,11 @@ export async function consumeVerifyLink(token) {
     record && record.codeHash === sha(payload.jti) && record.expiresAt.getTime() > Date.now();
   if (!usable) throw new AppError(400, 'LINK_INVALID', LINK_INVALID);
 
-  await record.deleteOne();
+  // The row is deliberately left in place until it expires. Mail providers and company
+  // security scanners open links before the person does, and a link that dies on that
+  // first look never works for the one it was meant for. A second click unlocks nothing
+  // extra: the address can only be confirmed once, and finishing the account needs the
+  // short ticket that only the browser which clicked is given.
   return payload;
 }
 

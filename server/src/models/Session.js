@@ -17,6 +17,7 @@ const sessionSchema = new mongoose.Schema(
     browser: String,
     os: String,
     deviceType: String,
+    deviceName: String,
     location: String,
     status: { type: String, enum: ['active', 'revoked'], default: 'active' },
     revokedAt: Date,

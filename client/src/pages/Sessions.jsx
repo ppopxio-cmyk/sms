@@ -74,6 +74,7 @@ export default function Sessions() {
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
           Every device signed in to your account. If you see something you do not recognise, sign it out and change your password.
         </p>
+        <p className="mt-1.5 text-xs text-slate-500">Places are estimated from the IP address and may not always be accurate.</p>
       </header>
 
       <Card>
@@ -110,6 +111,7 @@ export default function Sessions() {
                   </span>
                   <div className="min-w-0">
                     <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-800">
+                      {s.deviceName ? `${s.deviceName} · ` : ''}
                       {s.browser} on {s.os}
                       {s.current ? <Badge tone="success">This device</Badge> : null}
                     </p>

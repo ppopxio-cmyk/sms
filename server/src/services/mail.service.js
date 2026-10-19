@@ -142,18 +142,23 @@ export function sendCodeEmail({ to, name, code, purpose }) {
   });
 }
 
-export function sendLoginAlert({ to, name, ip, browser, os, location, at }) {
+export function sendLoginAlert({ to, name, ip, browser, os, location, deviceName, at }) {
+  const device = [deviceName, [browser, os].filter(Boolean).join(' on ')].filter(Boolean).join(' · ');
   const body =
     para(`Hi ${esc(name)},<br>You just signed in to your account. If this was you, no action is needed.`) +
     detailCard(
-      row('When', formatEthiopian(at, { time: true })) + row('Browser', browser) + row('System', os) + row('Place', location) + row('IP address', ip),
+      row('When', formatEthiopian(at, { time: true })) +
+        row('Device', device) +
+        row('Place', location) +
+        row('IP address', ip),
     ) +
+    note('The place is worked out from the IP address, so it is an estimate and may not always be accurate.') +
     note('If this was not you, reset your password right away and tell an administrator.');
   return deliver({
     to,
     subject: 'New sign-in to your account',
     html: layout({ preheader: 'We noticed a new sign-in', title: 'You signed in', accent: 'New sign-in', body }),
-    text: `You signed in on ${formatEthiopian(at, { time: true })} from ${browser} on ${os} (${ip}). If this was not you, reset your password.`,
+    text: `You signed in on ${formatEthiopian(at, { time: true })} from ${device} at ${location} (${ip}). The place is estimated from the IP address. If this was not you, reset your password.`,
   });
 }
 

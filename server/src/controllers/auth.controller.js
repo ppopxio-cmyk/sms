@@ -135,7 +135,7 @@ export const resendVerification = asyncHandler(async (req, res) => {
   // nothing. Everybody else does: either the address is still unconfirmed, or it is
   // confirmed but the account was never finished.
   const wantsLink = user && (!user.emailVerified || user.mustChangePassword);
-  if (wantsLink && user.status !== 'disabled') await deliverVerifyLink(user);
+  if (wantsLink && user.status !== 'disabled') await deliverVerifyLink(user).catch(() => {});
   res.json({ message: 'If that email still needs confirming, we sent a new link.' });
 });
 
@@ -374,6 +374,7 @@ export const listMySessions = asyncHandler(async (req, res) => {
         browser: s.browser,
         os: s.os,
         deviceType: s.deviceType,
+        deviceName: s.deviceName,
         location: s.location,
         ip: s.ip,
         createdAt: s.createdAt,

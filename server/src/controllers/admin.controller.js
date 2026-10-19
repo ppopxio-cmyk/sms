@@ -23,6 +23,7 @@ export const listSessions = asyncHandler(async (req, res) => {
       browser: s.browser,
       os: s.os,
       deviceType: s.deviceType,
+      deviceName: s.deviceName,
       location: s.location,
       createdAt: s.createdAt,
       lastSeenAt: s.lastSeenAt,

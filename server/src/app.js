@@ -28,7 +28,7 @@ export function createApp() {
         origin: isAllowedOrigin(req, req.get('origin')),
         credentials: true,
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Device-Fingerprint'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Device-Fingerprint', 'X-Device-Info'],
         maxAge: 600,
       });
     }),
@@ -49,6 +49,19 @@ export function createApp() {
     next();
   });
   app.get('/api/health', (req, res) => res.json({ ok: true }));
+
+  // Temporary: what the service can see about the connection in front of it, so the real
+  // client address can be picked out of the chain. Headers that could carry secrets are
+  // left out, and nothing but the caller's own address is ever returned.
+  app.get('/api/health/ip', (req, res) => {
+    const headers = {};
+    for (const [name, value] of Object.entries(req.headers)) {
+      const key = name.toLowerCase();
+      if (key === 'cookie' || key === 'authorization') continue;
+      if (key.startsWith('x-') || key.startsWith('cf-') || key === 'forwarded') headers[key] = String(value).slice(0, 200);
+    }
+    res.json({ ip: req.ip, ips: req.ips, trust: env.TRUST_PROXY ?? null, socket: req.socket?.remoteAddress, headers });
+  });
 
   // Which way mail leaves this server, and whether it can authenticate at this moment.
   // That one answer decides whether a code or a link can reach anybody, and reading it

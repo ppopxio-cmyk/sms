@@ -44,7 +44,10 @@ export async function notifyAdmins(entry) {
   await Promise.all(admins.map((admin) => deliver({ ...entry, userId: admin._id })));
 }
 
-const describe = (info) => [info.browser, info.os].filter(Boolean).join(' on ') || 'an unknown device';
+const describe = (info) => {
+  const system = [info.browser, info.os].filter(Boolean).join(' on ');
+  return [info.deviceName, system].filter(Boolean).join(' · ') || 'an unknown device';
+};
 
 // An account can confirm its email before its owner has chosen a name, so a notice must
 // never come out with a blank space where a person should be.

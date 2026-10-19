@@ -12,6 +12,9 @@ const knownDeviceSchema = new mongoose.Schema(
     browser: String,
     os: String,
     deviceType: String,
+    // What the device calls itself, when the browser is willing to say: "Samsung SM-M135F".
+    // A label, never proof.
+    deviceName: String,
     ip: String,
     location: String,
     firstSeenAt: { type: Date, default: Date.now },
