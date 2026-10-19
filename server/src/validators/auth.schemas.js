@@ -95,6 +95,12 @@ export const updateUserSchema = z.strictObject({
 
 export const removeUserSchema = z.strictObject({ password: adminPassword });
 
+// Two characters is the shortest search worth a round trip; the header waits for typing to
+// pause before it asks.
+export const searchQuerySchema = z.strictObject({
+  q: z.string().trim().min(2, 'Type at least two characters.').max(60),
+});
+
 export const listUsersQuerySchema = z.strictObject({
   search: z.string().trim().max(100).optional(),
   role: role.optional(),

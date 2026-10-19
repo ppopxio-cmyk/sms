@@ -219,6 +219,50 @@ body {
   animation: sweep 7s ease-in-out infinite;
 }
 
+/* A line drawing itself. Every path that uses this sets pathLength="1", which saves
+   measuring anything: the dash is the whole path, and it is pulled back to nothing. */
+.animate-draw {
+  stroke-dasharray: 1;
+  animation: draw 1.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
+.animate-orbit {
+  transform-origin: 50% 50%;
+  animation: orbit 22s linear infinite;
+}
+
+@keyframes orbit {
+  to { transform: rotate(360deg); }
+}
+
+.animate-slide-left {
+  animation: slide-left 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes slide-left {
+  from { opacity: 0; transform: translateX(-18px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* One pass of light across a button, on hover only. */
+.btn-shine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-130%);
+  background: linear-gradient(100deg, transparent 22%, rgba(255, 255, 255, 0.45) 50%, transparent 78%);
+  transition: transform 0.75s ease;
+}
+
+.btn-shine:hover::after {
+  transform: translateX(130%);
+}
+
 @keyframes sweep {
   0%, 100% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
@@ -236,8 +280,15 @@ body {
   .animate-bob,
   .animate-pulse-ring,
   .animate-pulse-dot,
-  .animate-sweep {
+  .animate-sweep,
+  .animate-draw,
+  .animate-orbit,
+  .animate-slide-left {
     animation: none !important;
+  }
+
+  .btn-shine::after {
+    display: none;
   }
 }
 

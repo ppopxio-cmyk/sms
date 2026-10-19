@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -8,6 +9,7 @@ import {
 } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
 import { createUserSchema, editUserSchema, removeUserSchema, ROLES, ASSIGNABLE_ROLES, emailField } from '../lib/validation';
+import { useDebounced } from '../lib/useDebounced';
 import { useAuth } from '../store/auth';
 import { formatEthiopian } from '../lib/ethiopianDate';
 import Card, { CardBody, CardHeader } from '../components/ui/Card';
@@ -34,20 +36,14 @@ const initials = (value) =>
     .toUpperCase() || 'U';
 
 // Typing in the search box should not fire a request per keystroke.
-function useDebounced(value, delay = 300) {
-  const [out, setOut] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setOut(value), delay);
-    return () => clearTimeout(id);
-  }, [value, delay]);
-  return out;
-}
-
 export default function Users() {
   const queryClient = useQueryClient();
   const me = useAuth((s) => s.user);
+  const location = useLocation();
 
-  const [search, setSearch] = useState('');
+  // The header search can hand a term straight to this page, so opening somebody from
+  // there lands on the row already filtered.
+  const [search, setSearch] = useState(() => location.state?.search ?? '');
   const [role, setRole] = useState('');
   const [status, setStatus] = useState('');
   const debouncedSearch = useDebounced(search);

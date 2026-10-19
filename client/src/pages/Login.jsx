@@ -217,7 +217,12 @@ export default function Login() {
           </Link>
         </div>
 
-        <Button type="submit" size="lg" loading={isSubmitting} className="w-full">
+        <Button
+          type="submit"
+          size="lg"
+          loading={isSubmitting}
+          className="btn-shine relative w-full overflow-hidden"
+        >
           Sign in
         </Button>
       </form>
