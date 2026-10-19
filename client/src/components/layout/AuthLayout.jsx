@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { Fingerprint, GraduationCap, MailCheck } from 'lucide-react';
 
 // The animated mark is the whole decoration: no marketing prose, just motion.
@@ -38,6 +39,16 @@ export default function AuthLayout({ title, subtitle, children, footer }) {
 
           {footer ? <div className="mt-6 border-t border-slate-100 pt-5 text-sm text-slate-600">{footer}</div> : null}
         </main>
+
+        <p className="mt-6 flex items-center justify-center gap-3 text-xs text-slate-400">
+          <Link to="/privacy" className="transition hover:text-slate-600">
+            Privacy Policy
+          </Link>
+          <span aria-hidden="true">·</span>
+          <Link to="/terms" className="transition hover:text-slate-600">
+            Terms of Service
+          </Link>
+        </p>
       </div>
     </div>
   );

@@ -13,6 +13,10 @@ import { SkeletonPage } from './components/ui/Skeleton';
 import Login from './pages/Login.jsx';
 import VerifyEmail from './pages/VerifyEmail.jsx';
 import ForgotPassword from './pages/ForgotPassword.jsx';
+// Public pages: they must open for anyone, including a reviewer or a visitor who is
+// not signed in, so they sit outside both the guest and the protected groups.
+import Privacy from './pages/Privacy.jsx';
+import Terms from './pages/Terms.jsx';
 
 const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 const Sessions = lazy(() => import('./pages/Sessions.jsx'));
@@ -63,6 +67,9 @@ export default function App() {
         {/* Opened from an email, often on a device that is not signed in, so this one
             is public. Without a token it sends the visitor to the sign-in page. */}
         <Route path="/verify-email" element={<VerifyEmail />} />
+
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>

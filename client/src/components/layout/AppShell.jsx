@@ -130,10 +130,21 @@ export default function AppShell() {
       </main>
 
       <footer className="mx-auto max-w-6xl px-4 pb-10 sm:px-6">
-        <p className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-          <Badge tone="neutral">SMS - PORTAL</Badge>
-          <span>All times shown in the Ethiopian calendar, Africa/Addis_Ababa.</span>
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+          <p className="flex flex-wrap items-center gap-2">
+            <Badge tone="neutral">SMS - PORTAL</Badge>
+            <span>All times shown in the Ethiopian calendar, Africa/Addis_Ababa.</span>
+          </p>
+          <p className="flex items-center gap-2">
+            <NavLink to="/privacy" className="transition hover:text-slate-600">
+              Privacy
+            </NavLink>
+            <span aria-hidden="true">·</span>
+            <NavLink to="/terms" className="transition hover:text-slate-600">
+              Terms
+            </NavLink>
+          </p>
+        </div>
       </footer>
     </div>
   );
