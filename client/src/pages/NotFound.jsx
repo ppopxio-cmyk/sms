@@ -12,7 +12,7 @@ export default function NotFound() {
         <p className="mt-1.5 text-sm text-slate-600">The link may be old, or the address may have a typo in it.</p>
       </div>
       <Link
-        to="/dashboard"
+        to="/"
         className="focus-ring brand-gradient inline-flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-600/25 transition hover:brightness-110"
       >
         <ArrowLeft className="h-4 w-4" />

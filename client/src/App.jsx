@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './store/auth';
+import { homeFor } from './lib/roles';
 import { GuestRoute, ProtectedRoute, RequireRole } from './components/guards';
 import AppShell from './components/layout/AppShell';
 import SplashScreen from './components/layout/SplashScreen';
@@ -18,7 +19,22 @@ const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 const Sessions = lazy(() => import('./pages/Sessions.jsx'));
 const Users = lazy(() => import('./pages/Users.jsx'));
 const AdminSessions = lazy(() => import('./pages/AdminSessions.jsx'));
+const Notifications = lazy(() => import('./pages/Notifications.jsx'));
+const Me = lazy(() => import('./pages/Me.jsx'));
 const NotFound = lazy(() => import('./pages/NotFound.jsx'));
+
+// The roles whose own area exists so far. ADMIN has the real screens; the rest land on
+// their dashboard under their own prefix, ready for their tools.
+const OTHER_ROLES = ['REGISTRAR', 'TEACHER', 'ACCOUNTANT'];
+
+function Home() {
+  const status = useAuth((s) => s.status);
+  const user = useAuth((s) => s.user);
+
+  if (status === 'loading') return null;
+  if (!user) return <Navigate to="/login" replace />;
+  return <Navigate to={homeFor(user.role)} replace />;
+}
 
 export default function App() {
   const status = useAuth((s) => s.status);
@@ -42,25 +58,38 @@ export default function App() {
         {/* There is no sign-up page on purpose: an administrator creates every account. */}
         <Route element={<GuestRoute />}>
           <Route path="/login" element={<Login />} />
-          <Route path="/verify-email" element={<VerifyEmail />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
         </Route>
+
+        {/* Opened from an email, often on a device that is not signed in, so this one
+            is public. Without a token it sends the visitor to the sign-in page. */}
+        <Route path="/verify-email" element={<VerifyEmail />} />
 
         <Route element={<ProtectedRoute />}>
           {/* Full screen, no navigation: nothing else opens until this is finished. */}
           <Route path="/set-password" element={<SetPassword />} />
 
           <Route element={<AppShell />}>
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/sessions" element={<Sessions />} />
+            {/* The same pages for every role: the person, not the job. */}
+            <Route path="/notifications" element={<Notifications />} />
+            <Route path="/me" element={<Me />} />
+            <Route path="/me/devices" element={<Sessions />} />
+
             <Route element={<RequireRole roles={['ADMIN']} />}>
-              <Route path="/users" element={<Users />} />
+              <Route path="/admin" element={<Dashboard />} />
+              <Route path="/admin/users" element={<Users />} />
               <Route path="/admin/sessions" element={<AdminSessions />} />
             </Route>
+
+            {OTHER_ROLES.map((role) => (
+              <Route key={role} element={<RequireRole roles={[role]} />}>
+                <Route path={`/${role.toLowerCase()}`} element={<Dashboard />} />
+              </Route>
+            ))}
           </Route>
         </Route>
 
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<Home />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>

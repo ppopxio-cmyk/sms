@@ -42,7 +42,14 @@ export const resetPasswordSchema = z
   .object({ password: passwordField, confirm: z.string().min(1, 'Repeat your new password.') })
   .refine((v) => v.password === v.confirm, { path: ['confirm'], message: 'The two passwords do not match.' });
 
-export const changePasswordSchema = z
+// Choosing your own password, with the repeat check. The forced first change has no
+// current-password field: the temporary password was already proved at sign-in.
+export const newPasswordSchema = z
+  .object({ password: passwordField, confirm: z.string().min(1, 'Repeat your new password.') })
+  .refine((v) => v.password === v.confirm, { path: ['confirm'], message: 'The two passwords do not match.' });
+
+// A voluntary change from the profile page always proves the current password.
+export const mePasswordSchema = z
   .object({
     currentPassword: z.string().min(1, 'Enter your current password.'),
     password: passwordField,
@@ -50,14 +57,25 @@ export const changePasswordSchema = z
   })
   .refine((v) => v.password === v.confirm, { path: ['confirm'], message: 'The two passwords do not match.' });
 
+export const passwordOnlySchema = z.object({ currentPassword: z.string().min(1, 'Enter your password.') });
+
+export const deleteAccountSchema = z.object({
+  password: z.string().min(1, 'Enter your password.'),
+  code: z.string().regex(/^[0-9]{6}$/, 'The code is 6 digits.'),
+});
+
 // Accounts are created by an administrator, never by the person themselves.
 export const ROLES = ['ADMIN', 'REGISTRAR', 'TEACHER', 'ACCOUNTANT'];
+
+// The system has exactly one administrator, so ADMIN is not something an administrator
+// can hand out. The only way to get one is the seed script.
+export const ASSIGNABLE_ROLES = ['REGISTRAR', 'TEACHER', 'ACCOUNTANT'];
 
 export const createUserSchema = z
   .object({
     name: nameField,
     email: emailField,
-    role: z.enum(ROLES),
+    role: z.enum(ASSIGNABLE_ROLES),
     password: passwordField,
     confirm: z.string().min(1, 'Repeat the temporary password.'),
   })

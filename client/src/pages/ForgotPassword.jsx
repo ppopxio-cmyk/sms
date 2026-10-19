@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
@@ -21,13 +21,17 @@ const STEPS = { email: 1, code: 2, password: 3 };
 // code is valid, or after it has been accepted — carries on from where it was.
 export default function ForgotPassword() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  // An administrator can send a reset link. That link already carries a reset ticket,
+  // so it goes straight to choosing the new password and skips the code steps.
+  const linkToken = params.get('token');
   // Read once on mount: whatever the last refresh left behind.
   const [saved] = useState(() => readFlow(FLOW_KEYS.reset));
 
-  const [step, setStep] = useState(saved?.step ?? 'email');
+  const [step, setStep] = useState(linkToken ? 'password' : saved?.step ?? 'email');
   const [email, setEmail] = useState(saved?.email ?? '');
   const [code, setCode] = useState('');
-  const [resetToken, setResetToken] = useState(saved?.resetToken ?? null);
+  const [resetToken, setResetToken] = useState(linkToken ?? saved?.resetToken ?? null);
   const [busy, setBusy] = useState(false);
   const [shake, setShake] = useState(0);
   const [error, setError] = useState(null);
@@ -134,7 +138,7 @@ export default function ForgotPassword() {
       title={titles[step][0]}
       subtitle={titles[step][1]}
       footer={
-        step === 'email' ? (
+        step === 'email' || linkToken ? (
           <span>
             Remembered it?{' '}
             <Link to="/login" className="focus-ring rounded-lg font-semibold text-brand-600 hover:text-brand-700">
@@ -209,6 +213,9 @@ export default function ForgotPassword() {
 
       {step === 'password' ? (
         <form onSubmit={passwordForm.handleSubmit(savePassword)} className="space-y-4" noValidate>
+          {linkToken ? (
+            <Alert tone="info">You opened a reset link sent by your administrator. Choose a new password below.</Alert>
+          ) : null}
           <Field
             label="New password"
             type="password"

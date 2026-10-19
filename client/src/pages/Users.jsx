@@ -4,10 +4,10 @@ import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
 import {
-  CircleCheck, KeyRound, Lock, LogOut, Mails, RefreshCw, Search, ShieldCheck, Trash2, TriangleAlert, UserPlus, UserRound,
+  CircleCheck, KeyRound, Lock, LogOut, MailCheck, Mails, RefreshCw, Search, ShieldCheck, Trash2, TriangleAlert, UserPlus, UserRound,
 } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
-import { createUserSchema, updateUserSchema, tempPasswordSchema, ROLES, nameField, emailField } from '../lib/validation';
+import { createUserSchema, updateUserSchema, tempPasswordSchema, ROLES, ASSIGNABLE_ROLES, nameField, emailField } from '../lib/validation';
 import { formatEthiopian } from '../lib/ethiopianDate';
 import Card, { CardBody, CardHeader } from '../components/ui/Card';
 import Badge, { RoleBadge } from '../components/ui/Badge';
@@ -108,7 +108,7 @@ export default function Users() {
       api.post('/admin/users', { name: values.name, email: values.email, role: values.role, password: values.password }),
     onSuccess: (res) => {
       toast.success(res.data?.message || 'Account created.');
-      toast.info('Give them the temporary password. The confirmation code is already in their inbox.');
+      toast.info('Give them the temporary password. A confirmation link is already in their inbox.');
       setCreateOpen(false);
       createForm.reset();
       refresh();
@@ -128,8 +128,16 @@ export default function Users() {
 
   const resend = useMutation({
     mutationFn: (id) => api.post(`/admin/users/${id}/resend-verification`),
-    onSuccess: (res) => toast.success(res.data?.message || 'A new confirmation code is on its way.'),
-    onError: (err) => fail(err, 'We could not send a new code.'),
+    onSuccess: (res) => toast.success(res.data?.message || 'A new confirmation link is on its way.'),
+    onError: (err) => fail(err, 'We could not send a new link.'),
+  });
+
+  // For somebody who confirmed their email but lost access. No password is ever handed
+  // out once the email is confirmed: they choose their own from the link.
+  const resetLink = useMutation({
+    mutationFn: (id) => api.post(`/admin/users/${id}/reset-link`),
+    onSuccess: (res) => toast.success(res.data?.message || 'A reset link is on its way.'),
+    onError: (err) => fail(err, 'We could not send a reset link.'),
   });
 
   const setTemp = useMutation({
@@ -175,7 +183,8 @@ export default function Users() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">Users</h1>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
-            Create the account, hand over the temporary password, and they choose their own at the first sign-in.
+            Create the account, hand over the temporary password, and they confirm their email with the link we send. After that
+            only they can choose a password.
           </p>
         </div>
         <Button onClick={() => setCreateOpen(true)}>
@@ -279,20 +288,32 @@ export default function Users() {
                         Edit
                       </Button>
                       {!u.emailVerified ? (
+                        <>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => resend.mutate(u.id)}
+                            loading={resend.isPending && resend.variables === u.id}
+                          >
+                            <Mails className="h-3.5 w-3.5" />
+                            Resend link
+                          </Button>
+                          <Button variant="secondary" size="sm" onClick={() => { tempForm.reset(); setTempFor(u); }}>
+                            <KeyRound className="h-3.5 w-3.5" />
+                            New password
+                          </Button>
+                        </>
+                      ) : (
                         <Button
                           variant="secondary"
                           size="sm"
-                          onClick={() => resend.mutate(u.id)}
-                          loading={resend.isPending && resend.variables === u.id}
+                          onClick={() => resetLink.mutate(u.id)}
+                          loading={resetLink.isPending && resetLink.variables === u.id}
                         >
-                          <Mails className="h-3.5 w-3.5" />
-                          Resend code
+                          <MailCheck className="h-3.5 w-3.5" />
+                          Send reset link
                         </Button>
-                      ) : null}
-                      <Button variant="secondary" size="sm" onClick={() => { tempForm.reset(); setTempFor(u); }}>
-                        <KeyRound className="h-3.5 w-3.5" />
-                        New password
-                      </Button>
+                      )}
                       <Button
                         variant="secondary"
                         size="sm"
@@ -325,7 +346,7 @@ export default function Users() {
       <Modal
         open={createOpen}
         title="Add a user"
-        subtitle="They get a temporary password from you and confirm their email before the first sign-in."
+        subtitle="They get a temporary password from you and a link in their inbox to confirm their email."
         onClose={closeCreate}
         footer={
           <>
@@ -367,12 +388,15 @@ export default function Users() {
               className="focus-ring h-11 w-full rounded-xl border border-slate-200 bg-white/80 px-3 text-sm text-slate-800"
               {...createForm.register('role')}
             >
-              {ROLES.map((r) => (
+              {ASSIGNABLE_ROLES.map((r) => (
                 <option key={r} value={r}>
                   {r.toLowerCase()}
                 </option>
               ))}
             </select>
+            <p className="mt-1.5 text-xs text-slate-400">
+              There is a single administrator account, so it is not something you can add here.
+            </p>
           </div>
           <Field
             label="Temporary password"
@@ -443,17 +467,23 @@ export default function Users() {
             <label htmlFor="edit-role" className="mb-1.5 block text-sm font-medium text-slate-700">
               Role
             </label>
-            <select
-              id="edit-role"
-              className="focus-ring h-11 w-full rounded-xl border border-slate-200 bg-white/80 px-3 text-sm text-slate-800"
-              {...editForm.register('role')}
-            >
-              {ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r.toLowerCase()}
-                </option>
-              ))}
-            </select>
+            {editing?.role === 'ADMIN' ? (
+              <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+                administrator — there is only one, and it stays that way.
+              </p>
+            ) : (
+              <select
+                id="edit-role"
+                className="focus-ring h-11 w-full rounded-xl border border-slate-200 bg-white/80 px-3 text-sm text-slate-800"
+                {...editForm.register('role')}
+              >
+                {ASSIGNABLE_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {r.toLowerCase()}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
           <div>
             <label htmlFor="edit-status" className="mb-1.5 block text-sm font-medium text-slate-700">
@@ -488,7 +518,7 @@ export default function Users() {
       <Modal
         open={!!tempFor}
         title="Set a temporary password"
-        subtitle={tempFor ? `For ${tempFor.name}. Every device is signed out, and they choose their own at the next sign-in.` : ''}
+        subtitle={tempFor ? `For ${tempFor.name}. They choose their own at the next sign-in. Every device is signed out.` : ''}
         onClose={() => setTempFor(null)}
         size="sm"
         footer={

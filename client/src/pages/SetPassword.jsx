@@ -10,7 +10,8 @@ import Button from '../components/ui/Button';
 import Alert from '../components/ui/Alert';
 import PasswordMeter from '../components/ui/PasswordMeter';
 import { api, errorMessage } from '../lib/api';
-import { changePasswordSchema } from '../lib/validation';
+import { newPasswordSchema } from '../lib/validation';
+import { homeFor } from '../lib/roles';
 import { useAuth } from '../store/auth';
 
 // Shown once, right after a sign-in with a temporary password. Nothing else in the
@@ -28,9 +29,9 @@ export default function SetPassword() {
     control,
     formState: { errors, isSubmitting },
   } = useForm({
-    resolver: zodResolver(changePasswordSchema),
+    resolver: zodResolver(newPasswordSchema),
     mode: 'onTouched',
-    defaultValues: { currentPassword: '', password: '', confirm: '' },
+    defaultValues: { password: '', confirm: '' },
   });
 
   const password = useWatch({ control, name: 'password' }) ?? '';
@@ -40,13 +41,12 @@ export default function SetPassword() {
   const onSubmit = async (values) => {
     setError(null);
     try {
-      await api.post('/auth/change-password', {
-        currentPassword: values.currentPassword,
-        newPassword: values.password,
-      });
-      await refreshUser();
+      // No current password is sent: the temporary one was already proved when this
+      // session was started, and it is the password being replaced.
+      await api.post('/auth/change-password', { newPassword: values.password });
+      const me = await refreshUser();
       toast.success('Password set. Welcome aboard.');
-      navigate('/dashboard', { replace: true });
+      navigate(homeFor(me?.role), { replace: true });
     } catch (err) {
       setError(errorMessage(err, 'We could not change your password.'));
     }
@@ -74,19 +74,9 @@ export default function SetPassword() {
         </Alert>
 
         <Field
-          label="Temporary password"
-          type="password"
-          icon={KeyRound}
-          autoComplete="current-password"
-          placeholder="The one you were given"
-          error={errors.currentPassword?.message}
-          {...register('currentPassword')}
-        />
-
-        <Field
           label="New password"
           type="password"
-          icon={Lock}
+          icon={KeyRound}
           autoComplete="new-password"
           placeholder="Choose a new password"
           error={errors.password?.message}

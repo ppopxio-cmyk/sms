@@ -12,6 +12,7 @@ import CodeInput from '../components/ui/CodeInput';
 import { api, errorMessage } from '../lib/api';
 import { loginSchema, emailField } from '../lib/validation';
 import { FLOW_KEYS, clearFlow, writeFlow } from '../lib/session-flow';
+import { homeFor } from '../lib/roles';
 import useResendTimer, { formatWait } from '../lib/useResendTimer';
 import { useAuth } from '../store/auth';
 
@@ -27,6 +28,7 @@ export default function Login() {
   const [shake, setShake] = useState(0);
   const [serverError, setServerError] = useState(null);
   const [unverified, setUnverified] = useState(null);
+  const [locked, setLocked] = useState(false);
 
   // One countdown per journey, kept in sessionStorage so a refresh does not restart it.
   const loginTimer = useResendTimer('login');
@@ -47,12 +49,13 @@ export default function Login() {
     clearFlow(FLOW_KEYS.pendingVerify);
     setSession(data);
     toast.success(greeting);
-    navigate(location.state?.from || '/dashboard', { replace: true });
+    navigate(location.state?.from || homeFor(data.user.role), { replace: true });
   };
 
   const onSubmit = async (values) => {
     setServerError(null);
     setUnverified(null);
+    setLocked(false);
     try {
       const { data } = await api.post('/auth/login', values);
       if (data.requires2fa) {
@@ -69,13 +72,15 @@ export default function Login() {
       }
       finish(data, `Welcome back, ${data.user.name.split(' ')[0]}.`);
     } catch (err) {
-      if (err?.response?.data?.code === 'EMAIL_NOT_VERIFIED') {
+      const code = err?.response?.data?.code;
+      if (code === 'EMAIL_NOT_VERIFIED') {
         const target = err.response.data?.data?.email || getValues('email');
         setUnverified(target);
-        // Remember where the code went, so a refresh of the confirm page still knows.
+        // Remember where the link went, so a refresh of the confirm page still knows.
         writeFlow(FLOW_KEYS.pendingVerify, { email: target });
         verifyTimer.start();
       }
+      if (code === 'ACCOUNT_LOCKED') setLocked(true);
       setServerError(errorMessage(err, 'We could not sign you in.'));
     }
   };
@@ -157,15 +162,25 @@ export default function Login() {
 
         {unverified ? (
           <Alert tone="info" title="Confirm your email first">
-            We sent a fresh code to {unverified}.{' '}
+            We sent a link to {unverified}.{' '}
             <Link
               to="/verify-email"
               state={{ email: unverified }}
               className="focus-ring rounded font-semibold underline"
             >
-              Enter it now
+              Open the confirmation page
             </Link>
             .
+          </Alert>
+        ) : null}
+
+        {locked ? (
+          <Alert tone="warning" title="Account locked for a moment">
+            Too many wrong attempts.{' '}
+            <Link to="/forgot-password" className="focus-ring rounded font-semibold underline">
+              Reset your password
+            </Link>{' '}
+            to get back in sooner.
           </Alert>
         ) : null}
 

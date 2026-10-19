@@ -8,23 +8,32 @@ import { REFRESH_COOKIE, refreshCookieOptions, clearRefreshOptions } from '../ut
 import { signAccess, signTicket, readTicket, sha256 } from '../services/token.service.js';
 import { checkCode, resendWaitMessage } from '../services/code.service.js';
 import { sendCode } from '../services/codeDelivery.js';
+import { deliverVerifyLink } from '../services/linkDelivery.js';
+import { consumeVerifyLink } from '../services/link.service.js';
 import {
   createSession,
   rotateSession,
   revokeSession,
   deleteSessionRows,
   deleteDeviceSessions,
+  deleteAllForUser,
   deleteAllForUserExcept,
 } from '../services/session.service.js';
-import { isNewDevice, rememberDevice } from '../services/device.service.js';
+import { isNewDevice, rememberDevice, forgetDevicesForUser } from '../services/device.service.js';
 import { forgetUser } from '../services/user.service.js';
+import { removeForDevice, removeAllForUser } from '../services/push.service.js';
+import { notifySignIn, notifyEmailVerified, notifyPasswordChanged } from '../services/notification.service.js';
 import { sendLoginAlert, sendPasswordChanged } from '../services/mail.service.js';
 import { audit } from '../services/audit.service.js';
 
 // Used when the email does not exist, so a wrong email takes as long as a wrong password.
 const DUMMY_HASH = await argon2.hash('not-a-real-password');
-const LOCK_AFTER = 5;
+// Three wrong passwords lock the account for fifteen minutes. The message matches the
+// wording on the sign-in screen.
+const LOCK_AFTER = 3;
 const LOCK_MS = 15 * 60_000;
+
+const LINK_INVALID = 'That link has expired or has already been used. Ask for a new one.';
 
 export const safeUser = (u) => ({
   id: u._id,
@@ -44,33 +53,47 @@ async function startSession(req, res, user, { deviceId, fingerprint }) {
   // This browser has now signed in, so the next sign-in from it is not "new".
   void rememberDevice({ userId: user._id, key: deviceKey(fingerprint, deviceId), info }).catch(() => {});
   void sendLoginAlert({ to: user.email, name: user.name, ...info, at: new Date() });
+  // Open tabs and other devices hear about this at once; the administrator is told when
+  // it is somebody else. The browser that just signed in is left out of its own notice.
+  void notifySignIn({ user, sid: session._id, deviceKey: deviceKey(fingerprint, deviceId), info }).catch(() => {});
   audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.login', targetType: 'session', targetId: session._id, meta: { browser: info.browser, os: info.os } });
   return { accessToken: signAccess(user, session._id), user: safeUser(user), session: { id: session._id } };
 }
 
+// Confirming an email uses a link, never a code: the link is a signed ticket that is
+// bound to the address and dies the moment it is used, or after VERIFY_LINK_TTL_HOURS.
 export const verifyEmail = asyncHandler(async (req, res) => {
-  const { email, code } = req.body;
-  const user = await User.findOne({ email });
-  if (!user) throw new AppError(400, 'CODE_WRONG', 'That code is not right.');
-  await checkCode(user._id, 'email_verify', code);
-  user.emailVerified = true;
-  if (user.status === 'pending') user.status = 'active';
-  await user.save();
-  forgetUser(user._id);
+  const payload = await consumeVerifyLink(req.body.token);
+  const user = await User.findById(payload.sub);
+  if (!user || user.deletedAt || (payload.email && payload.email !== user.email)) {
+    throw new AppError(400, 'LINK_INVALID', LINK_INVALID);
+  }
+
+  const firstTime = !user.emailVerified;
+  if (firstTime) {
+    user.emailVerified = true;
+    if (user.status === 'pending') user.status = 'active';
+    await user.save();
+    forgetUser(user._id);
+    void notifyEmailVerified({ user }).catch(() => {});
+    audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.email_verified', targetType: 'user', targetId: user._id });
+  }
 
   // The person just proved they read the mailbox from this browser, so the sign-in
   // that follows counts as a known device and does not ask for a second code.
   const info = await describeRequest(req);
   await rememberDevice({ userId: user._id, key: deviceKey(deviceFingerprint(req), ensureDeviceId(req, res)), info }).catch(() => {});
 
-  audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.email_verified', targetType: 'user', targetId: user._id });
-  res.json({ message: 'Email confirmed. You can sign in now.' });
+  res.json({
+    message: firstTime ? 'Email confirmed. You can sign in now.' : 'This email was already confirmed.',
+    email: user.email,
+  });
 });
 
 export const resendVerification = asyncHandler(async (req, res) => {
   const user = await User.findOne({ email: req.body.email });
-  if (user && !user.emailVerified) await sendCode(user, 'email_verify');
-  res.json({ message: 'If that email still needs confirming, we sent a new code.' });
+  if (user && !user.emailVerified && user.status !== 'disabled') await deliverVerifyLink(user);
+  res.json({ message: 'If that email still needs confirming, we sent a new link.' });
 });
 
 export const login = asyncHandler(async (req, res) => {
@@ -98,8 +121,10 @@ export const login = asyncHandler(async (req, res) => {
   }
 
   if (!user.emailVerified) {
-    await sendCode(user, 'email_verify');
-    throw new AppError(403, 'EMAIL_NOT_VERIFIED', 'Please confirm your email first. We sent you a code.', { email: user.email });
+    // A brand new link, unless one went out less than two minutes ago - the older link
+    // is still good for hours, so the wait costs nothing.
+    await deliverVerifyLink(user).catch(() => {});
+    throw new AppError(403, 'EMAIL_NOT_VERIFIED', 'Please confirm your email first. We sent a link to your inbox.', { email: user.email });
   }
 
   const deviceId = ensureDeviceId(req, res);
@@ -165,6 +190,9 @@ export const logout = asyncHandler(async (req, res) => {
     const session = await Session.findOne({ refreshHash: sha256(raw) });
     if (session) {
       const ended = await deleteDeviceSessions(session.userId, { deviceId: session.deviceId, fingerprint: session.fingerprint });
+      // A signed-out browser must stop receiving this person's notices, or the next
+      // person on a shared computer would read them on the lock screen.
+      await removeForDevice(session.userId, deviceKey(session.fingerprint, session.deviceId)).catch(() => {});
       audit({ req, actorId: session.userId, action: 'auth.logout', targetType: 'session', targetId: session._id, meta: { sessionsEnded: ended } });
     }
   }
@@ -185,7 +213,11 @@ export const changePassword = asyncHandler(async (req, res) => {
     throw new AppError(401, 'SESSION_ENDED', 'This account is not available. Please contact the administrator.');
   }
 
-  if (!(await argon2.verify(user.passwordHash, currentPassword))) {
+  // A forced change happens straight after signing in with the temporary password, and
+  // that password was already proved at the sign-in step. Asking for it again would mean
+  // asking for the very password being replaced. A voluntary change from the profile
+  // page always has to prove the current one.
+  if (!user.mustChangePassword && !(await argon2.verify(user.passwordHash, currentPassword ?? ''))) {
     audit({ req, action: 'auth.password_change_failed', status: 'fail', targetType: 'user', targetId: user._id });
     throw new AppError(400, 'WRONG_PASSWORD', 'That is not your current password.');
   }
@@ -196,14 +228,83 @@ export const changePassword = asyncHandler(async (req, res) => {
   user.passwordHash = await argon2.hash(newPassword);
   user.passwordChangedAt = new Date();
   user.mustChangePassword = false;
+  user.failedLogins = 0;
+  user.lockUntil = undefined;
   await user.save();
   forgetUser(user._id);
 
   // Every other device is signed out; the browser making the change stays in.
   const ended = await deleteAllForUserExcept(user._id, req.user.sid);
   void sendPasswordChanged({ to: user.email, name: user.name });
+  void notifyPasswordChanged({ user }).catch(() => {});
   audit({ req, action: 'auth.password_changed', targetType: 'user', targetId: user._id, meta: { otherSessionsEnded: ended } });
   res.json({ message: 'Password changed.', user: safeUser(user) });
+});
+
+// Two-step verification is the person's own setting, and switching it on or off has to
+// prove the current password so a borrowed browser cannot quietly turn it off.
+export const setTwoStep = asyncHandler(async (req, res) => {
+  const { enabled, currentPassword } = req.body;
+  const user = await User.findById(req.user.id).select('+passwordHash');
+  if (!user || user.status === 'disabled' || user.deletedAt) {
+    throw new AppError(401, 'SESSION_ENDED', 'Please sign in again.');
+  }
+  if (!(await argon2.verify(user.passwordHash, currentPassword))) {
+    throw new AppError(400, 'WRONG_PASSWORD', 'That is not your current password.');
+  }
+  if (user.twoStepEnabled !== enabled) {
+    user.twoStepEnabled = enabled;
+    await user.save();
+    forgetUser(user._id);
+    audit({ req, action: enabled ? 'auth.two_step_enabled' : 'auth.two_step_disabled', targetType: 'user', targetId: user._id });
+  }
+  res.json({ user: safeUser(user), message: enabled ? 'Two-step verification is on.' : 'Two-step verification is off.' });
+});
+
+// Deleting your own account asks for the password and then a code sent to the mailbox,
+// so a stolen laptop cannot wipe the account. The only administrator cannot delete
+// itself: that would leave nobody able to manage the system.
+export const requestDeleteCode = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.id).select('+passwordHash');
+  if (!user || user.deletedAt) throw new AppError(401, 'SESSION_ENDED', 'Please sign in again.');
+  if (user.role === 'ADMIN') {
+    throw new AppError(400, 'LAST_ADMIN', 'This is the only administrator account, so it cannot be deleted.');
+  }
+  if (!(await argon2.verify(user.passwordHash, req.body.password))) {
+    audit({ req, action: 'auth.account_delete_failed', status: 'fail', targetType: 'user', targetId: user._id });
+    throw new AppError(400, 'WRONG_PASSWORD', 'That is not your current password.');
+  }
+
+  const sent = await sendCode(user, 'account_delete');
+  if (!sent) throw new AppError(429, 'WAIT_BEFORE_RESEND', resendWaitMessage);
+  audit({ req, action: 'auth.account_delete_code_sent', targetType: 'user', targetId: user._id });
+  res.json({ message: 'We emailed you a code to confirm.' });
+});
+
+export const deleteAccount = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.id).select('+passwordHash');
+  if (!user || user.deletedAt) throw new AppError(401, 'SESSION_ENDED', 'Please sign in again.');
+  if (user.role === 'ADMIN') {
+    throw new AppError(400, 'LAST_ADMIN', 'This is the only administrator account, so it cannot be deleted.');
+  }
+  if (!(await argon2.verify(user.passwordHash, req.body.password))) {
+    throw new AppError(400, 'WRONG_PASSWORD', 'That is not your current password.');
+  }
+  await checkCode(user._id, 'account_delete', req.body.code);
+
+  // Soft delete, like the administrator's "remove": the account stops working, the
+  // audit trail keeps its history.
+  user.deletedAt = new Date();
+  user.status = 'disabled';
+  await user.save();
+  forgetUser(user._id);
+  await deleteAllForUser(user._id);
+  await forgetDevicesForUser(user._id);
+  await removeAllForUser(user._id).catch(() => {});
+
+  audit({ req, action: 'auth.account_deleted', targetType: 'user', targetId: user._id });
+  res.clearCookie(REFRESH_COOKIE, clearRefreshOptions);
+  res.json({ message: 'Your account was deleted.' });
 });
 
 // authenticate already refreshes lastSeenAt (at most once a minute), which is what makes "active now" work.

@@ -68,6 +68,18 @@ function codeBlock(code, minutes) {
 </table>`;
 }
 
+// A real button, plus the plain URL underneath: some mail clients strip styles, and
+// a verification link that cannot be tapped is a link that cannot be used.
+function button(href, label, subline) {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 20px;">
+  <tr><td align="center">
+    <a href="${esc(href)}" style="display:inline-block;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#4f46e5;background-image:linear-gradient(135deg,#4f46e5,#7c3aed);color:#ffffff;text-decoration:none;font-size:16px;font-weight:700;letter-spacing:.2px;padding:15px 34px;border-radius:14px;">${esc(label)}</a>
+    ${subline ? `<div style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin-top:12px;font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:#6366f1;">${esc(subline)}</div>` : ''}
+  </td></tr>
+</table>
+<p style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0 0 18px;font-size:12px;line-height:1.6;color:#64748b;word-break:break-all;">If the button does not work, copy this address into your browser:<br><span style="font-family:${MONO};color:#4338ca;">${esc(href)}</span></p>`;
+}
+
 function note(html) {
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0;">
   <tr><td style="background:#fff7ed;border-left:3px solid #fb923c;border-radius:10px;padding:14px 16px;">
@@ -98,10 +110,10 @@ async function deliver({ to, subject, html, text }) {
 export const verifyMail = () => transporter.verify();
 
 const COPY = {
-  email_verify: { subject: 'Confirm your email address', accent: 'Email confirmation', title: 'Confirm your email', intro: 'Use this code to finish setting up your account.' },
   login_2fa: { subject: 'Your sign-in code', accent: 'Sign-in verification', title: 'Here is your sign-in code', intro: 'Someone is signing in to your account. Enter this code to continue.' },
   password_reset: { subject: 'Reset your password', accent: 'Password reset', title: 'Reset your password', intro: 'Use this code to choose a new password.' },
   session_terminate: { subject: 'Confirm signing a device out', accent: 'Device sign-out', title: 'Confirm this sign-out', intro: 'Use this code to sign the other device out of your account.' },
+  account_delete: { subject: 'Confirm deleting your account', accent: 'Account deletion', title: 'Confirm you want to delete your account', intro: 'Use this code to confirm that your account should be deleted. This cannot be undone.' },
 };
 
 export function sendCodeEmail({ to, name, code, purpose }) {
@@ -150,7 +162,7 @@ export function sendPasswordChanged({ to, name }) {
 export function sendAccountCreated({ to, name, role }) {
   const body =
     para(`Hi ${esc(name)},<br>Your school administrator created your account. You are signed up as <strong>${esc(role)}</strong>.`) +
-    para('Ask the administrator for your temporary password, then sign in. You will confirm your email, choose your own password, and only then see the rest of the system.') +
+    para('We sent you a separate email with a link to confirm this address. Ask the administrator for your temporary password, then sign in. You will choose your own password at the first sign-in.') +
     note('If you were not expecting this account, tell your administrator.');
   return deliver({
     to,
@@ -182,5 +194,36 @@ export function sendAccountDisabled({ to, name }) {
     subject: 'Your account has been turned off',
     html: layout({ preheader: 'Your account has been turned off', title: 'Account turned off', accent: 'Account notice', body }),
     text: 'Your account has been turned off and you were signed out everywhere. Contact your administrator if this is a mistake.',
+  });
+}
+
+// Confirming an email is done with a link, never a code: there is nothing to type and
+// nothing to read out over the phone. The link works once and stops working after
+// VERIFY_LINK_TTL_HOURS.
+export function sendVerifyLinkEmail({ to, name, url, hours }) {
+  const body =
+    para(`Hi ${esc(name)},<br>Tap the button below to confirm this email address and finish setting up your account.`) +
+    button(url, 'Confirm my email', `the link works for ${hours} hours`) +
+    note('If you did not create this account, ignore this email and tell your administrator.');
+  return deliver({
+    to,
+    subject: 'Confirm your email address',
+    html: layout({ preheader: 'Confirm your email address', title: 'Confirm your email', accent: 'Email confirmation', body }),
+    text: `Confirm your email address by opening this link within ${hours} hours: ${url}`,
+  });
+}
+
+// Sent by an administrator when somebody with a confirmed email has lost access.
+// It lands straight on the "choose a new password" step.
+export function sendResetLinkEmail({ to, name, url, minutes }) {
+  const body =
+    para(`Hi ${esc(name)},<br>An administrator asked us to send you a password reset link. Choose a new password with it.`) +
+    button(url, 'Choose a new password', `the link works for ${minutes} minutes`) +
+    note('If you did not ask for this, ignore this email. Your password will not change until the link is used.');
+  return deliver({
+    to,
+    subject: 'Reset your password',
+    html: layout({ preheader: 'Reset your password', title: 'Choose a new password', accent: 'Password reset', body }),
+    text: `Choose a new password with this link within ${minutes} minutes: ${url}`,
   });
 }

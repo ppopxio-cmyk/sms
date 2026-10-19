@@ -32,7 +32,13 @@ export function createApp() {
       });
     }),
   );
-  app.use(compression());
+  // The live notification stream must never be compressed: compressing it would hold
+  // notices back in a buffer instead of sending them the moment they happen.
+  app.use(
+    compression({
+      filter: (req, res) => !req.path.includes('/notifications/stream') && compression.filter(req, res),
+    }),
+  );
   app.use(pinoHttp({ logger, autoLogging: env.NODE_ENV !== 'test' }));
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());

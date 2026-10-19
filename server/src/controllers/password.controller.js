@@ -5,12 +5,12 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { signTicket, readTicket } from '../services/token.service.js';
 import { checkCode } from '../services/code.service.js';
 import { sendCode } from '../services/codeDelivery.js';
+import { passwordVersion as version } from '../services/link.service.js';
 import { revokeAllForUser } from '../services/session.service.js';
 import { forgetUser } from '../services/user.service.js';
+import { notifyPasswordChanged } from '../services/notification.service.js';
 import { sendPasswordChanged } from '../services/mail.service.js';
 import { audit } from '../services/audit.service.js';
-
-const version = (user) => user.passwordChangedAt?.getTime() ?? 0;
 
 export const forgotPassword = asyncHandler(async (req, res) => {
   const user = await User.findOne({ email: req.body.email });
@@ -52,6 +52,7 @@ export const resetPassword = asyncHandler(async (req, res) => {
 
   await revokeAllForUser(user._id, 'password_reset');
   void sendPasswordChanged({ to: user.email, name: user.name });
+  void notifyPasswordChanged({ user }).catch(() => {});
   audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.password_reset_done', targetType: 'user', targetId: user._id });
   res.json({ message: 'Password changed. Please sign in with your new password.' });
 });

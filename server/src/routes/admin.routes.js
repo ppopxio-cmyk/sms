@@ -7,7 +7,7 @@ import {
 } from '../validators/auth.schemas.js';
 import { listSessions, terminateSession } from '../controllers/admin.controller.js';
 import {
-  listUsers, createUser, updateUser, resendUserCode, setTempPassword, signOutUser, removeUser,
+  listUsers, createUser, updateUser, resendUserCode, setTempPassword, signOutUser, removeUser, sendResetLink,
 } from '../controllers/users.controller.js';
 
 const r = Router();
@@ -33,6 +33,14 @@ r.post(
   requirePermission('users:manage'),
   validate(idParamSchema, 'params'),
   resendUserCode,
+);
+// For somebody who confirmed their email but lost access: a link, not a password we
+// hand out. Once the email is confirmed, only that person can choose a password.
+r.post(
+  '/users/:id/reset-link',
+  requirePermission('users:manage'),
+  validate(idParamSchema, 'params'),
+  sendResetLink,
 );
 r.post(
   '/users/:id/password',

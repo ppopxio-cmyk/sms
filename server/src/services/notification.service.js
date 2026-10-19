@@ -1,0 +1,118 @@
+import { Notification, NOTIFICATION_TTL_MS } from '../models/Notification.js';
+import { User } from '../models/User.js';
+import { logger } from '../utils/logger.js';
+import * as stream from './stream.service.js';
+import * as push from './push.service.js';
+
+export const toPayload = (doc) => ({
+  id: String(doc._id),
+  type: doc.type,
+  title: doc.title,
+  body: doc.body || '',
+  actorName: doc.actorName || '',
+  meta: doc.meta ?? null,
+  readAt: doc.readAt ?? null,
+  createdAt: doc.createdAt,
+});
+
+// One row per event per person: the bell counts rows, and every person can clear their
+// own. Delivery is either a live stream (a tab is open) or a push (no tab is open) -
+// never both, so nobody sees the same notice twice on one screen.
+async function deliver(entry, { exceptSid, exceptDeviceKey } = {}) {
+  try {
+    const doc = await Notification.create({
+      ...entry,
+      expiresAt: new Date(Date.now() + NOTIFICATION_TTL_MS),
+    });
+    const payload = toPayload(doc);
+    const live = stream.sendToUser(doc.userId, 'notification', payload, { exceptSid });
+    if (live === 0) {
+      await push.sendToUser(doc.userId, { kind: 'notification', ...payload }, { exceptDeviceKey });
+    }
+    return payload;
+  } catch (err) {
+    // A notice that cannot be stored must never break the action that caused it.
+    logger.error({ err: err.message }, 'a notification could not be delivered');
+    return null;
+  }
+}
+
+export async function notifyAdmins(entry) {
+  const admins = await User.find({ role: 'ADMIN', status: 'active', deletedAt: null })
+    .select('_id')
+    .lean();
+  await Promise.all(admins.map((admin) => deliver({ ...entry, userId: admin._id })));
+}
+
+const describe = (info) => [info.browser, info.os].filter(Boolean).join(' on ') || 'an unknown device';
+
+// Somebody signed in. Their other open tabs and devices hear about it, and so does the
+// administrator - unless the administrator is the one who signed in.
+export async function notifySignIn({ user, sid, deviceKey, info }) {
+  const where = `${describe(info)} · ${info.location}`;
+  const at = new Date().toISOString();
+
+  await deliver(
+    {
+      userId: user._id,
+      type: 'login',
+      title: 'New sign-in to your account',
+      body: where,
+      actorId: user._id,
+      actorName: user.name,
+      meta: { browser: info.browser, os: info.os, ip: info.ip, location: info.location, at },
+    },
+    { exceptSid: sid, exceptDeviceKey: deviceKey },
+  );
+
+  if (user.role !== 'ADMIN') {
+    await notifyAdmins({
+      type: 'user_login',
+      title: `${user.name} signed in`,
+      body: `${where} · ${user.email}`,
+      actorId: user._id,
+      actorName: user.name,
+      meta: { email: user.email, role: user.role, browser: info.browser, os: info.os, at },
+    });
+  }
+}
+
+export async function notifyEmailVerified({ user }) {
+  await deliver({
+    userId: user._id,
+    type: 'email_verified',
+    title: 'Your email was confirmed',
+    body: 'Your account is ready. You can sign in now.',
+    actorId: user._id,
+    actorName: user.name,
+  });
+  await notifyAdmins({
+    type: 'user_verified',
+    title: `${user.name} confirmed their email`,
+    body: `${user.email} · ${user.role.toLowerCase()}`,
+    actorId: user._id,
+    actorName: user.name,
+    meta: { email: user.email, role: user.role },
+  });
+}
+
+export async function notifyPasswordChanged({ user, by = 'user' }) {
+  await deliver({
+    userId: user._id,
+    type: 'password_changed',
+    title: 'Your password was changed',
+    body: 'Every device was signed out for safety.',
+    actorId: user._id,
+    actorName: user.name,
+  });
+  if (user.role !== 'ADMIN') {
+    await notifyAdmins({
+      type: 'user_password_changed',
+      title: `${user.name} changed their password`,
+      body: by === 'admin' ? `Reset from the users screen · ${user.email}` : user.email,
+      actorId: user._id,
+      actorName: user.name,
+      meta: { email: user.email, role: user.role, by },
+    });
+  }
+}

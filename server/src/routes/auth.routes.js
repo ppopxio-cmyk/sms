@@ -4,12 +4,13 @@ import { validate } from '../middleware/validate.js';
 import { authenticate, requirePasswordChanged } from '../middleware/authenticate.js';
 import {
   emailOnlySchema, verifyEmailSchema, loginSchema, loginVerifySchema, ticketSchema,
-  changePasswordSchema, sessionConfirmSchema, idParamSchema,
+  changePasswordSchema, sessionConfirmSchema, idParamSchema, twoStepSchema,
+  deletePasswordSchema, deleteAccountSchema,
 } from '../validators/auth.schemas.js';
 import {
   verifyEmail, resendVerification, login, loginVerify, loginResend,
   refresh, logout, me, heartbeat, changePassword, listMySessions,
-  requestSessionCode, terminateMySession,
+  requestSessionCode, terminateMySession, setTwoStep, requestDeleteCode, deleteAccount,
 } from '../controllers/auth.controller.js';
 
 const r = Router();
@@ -27,6 +28,9 @@ r.post('/logout', logout);
 
 r.get('/me', authenticate, me);
 r.post('/change-password', authLimiter, authenticate, validate(changePasswordSchema), changePassword);
+r.post('/two-step', authLimiter, authenticate, requirePasswordChanged, validate(twoStepSchema), setTwoStep);
+r.post('/delete-account/code', authLimiter, authenticate, requirePasswordChanged, validate(deletePasswordSchema), requestDeleteCode);
+r.post('/delete-account', authLimiter, authenticate, requirePasswordChanged, validate(deleteAccountSchema), deleteAccount);
 r.post('/heartbeat', authenticate, requirePasswordChanged, heartbeat);
 r.get('/sessions', authenticate, requirePasswordChanged, listMySessions);
 r.post(
