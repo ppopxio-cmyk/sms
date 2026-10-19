@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -10,6 +10,7 @@ import Button from '../components/ui/Button';
 import Alert from '../components/ui/Alert';
 import CodeInput from '../components/ui/CodeInput';
 import { api, errorMessage } from '../lib/api';
+import { mountGoogleButton } from '../lib/google';
 import { loginSchema, emailField } from '../lib/validation';
 import { FLOW_KEYS, clearFlow, writeFlow } from '../lib/session-flow';
 import { homeFor } from '../lib/roles';
@@ -29,6 +30,8 @@ export default function Login() {
   const [serverError, setServerError] = useState(null);
   const [unverified, setUnverified] = useState(null);
   const [locked, setLocked] = useState(false);
+  const [googleReady, setGoogleReady] = useState(false);
+  const googleSlot = useRef(null);
 
   // One countdown per journey, kept in sessionStorage so a refresh does not restart it.
   const loginTimer = useResendTimer('login');
@@ -57,38 +60,78 @@ export default function Login() {
     navigate(location.state?.from || homeFor(data.user.role), { replace: true });
   };
 
+  // Shared by the password form and the Google button, so a second step and an account
+  // that still has to be finished behave the same either way.
+  const startTwoFactor = (data) => {
+    setTicket(data.ticket);
+    setCode('');
+    setStep('code');
+    loginTimer.start();
+    toast.info(
+      data.reason === 'newDevice'
+        ? 'This browser is new, so we emailed you a code.'
+        : 'We emailed you a 6-digit sign-in code.',
+    );
+  };
+
+  const applyLoginFailure = (err, fallbackEmail = '') => {
+    const code = err?.response?.data?.code;
+    if (code === 'EMAIL_NOT_VERIFIED' || code === 'ACCOUNT_NOT_SET_UP') {
+      const target = err.response.data?.data?.email || fallbackEmail;
+      setUnverified(target);
+      // Remember where the link went, so a refresh of the confirm page still knows.
+      if (target) writeFlow(FLOW_KEYS.pendingVerify, { email: target });
+      verifyTimer.start();
+    }
+    if (code === 'ACCOUNT_LOCKED') setLocked(true);
+    setServerError(errorMessage(err, 'We could not sign you in.'));
+  };
+
   const onSubmit = async (values) => {
     setServerError(null);
     setUnverified(null);
     setLocked(false);
     try {
       const { data } = await api.post('/auth/login', values);
-      if (data.requires2fa) {
-        setTicket(data.ticket);
-        setCode('');
-        setStep('code');
-        loginTimer.start();
-        toast.info(
-          data.reason === 'newDevice'
-            ? 'This browser is new, so we emailed you a code.'
-            : 'We emailed you a 6-digit sign-in code.',
-        );
-        return;
-      }
+      if (data.requires2fa) return startTwoFactor(data);
       finish(data, `Welcome back, ${data.user.name.split(' ')[0]}.`);
     } catch (err) {
-      const code = err?.response?.data?.code;
-      if (code === 'EMAIL_NOT_VERIFIED' || code === 'ACCOUNT_NOT_SET_UP') {
-        const target = err.response.data?.data?.email || getValues('email');
-        setUnverified(target);
-        // Remember where the link went, so a refresh of the confirm page still knows.
-        writeFlow(FLOW_KEYS.pendingVerify, { email: target });
-        verifyTimer.start();
-      }
-      if (code === 'ACCOUNT_LOCKED') setLocked(true);
-      setServerError(errorMessage(err, 'We could not sign you in.'));
+      applyLoginFailure(err, getValues('email'));
     }
   };
+
+  // The Google button is mounted exactly once, so the widget Google draws lives in a slot
+  // that never gets taken out of the page. The handler behind it is refreshed into a ref on
+  // every render instead, and only ever read from a click, long after mount.
+  const googleHandler = useRef(null);
+  useEffect(() => {
+    googleHandler.current = async (credential) => {
+      setServerError(null);
+      setUnverified(null);
+      setLocked(false);
+      try {
+        const { data } = await api.post('/auth/google', { credential });
+        if (data.requires2fa) return startTwoFactor(data);
+        finish(data, `Welcome back, ${data.user.name.split(' ')[0]}.`);
+      } catch (err) {
+        applyLoginFailure(err);
+      }
+    };
+  });
+
+  // The button only appears when the server is actually configured for Google sign-in, so
+  // a half-finished setup never shows people a door that does not open.
+  useEffect(() => {
+    let alive = true;
+    mountGoogleButton(googleSlot.current, (credential) => googleHandler.current?.(credential))
+      .then((shown) => {
+        if (alive && shown) setGoogleReady(true);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const onVerify = async () => {
     setServerError(null);
@@ -220,6 +263,15 @@ export default function Login() {
         <Button type="submit" size="lg" loading={isSubmitting} className="w-full">
           Sign in
         </Button>
+
+        {/* Both of these stay in the tree; only their look changes. Taking the slot out and
+            putting it back would throw away the button Google drew inside it. */}
+        <div className={googleReady ? 'flex items-center gap-3 pt-1' : 'hidden'}>
+          <span className="h-px flex-1 bg-slate-100" />
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">or</span>
+          <span className="h-px flex-1 bg-slate-100" />
+        </div>
+        <div ref={googleSlot} className="flex justify-center" />
       </form>
     </AuthLayout>
   );

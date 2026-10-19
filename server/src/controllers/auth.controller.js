@@ -1,6 +1,7 @@
 import argon2 from 'argon2';
 import { User } from '../models/User.js';
 import { Session } from '../models/Session.js';
+import { env } from '../config/env.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ensureDeviceId, describeRequest, deviceFingerprint, deviceKey } from '../utils/device.js';
@@ -21,6 +22,7 @@ import {
 } from '../services/session.service.js';
 import { isNewDevice, rememberDevice, forgetDevicesForUser } from '../services/device.service.js';
 import { forgetUser } from '../services/user.service.js';
+import { googleSignInReady, verifyGoogleIdToken } from '../services/googleAuth.service.js';
 import { removeForDevice, removeAllForUser } from '../services/push.service.js';
 import { notifySignIn, notifyEmailVerified, notifyPasswordChanged } from '../services/notification.service.js';
 import { sendLoginAlert, sendPasswordChanged } from '../services/mail.service.js';
@@ -34,6 +36,10 @@ const LOCK_AFTER = 3;
 const LOCK_MS = 15 * 60_000;
 
 const LINK_INVALID = 'That link has expired or has already been used. Ask for a new one.';
+
+// The same rule as the sign-in form: an account here is always a Gmail address, because
+// every code and notice is delivered through the school's own Gmail.
+const GMAIL_ADDRESS = /^[a-z0-9][a-z0-9._%+-]*@gmail\.com$/;
 
 export const safeUser = (u) => ({
   id: u._id,
@@ -58,6 +64,28 @@ async function startSession(req, res, user, { deviceId, fingerprint }) {
   void notifySignIn({ user, sid: session._id, deviceKey: deviceKey(fingerprint, deviceId), info }).catch(() => {});
   audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.login', targetType: 'session', targetId: session._id, meta: { browser: info.browser, os: info.os } });
   return { accessToken: signAccess(user, session._id), user: safeUser(user), session: { id: session._id } };
+}
+
+// Everything that happens once we know who the person is, however they proved it: the
+// device rules, the second code when one is due, and the session itself. Password
+// sign-in and Google sign-in both end here, so the two can never drift apart.
+async function finishLogin(req, res, user) {
+  const deviceId = ensureDeviceId(req, res);
+  const fingerprint = deviceFingerprint(req);
+  const fresh = await isNewDevice(user._id, deviceKey(fingerprint, deviceId));
+
+  // A code is asked for when the account turned 2-step on, or when this browser has
+  // never signed in before.
+  if (user.twoStepEnabled || fresh) {
+    await sendCode(user, 'login_2fa');
+    return {
+      requires2fa: true,
+      reason: user.twoStepEnabled ? 'twoStep' : 'newDevice',
+      ticket: signTicket(user._id, 'login-2fa', '5m'),
+    };
+  }
+
+  return startSession(req, res, user, { deviceId, fingerprint });
 }
 
 // Confirming an email uses a link, never a code: the link is a signed ticket that is
@@ -182,22 +210,7 @@ export const login = asyncHandler(async (req, res) => {
     throw new AppError(403, 'EMAIL_NOT_VERIFIED', 'Please confirm your email first. We sent a link to your inbox.', { email: user.email });
   }
 
-  const deviceId = ensureDeviceId(req, res);
-  const fingerprint = deviceFingerprint(req);
-  const fresh = await isNewDevice(user._id, deviceKey(fingerprint, deviceId));
-
-  // A code is asked for when the account turned 2-step on, or when this browser has
-  // never signed in before.
-  if (user.twoStepEnabled || fresh) {
-    await sendCode(user, 'login_2fa');
-    return res.json({
-      requires2fa: true,
-      reason: user.twoStepEnabled ? 'twoStep' : 'newDevice',
-      ticket: signTicket(user._id, 'login-2fa', '5m'),
-    });
-  }
-
-  res.json(await startSession(req, res, user, { deviceId, fingerprint }));
+  res.json(await finishLogin(req, res, user));
 });
 
 export const loginVerify = asyncHandler(async (req, res) => {
@@ -215,6 +228,61 @@ export const loginResend = asyncHandler(async (req, res) => {
   const user = await User.findById(payload.sub);
   if (user && user.status !== 'disabled' && !user.deletedAt) await sendCode(user, 'login_2fa');
   res.json({ message: 'We sent a new code.' });
+});
+
+// The sign-in page draws Google's own button, which needs the public client id. Serving it
+// from here means the browser always uses the same value the server checks tokens against,
+// and a client id is not a secret.
+export const googleConfig = asyncHandler(async (req, res) => {
+  res.json({ clientId: googleSignInReady ? env.GOOGLE_CLIENT_ID : null });
+});
+
+// Signing in with Google. Google has already confirmed the mailbox, so this stands in for
+// both the password and the confirmation link. After that it is an ordinary sign-in: the
+// same account checks, the same device rules, the same second code when one is due.
+export const googleSignIn = asyncHandler(async (req, res) => {
+  if (!googleSignInReady) {
+    throw new AppError(501, 'GOOGLE_NOT_CONFIGURED', 'Signing in with Google is not switched on yet.');
+  }
+
+  const claimed = await verifyGoogleIdToken(req.body.credential);
+  if (!GMAIL_ADDRESS.test(claimed.email)) {
+    throw new AppError(403, 'GMAIL_ONLY', 'Use the school Gmail address that was given an account.');
+  }
+
+  const user = await User.findOne({ email: claimed.email });
+
+  // There is no self-registration: an address Google knows is still not an account here.
+  if (!user || user.deletedAt) {
+    audit({ req, action: 'auth.login_google_no_account', status: 'fail', meta: { email: claimed.email } });
+    throw new AppError(404, 'NO_ACCOUNT', 'That Google account has no school account. Ask your administrator to create one.');
+  }
+
+  if (user.status === 'disabled') {
+    throw new AppError(403, 'ACCOUNT_DISABLED', 'This account is turned off. Please contact the administrator.');
+  }
+
+  // An account that was never finished goes through the same door as always: confirm the
+  // address, then choose the full name and the password. Nothing is skipped.
+  if (user.mustChangePassword) {
+    await deliverVerifyLink(user).catch(() => {});
+    audit({ req, actorId: user._id, action: 'auth.login_google_not_set_up', status: 'fail' });
+    throw new AppError(403, 'ACCOUNT_NOT_SET_UP', 'Finish setting up your account first. We sent a fresh link to your inbox.', { email: user.email });
+  }
+
+  // Google signs the address as confirmed, which proves the same thing the link in the
+  // inbox proves, so an account still waiting on that can move on.
+  if (!user.emailVerified) {
+    user.emailVerified = true;
+    if (user.status === 'pending') user.status = 'active';
+    await user.save();
+    forgetUser(user._id);
+    void notifyEmailVerified({ user }).catch(() => {});
+    audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.email_verified_google', targetType: 'user', targetId: user._id });
+  }
+
+  audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.login_google', targetType: 'user', targetId: user._id });
+  res.json(await finishLogin(req, res, user));
 });
 
 // The page calls this every time it starts. This is what keeps people signed in after a refresh.

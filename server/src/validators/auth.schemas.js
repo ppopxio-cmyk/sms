@@ -50,6 +50,9 @@ export const verifyResetCodeSchema = z.strictObject({ email, code });
 // opened the link in their own mailbox.
 export const setupAccountSchema = z.strictObject({ ticket, name, password });
 export const loginSchema = z.strictObject({ email, password: z.string().min(1).max(128) });
+// The credential is the signed ID token Google's button hands the browser. It is long;
+// its contents are checked in the controller, never trusted from the client.
+export const googleSignInSchema = z.strictObject({ credential: z.string().min(20).max(4096) });
 export const loginVerifySchema = z.strictObject({ ticket, code });
 export const ticketSchema = z.strictObject({ ticket });
 export const resetPasswordSchema = z.strictObject({ resetToken: ticket, newPassword: password });
