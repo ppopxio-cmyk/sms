@@ -3,7 +3,9 @@ import { ROLES } from '../config/roles.js';
 
 const userSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true, trim: true, maxlength: 100 },
+    // Empty until its owner sets it. An administrator creates an account with an email
+    // and a role only; the full name is chosen by the person themselves.
+    name: { type: String, default: '', trim: true, maxlength: 100 },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true, maxlength: 254 },
     passwordHash: { type: String, required: true, select: false },
     role: { type: String, enum: ROLES, default: 'TEACHER', index: true },

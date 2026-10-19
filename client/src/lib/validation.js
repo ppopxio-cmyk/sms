@@ -42,8 +42,8 @@ export const resetPasswordSchema = z
   .object({ password: passwordField, confirm: z.string().min(1, 'Repeat your new password.') })
   .refine((v) => v.password === v.confirm, { path: ['confirm'], message: 'The two passwords do not match.' });
 
-// Choosing your own password, with the repeat check. The forced first change has no
-// current-password field: the temporary password was already proved at sign-in.
+// Choosing your own password, with the repeat check. Used by the reset wizard, which
+// has nothing else to prove: the reset ticket was the proof.
 export const newPasswordSchema = z
   .object({ password: passwordField, confirm: z.string().min(1, 'Repeat your new password.') })
   .refine((v) => v.password === v.confirm, { path: ['confirm'], message: 'The two passwords do not match.' });
@@ -71,25 +71,33 @@ export const ROLES = ['ADMIN', 'REGISTRAR', 'TEACHER', 'ACCOUNTANT'];
 // can hand out. The only way to get one is the seed script.
 export const ASSIGNABLE_ROLES = ['REGISTRAR', 'TEACHER', 'ACCOUNTANT'];
 
-export const createUserSchema = z
-  .object({
-    name: nameField,
-    email: emailField,
-    role: z.enum(ASSIGNABLE_ROLES),
-    password: passwordField,
-    confirm: z.string().min(1, 'Repeat the temporary password.'),
-  })
-  .refine((v) => v.password === v.confirm, { path: ['confirm'], message: 'The two passwords do not match.' });
-
-export const updateUserSchema = z.object({
-  name: nameField,
-  role: z.enum(ROLES),
-  status: z.enum(['active', 'disabled']),
-  twoStepEnabled: z.boolean(),
+// An account starts as an email address and a role. The person chooses their own name
+// and password when they open the link that confirms the address.
+export const createUserSchema = z.object({
+  email: emailField,
+  role: z.enum(ASSIGNABLE_ROLES),
 });
 
-export const tempPasswordSchema = z
-  .object({ password: passwordField, confirm: z.string().min(1, 'Repeat the temporary password.') })
+// Editing an account is turning it on or off, confirmed with the administrator's own
+// password.
+export const editUserSchema = z.object({
+  status: z.enum(['active', 'disabled']),
+  password: z.string().min(1, 'Enter your password.'),
+});
+
+// Removing an account keeps the record but hides it, and asks for the same proof.
+export const removeUserSchema = z.object({
+  password: z.string().min(1, 'Enter your password.'),
+});
+
+// The second half of the very first sign-up, right after the link is opened: the name
+// and the password are both chosen by the person themselves.
+export const setupAccountSchema = z
+  .object({
+    name: nameField,
+    password: passwordField,
+    confirm: z.string().min(1, 'Repeat your password.'),
+  })
   .refine((v) => v.password === v.confirm, { path: ['confirm'], message: 'The two passwords do not match.' });
 
 // The first three are exactly what the API requires, so a full green meter means

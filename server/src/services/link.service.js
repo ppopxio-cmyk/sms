@@ -68,3 +68,18 @@ export async function consumeVerifyLink(token) {
 // with the password version like every other reset ticket.
 export const issueResetLink = (user) =>
   signTicket(user._id, 'password-reset', `${env.RESET_LINK_TTL_MINUTES}m`, { v: passwordVersion(user) });
+
+// Once the link in the inbox has been used, the address is confirmed but the account
+// still has no name and no password. This short ticket is what lets that same browser
+// finish the job. It stops working the moment a password exists, so it cannot be
+// replayed by anybody who finds it later.
+export const issueSetupTicket = (user) =>
+  signTicket(user._id, 'account-setup', `${env.SETUP_TICKET_TTL_MINUTES}m`);
+
+export function consumeSetupTicket(token) {
+  try {
+    return readTicket(token, 'account-setup');
+  } catch {
+    throw new AppError(400, 'SETUP_TICKET_INVALID', 'That step took too long. Ask for a new link from the sign-in page.');
+  }
+}

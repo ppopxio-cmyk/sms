@@ -4,19 +4,17 @@ import { homeFor } from '../lib/roles';
 
 export function ProtectedRoute() {
   const status = useAuth((s) => s.status);
-  const user = useAuth((s) => s.user);
-  const location = useLocation();
 
   if (status === 'loading') return null; // App shows the splash screen instead
-  if (status === 'guest') return <Navigate to="/login" replace state={{ from: location.pathname }} />;
-
-  // An account created by an administrator starts with a temporary password. Until
-  // its owner picks their own, nothing else opens.
-  if (user?.mustChangePassword && location.pathname !== '/set-password') {
-    return <Navigate to="/set-password" replace />;
-  }
+  if (status === 'guest') return <GuestRedirect />;
 
   return <Outlet />;
+}
+
+// Kept separate so the location is only read when somebody actually has to be sent away.
+function GuestRedirect() {
+  const location = useLocation();
+  return <Navigate to="/login" replace state={{ from: location.pathname }} />;
 }
 
 export function GuestRoute() {

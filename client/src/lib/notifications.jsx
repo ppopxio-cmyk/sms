@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { api } from './api';
 import { showLocalNotification } from './push';
+import NoticeToast from '../components/layout/NoticeToast';
 
 const LIST_KEY = 'notifications';
 
@@ -22,9 +24,9 @@ export function useNotifications({ unread = false, limit = 30 } = {}) {
   });
 }
 
-// One live connection while somebody is signed in. A notice that arrives on it is shown
-// straight away, so no page refresh is needed; if the connection drops, it reconnects,
-// and the periodic refetch above covers the gap.
+// One live connection while somebody is signed in. A notice that arrives on it floats in
+// at the top corner straight away and refreshes the list, so no page refresh is needed;
+// if the connection drops, it reconnects, and the periodic refetch above covers the gap.
 export function useNotificationStream(enabled) {
   const queryClient = useQueryClient();
   const [connected, setConnected] = useState(false);
@@ -52,6 +54,11 @@ export function useNotificationStream(enabled) {
           }
           queryClient.invalidateQueries({ queryKey: [LIST_KEY] });
           if (payload) {
+            // One card per notice, keyed by its id, so a reconnect cannot show it twice.
+            toast.custom((id) => <NoticeToast id={id} notice={payload} />, {
+              id: `notice-${payload.id}`,
+              duration: 9000,
+            });
             void showLocalNotification({
               title: payload.title,
               body: payload.body,

@@ -40,7 +40,12 @@ export default function Login() {
     getValues,
     control,
     formState: { errors, isSubmitting },
-  } = useForm({ resolver: zodResolver(loginSchema), mode: 'onTouched', defaultValues: { email: '', password: '' } });
+  } = useForm({
+    resolver: zodResolver(loginSchema),
+    mode: 'onTouched',
+    // Finishing a brand new account lands here with the address already known.
+    defaultValues: { email: location.state?.email ?? '', password: '' },
+  });
 
   const email = useWatch({ control, name: 'email' }) ?? '';
   const emailOk = email.length > 0 && emailField.safeParse(email).success;
@@ -73,7 +78,7 @@ export default function Login() {
       finish(data, `Welcome back, ${data.user.name.split(' ')[0]}.`);
     } catch (err) {
       const code = err?.response?.data?.code;
-      if (code === 'EMAIL_NOT_VERIFIED') {
+      if (code === 'EMAIL_NOT_VERIFIED' || code === 'ACCOUNT_NOT_SET_UP') {
         const target = err.response.data?.data?.email || getValues('email');
         setUnverified(target);
         // Remember where the link went, so a refresh of the confirm page still knows.
@@ -161,7 +166,7 @@ export default function Login() {
         {serverError ? <Alert tone="danger">{serverError}</Alert> : null}
 
         {unverified ? (
-          <Alert tone="info" title="Confirm your email first">
+          <Alert tone="info" title="Open the link we emailed you">
             We sent a link to {unverified}.{' '}
             <Link
               to="/verify-email"

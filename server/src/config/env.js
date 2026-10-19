@@ -24,6 +24,8 @@ const schema = z.object({
   // The confirmation email carries a link, not a code. The link is single use.
   VERIFY_LINK_TTL_HOURS: z.coerce.number().default(3),
   // How long a password-reset link sent by an administrator stays usable.
+  // How long the "finish your account" step stays open after an email is confirmed.
+  SETUP_TICKET_TTL_MINUTES: z.coerce.number().default(30),
   RESET_LINK_TTL_MINUTES: z.coerce.number().default(30),
   // Notifications clear themselves after this many days.
   NOTIFICATION_TTL_DAYS: z.coerce.number().default(30),

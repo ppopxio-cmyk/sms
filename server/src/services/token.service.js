@@ -12,8 +12,9 @@ export const signAccess = (user, sessionId) =>
 export const verifyAccess = (token) =>
   jwt.verify(token, env.JWT_ACCESS_SECRET, { algorithms: ['HS256'], issuer: ISSUER, audience: 'sms-access' });
 
-// Short-lived one-purpose tickets: 'login-2fa' and 'password-reset'.
-// A ticket can never be used as an access token, because the audience differs.
+// Short-lived one-purpose tickets: 'email-verify', 'account-setup', 'login-2fa' and
+// 'password-reset'. A ticket can never be used as an access token, because the
+// audience differs.
 export const signTicket = (userId, purpose, expiresIn, extra = {}) =>
   sign({ purpose, ...extra }, { subject: String(userId), audience: 'sms-ticket', expiresIn });
 

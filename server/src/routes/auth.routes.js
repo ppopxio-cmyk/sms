@@ -4,11 +4,11 @@ import { validate } from '../middleware/validate.js';
 import { authenticate, requirePasswordChanged } from '../middleware/authenticate.js';
 import {
   emailOnlySchema, verifyEmailSchema, loginSchema, loginVerifySchema, ticketSchema,
-  changePasswordSchema, sessionConfirmSchema, idParamSchema, twoStepSchema,
+  setupAccountSchema, changePasswordSchema, sessionConfirmSchema, idParamSchema, twoStepSchema,
   deletePasswordSchema, deleteAccountSchema,
 } from '../validators/auth.schemas.js';
 import {
-  verifyEmail, resendVerification, login, loginVerify, loginResend,
+  verifyEmail, setupAccount, resendVerification, login, loginVerify, loginResend,
   refresh, logout, me, heartbeat, changePassword, listMySessions,
   requestSessionCode, terminateMySession, setTwoStep, requestDeleteCode, deleteAccount,
 } from '../controllers/auth.controller.js';
@@ -17,6 +17,8 @@ const r = Router();
 
 // There is no self-registration on purpose: an administrator creates every account.
 r.post('/verify-email', codeLimiter, validate(verifyEmailSchema), verifyEmail);
+// Finishing that new account - its own name and password - right after the link is used.
+r.post('/setup-account', authLimiter, validate(setupAccountSchema), setupAccount);
 r.post('/resend-verification', codeLimiter, validate(emailOnlySchema), resendVerification);
 
 r.post('/login', authLimiter, validate(loginSchema), login);

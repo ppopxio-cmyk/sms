@@ -1,30 +1,51 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { useForm, useWatch } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
-import { CircleCheck, LoaderCircle, MailCheck, MailWarning, TriangleAlert } from 'lucide-react';
+import {
+  CircleCheck, KeyRound, LoaderCircle, Lock, MailCheck, MailWarning, TriangleAlert, UserRound,
+} from 'lucide-react';
 import AuthLayout from '../components/layout/AuthLayout';
 import Button from '../components/ui/Button';
 import Alert from '../components/ui/Alert';
+import Field from '../components/ui/Field';
+import PasswordMeter from '../components/ui/PasswordMeter';
 import { api, errorMessage } from '../lib/api';
-import { FLOW_KEYS, clearFlow, readFlow } from '../lib/session-flow';
+import { nameField, setupAccountSchema } from '../lib/validation';
+import { FLOW_KEYS, clearFlow, readFlow, writeFlow } from '../lib/session-flow';
 import useResendTimer, { formatWait } from '../lib/useResendTimer';
 
-// Confirming an email is done by opening the link we emailed. There is no code to type.
-// A visit without a token - somebody who typed the address, or an old bookmark - is sent
-// to the sign-in page, where asking to sign in sends a fresh link.
+// Confirming an email is done by opening the link we emailed. The same page then finishes
+// the account: the person picks their own full name and password, and only after that are
+// they sent to the sign-in page. A visit without a token - somebody who typed the address,
+// or an old bookmark - is sent to the sign-in page, which emails a fresh link on request.
 export default function VerifyEmail() {
   const navigate = useNavigate();
   const location = useLocation();
   const [params] = useSearchParams();
   const token = params.get('token');
-  const [flow] = useState(() => readFlow(FLOW_KEYS.pendingVerify));
-  const email = location.state?.email ?? flow?.email ?? '';
+  const [flow, setFlow] = useState(() => readFlow(FLOW_KEYS.setup));
+  const [pending] = useState(() => readFlow(FLOW_KEYS.pendingVerify));
+  const email = location.state?.email ?? flow?.email ?? pending?.email ?? '';
 
-  const [state, setState] = useState(token ? 'verifying' : 'waiting');
+  const [state, setState] = useState(token ? 'verifying' : flow?.ticket ? 'setup' : 'waiting');
   const [message, setMessage] = useState(null);
   const [sending, setSending] = useState(false);
+  const [busy, setBusy] = useState(false);
   const started = useRef(false);
   const { left, start, clear } = useResendTimer('verify-email');
+
+  const form = useForm({
+    resolver: zodResolver(setupAccountSchema),
+    mode: 'onTouched',
+    defaultValues: { name: '', password: '', confirm: '' },
+  });
+  const name = useWatch({ control: form.control, name: 'name' }) ?? '';
+  const password = useWatch({ control: form.control, name: 'password' }) ?? '';
+  const confirm = useWatch({ control: form.control, name: 'confirm' }) ?? '';
+  const nameOk = name.length > 0 && nameField.safeParse(name).success;
+  const matches = confirm.length > 0 && password === confirm;
 
   useEffect(() => {
     if (!token || started.current) return;
@@ -35,10 +56,20 @@ export default function VerifyEmail() {
     (async () => {
       try {
         const { data } = await api.post('/auth/verify-email', { token });
+        clear();
+        clearFlow(FLOW_KEYS.pendingVerify);
+        if (data?.setupTicket) {
+          // Half done: the address is confirmed, the account is not. The ticket is kept
+          // in this tab so a refresh lands back on this step instead of the start.
+          const next = { email: data.email, ticket: data.setupTicket };
+          writeFlow(FLOW_KEYS.setup, next);
+          setFlow(next);
+          setMessage(data?.message);
+          setState('setup');
+          return;
+        }
         setMessage(data?.message || 'Email confirmed.');
         setState('done');
-        clearFlow(FLOW_KEYS.pendingVerify);
-        clear();
         toast.success('Your email is confirmed.');
         navigate('/verify-email', { replace: true });
       } catch (err) {
@@ -47,6 +78,31 @@ export default function VerifyEmail() {
       }
     })();
   }, [token, clear, navigate]);
+
+  const save = async (values) => {
+    setMessage(null);
+    setBusy(true);
+    try {
+      await api.post('/auth/setup-account', { ticket: flow.ticket, name: values.name, password: values.password });
+      const who = flow.email || values.name;
+      setFlow(null);
+      clearFlow(FLOW_KEYS.setup);
+      toast.success('Your account is ready. Sign in with your new password.');
+      navigate('/login', { replace: true, state: { email: who } });
+    } catch (err) {
+      const code = err?.response?.data?.code;
+      if (code === 'SETUP_TICKET_INVALID' || code === 'ALREADY_SET_UP' || code === 'ACCOUNT_DISABLED') {
+        clearFlow(FLOW_KEYS.setup);
+        setFlow(null);
+        setMessage(errorMessage(err));
+        setState('error');
+        return;
+      }
+      setMessage(errorMessage(err, 'We could not save that. Please try again.'));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // Nothing to confirm and nobody to confirm for: go and sign in.
   if (state === 'waiting' && !email) return <Navigate to="/login" replace />;
@@ -76,6 +132,68 @@ export default function VerifyEmail() {
     );
   }
 
+  if (state === 'setup') {
+    return (
+      <AuthLayout
+        title="Create your account"
+        subtitle="Your email is confirmed. Choose the name and the password you want to sign in with."
+        footer={<span>Only you ever see this password, not even the administrator.</span>}
+      >
+        <form onSubmit={form.handleSubmit(save)} className="space-y-4" noValidate>
+          {message ? <Alert tone="info">{message}</Alert> : null}
+
+          <Field
+            label="Full name"
+            icon={UserRound}
+            autoComplete="name"
+            placeholder="Haile Michael"
+            status={nameOk ? 'ok' : undefined}
+            hint="First name and last name."
+            error={form.formState.errors.name?.message}
+            {...form.register('name')}
+          />
+
+          <Field
+            label="Password"
+            type="password"
+            icon={Lock}
+            autoComplete="new-password"
+            placeholder="Choose a password"
+            error={form.formState.errors.password?.message}
+            {...form.register('password')}
+          >
+            <PasswordMeter value={password} className="mt-3" />
+          </Field>
+
+          <Field
+            label="Repeat password"
+            type="password"
+            icon={KeyRound}
+            autoComplete="new-password"
+            placeholder="Type it again"
+            error={confirm.length === 0 ? form.formState.errors.confirm?.message : undefined}
+            {...form.register('confirm')}
+          >
+            {confirm.length > 0 ? (
+              <p
+                className={`animate-rise mt-1.5 flex items-center gap-1.5 text-xs font-semibold ${
+                  matches ? 'text-emerald-600' : 'text-rose-500'
+                }`}
+              >
+                {matches ? <CircleCheck className="animate-pop h-3.5 w-3.5" /> : <TriangleAlert className="h-3.5 w-3.5" />}
+                {matches ? 'Passwords match' : 'Passwords do not match'}
+              </p>
+            ) : null}
+          </Field>
+
+          <Button type="submit" size="lg" loading={busy} className="w-full">
+            Finish and continue
+          </Button>
+        </form>
+      </AuthLayout>
+    );
+  }
+
   if (state === 'done') {
     return (
       <AuthLayout title="Email confirmed" subtitle={message} footer={null}>
@@ -85,12 +203,10 @@ export default function VerifyEmail() {
               <CircleCheck className="h-7 w-7" />
             </span>
             <p className="text-base font-semibold text-emerald-800">Your account is ready.</p>
-            <p className="max-w-sm text-sm leading-relaxed text-emerald-700">
-              Sign in with the password you were given, and you will choose your own straight away.
-            </p>
+            <p className="max-w-sm text-sm leading-relaxed text-emerald-700">Sign in with the password you chose.</p>
           </div>
 
-          <Button size="lg" className="w-full" onClick={() => navigate('/login', { replace: true })}>
+          <Button size="lg" className="w-full" onClick={() => navigate('/login', { replace: true, state: { email } })}>
             Go to sign in
           </Button>
         </div>

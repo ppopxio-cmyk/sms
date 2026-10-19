@@ -1,52 +1,37 @@
-import { useEffect, useState } from 'react';
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Bell, Fingerprint, LayoutDashboard, LogOut, Menu, ShieldCheck, UserRound, Users, X } from 'lucide-react';
+import { useState } from 'react';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, LogOut, Menu, ShieldCheck, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../store/auth';
 import { homeFor } from '../../lib/roles';
 import { useNotificationStream } from '../../lib/notifications';
-import { registerServiceWorker } from '../../lib/push';
 import Brand from '../ui/Brand';
 import Badge, { RoleBadge } from '../ui/Badge';
 import NotificationBell from './NotificationBell';
+import ProfileMenu from './ProfileMenu';
+import { PERSONAL_ITEMS } from '../../lib/menu';
 import { formatEthiopian } from '../../lib/ethiopianDate';
 
 // The first entry is the role's own front door, so it is the same page for everybody but
-// under a different address. The rest is the same for every role.
+// under a different address. Everything that belongs to the person rather than the job
+// (notices, profile, devices, signing out) lives in the avatar menu instead.
 const navItems = (role) => [
   { to: homeFor(role), label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/admin/users', label: 'Users', icon: Users, roles: ['ADMIN'] },
   { to: '/admin/sessions', label: 'All sessions', icon: ShieldCheck, roles: ['ADMIN'] },
-  { to: '/notifications', label: 'Notifications', icon: Bell },
-  { to: '/me', label: 'My profile', icon: UserRound, end: true },
-  { to: '/me/devices', label: 'My devices', icon: Fingerprint },
 ];
 
-const initials = (name) =>
-  (name || '')
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((p) => p[0])
-    .join('')
-    .toUpperCase() || 'U';
+const itemClass = ({ isActive }) =>
+  `focus-ring flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-medium transition ${
+    isActive ? 'bg-white text-brand-700 shadow-sm ring-1 ring-brand-100' : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
+  }`;
 
 function NavItems({ role, onNavigate }) {
   return navItems(role)
     .filter((item) => !item.roles || item.roles.includes(role))
     .map((item) => (
-      <NavLink
-        key={item.to}
-        to={item.to}
-        end={item.end}
-        onClick={onNavigate}
-        className={({ isActive }) =>
-          `focus-ring flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-medium transition ${
-            isActive ? 'bg-white text-brand-700 shadow-sm ring-1 ring-brand-100' : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
-          }`
-        }
-      >
-        <item.icon className="h-4.5 w-4.5" />
+      <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={itemClass}>
+        <item.icon className="h-4 w-4" />
         {item.label}
       </NavLink>
     ));
@@ -58,16 +43,12 @@ export default function AppShell() {
   const logout = useAuth((s) => s.logout);
   const navigate = useNavigate();
 
-  // The service worker is what lets a notice arrive with the tab closed. It caches
-  // nothing, so registering it here is enough.
-  useEffect(() => {
-    void registerServiceWorker();
-  }, []);
-
-  // One live connection for the whole app: notices appear as they happen.
+  // One live connection for the whole app: notices float in as they happen, on every page
+  // and for every role. The service worker is registered once in main.jsx.
   useNotificationStream(true);
 
   const signOut = async () => {
+    setOpen(false);
     await logout();
     toast.success('You have been signed out.');
     navigate('/login', { replace: true });
@@ -85,31 +66,8 @@ export default function AppShell() {
 
           <div className="flex items-center gap-2">
             <NotificationBell />
+            <ProfileMenu />
 
-            <Link
-              to="/me"
-              title="My profile"
-              className="focus-ring hidden items-center gap-3 rounded-2xl px-2 py-1.5 transition hover:bg-white/70 sm:flex"
-            >
-              <span className="brand-gradient flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold text-white">
-                {initials(user?.name)}
-              </span>
-              <span className="hidden text-left xl:block">
-                <span className="block text-sm font-semibold leading-tight text-slate-800">{user?.name}</span>
-                <span className="block text-xs leading-tight text-slate-500">{user?.email}</span>
-              </span>
-              <RoleBadge role={user?.role} />
-            </Link>
-
-            <button
-              type="button"
-              onClick={signOut}
-              title="Sign out"
-              aria-label="Sign out"
-              className="focus-ring rounded-xl p-2.5 text-slate-500 transition hover:bg-white/80 hover:text-rose-600"
-            >
-              <LogOut className="h-4.5 w-4.5" />
-            </button>
             <button
               type="button"
               onClick={() => setOpen(true)}
@@ -132,13 +90,34 @@ export default function AppShell() {
                 <X className="h-5 w-5" />
               </button>
             </div>
+
             <div className="flex flex-col gap-1">
               <NavItems role={user?.role} onNavigate={() => setOpen(false)} />
             </div>
+
+            <div className="my-3 h-px bg-slate-100" />
+
+            <div className="flex flex-col gap-1">
+              {PERSONAL_ITEMS.map((item) => (
+                <NavLink key={item.to} to={item.to} onClick={() => setOpen(false)} className={itemClass}>
+                  <item.icon className="h-4 w-4" />
+                  {item.label}
+                </NavLink>
+              ))}
+              <button
+                type="button"
+                onClick={signOut}
+                className="focus-ring flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50"
+              >
+                <LogOut className="h-4 w-4" />
+                Sign out
+              </button>
+            </div>
+
             <div className="mt-4 flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-800">{user?.name}</p>
-                <p className="text-xs text-slate-500">{user?.email}</p>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-800">{user?.name || user?.email}</p>
+                {user?.name ? <p className="truncate text-xs text-slate-500">{user?.email}</p> : null}
               </div>
               <RoleBadge role={user?.role} />
             </div>

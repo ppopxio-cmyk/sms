@@ -56,6 +56,10 @@ function layout({ preheader, title, accent, body }) {
 </html>`;
 }
 
+// An account can exist before its owner has chosen a name, so a greeting must never
+// come out empty.
+const hi = (name) => esc(name || 'there');
+
 const para = (html, { muted = false, last = false } = {}) =>
   `<p style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0 0 ${last ? '0' : '16px'};font-size:15px;line-height:1.65;color:${muted ? '#64748b' : '#334155'};">${html}</p>`;
 
@@ -157,43 +161,18 @@ export function sendPasswordChanged({ to, name }) {
   });
 }
 
-// No password ever travels by email: the administrator who created the account hands
-// the temporary one over in person, and it has to be replaced at the first sign-in.
-export function sendAccountCreated({ to, name, role }) {
+// No password ever travels by email, and none is ever handed out. The account is created
+// empty: its owner confirms the address and then chooses their own name and password.
+export function sendAccountCreated({ to, role }) {
   const body =
-    para(`Hi ${esc(name)},<br>Your school administrator created your account. You are signed up as <strong>${esc(role)}</strong>.`) +
-    para('We sent you a separate email with a link to confirm this address. Ask the administrator for your temporary password, then sign in. You will choose your own password at the first sign-in.') +
+    para(`Hi ${hi()},<br>Your school administrator created your account. You are signed up as <strong>${esc(role)}</strong>.`) +
+    para('We sent you a separate email with a link to confirm this address. Open that link to choose your full name and your password, then sign in.') +
     note('If you were not expecting this account, tell your administrator.');
   return deliver({
     to,
     subject: 'Your account has been created',
     html: layout({ preheader: 'Your account has been created', title: 'Welcome aboard', accent: 'Account created', body }),
-    text: `Your account was created as ${role}. Ask the administrator for your temporary password, then sign in and choose your own.`,
-  });
-}
-
-export function sendTempPassword({ to, name }) {
-  const body =
-    para(`Hi ${esc(name)},<br>An administrator set a new temporary password on your account, and every device was signed out.`) +
-    para('Ask the administrator for the temporary password. You will be asked to choose your own as soon as you sign in.') +
-    note('If you did not expect this, contact an administrator immediately.');
-  return deliver({
-    to,
-    subject: 'A new temporary password was set',
-    html: layout({ preheader: 'A new temporary password was set', title: 'Temporary password set', accent: 'Security notice', body }),
-    text: 'An administrator set a new temporary password and signed every device out. Ask them for it, then choose your own password.',
-  });
-}
-
-export function sendAccountDisabled({ to, name }) {
-  const body =
-    para(`Hi ${esc(name)},<br>Your account has been turned off, and you have been signed out on every device.`) +
-    note('If you think this is a mistake, contact your school administrator.');
-  return deliver({
-    to,
-    subject: 'Your account has been turned off',
-    html: layout({ preheader: 'Your account has been turned off', title: 'Account turned off', accent: 'Account notice', body }),
-    text: 'Your account has been turned off and you were signed out everywhere. Contact your administrator if this is a mistake.',
+    text: `Your account was created as ${role}. Open the link we emailed you to confirm this address and choose your name and password.`,
   });
 }
 
@@ -202,7 +181,7 @@ export function sendAccountDisabled({ to, name }) {
 // VERIFY_LINK_TTL_HOURS.
 export function sendVerifyLinkEmail({ to, name, url, hours }) {
   const body =
-    para(`Hi ${esc(name)},<br>Tap the button below to confirm this email address and finish setting up your account.`) +
+    para(`Hi ${hi(name)},<br>Tap the button below to confirm this email address, then choose your full name and your password.`) +
     button(url, 'Confirm my email', `the link works for ${hours} hours`) +
     note('If you did not create this account, ignore this email and tell your administrator.');
   return deliver({
@@ -217,7 +196,7 @@ export function sendVerifyLinkEmail({ to, name, url, hours }) {
 // It lands straight on the "choose a new password" step.
 export function sendResetLinkEmail({ to, name, url, minutes }) {
   const body =
-    para(`Hi ${esc(name)},<br>An administrator asked us to send you a password reset link. Choose a new password with it.`) +
+    para(`Hi ${hi(name)},<br>An administrator asked us to send you a password reset link. Choose a new password with it.`) +
     button(url, 'Choose a new password', `the link works for ${minutes} minutes`) +
     note('If you did not ask for this, ignore this email. Your password will not change until the link is used.');
   return deliver({

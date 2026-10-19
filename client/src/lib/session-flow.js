@@ -3,6 +3,7 @@
 // every key is cleared the moment its journey ends.
 export const FLOW_KEYS = {
   pendingVerify: 'sms.pending-verify',
+  setup: 'sms.setup-flow',
   reset: 'sms.reset-flow',
 };
 

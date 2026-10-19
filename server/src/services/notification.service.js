@@ -46,6 +46,10 @@ export async function notifyAdmins(entry) {
 
 const describe = (info) => [info.browser, info.os].filter(Boolean).join(' on ') || 'an unknown device';
 
+// An account can confirm its email before its owner has chosen a name, so a notice must
+// never come out with a blank space where a person should be.
+const who = (user) => user.name || user.email;
+
 // Somebody signed in. Their other open tabs and devices hear about it, and so does the
 // administrator - unless the administrator is the one who signed in.
 export async function notifySignIn({ user, sid, deviceKey, info }) {
@@ -59,7 +63,7 @@ export async function notifySignIn({ user, sid, deviceKey, info }) {
       title: 'New sign-in to your account',
       body: where,
       actorId: user._id,
-      actorName: user.name,
+      actorName: who(user),
       meta: { browser: info.browser, os: info.os, ip: info.ip, location: info.location, at },
     },
     { exceptSid: sid, exceptDeviceKey: deviceKey },
@@ -68,10 +72,10 @@ export async function notifySignIn({ user, sid, deviceKey, info }) {
   if (user.role !== 'ADMIN') {
     await notifyAdmins({
       type: 'user_login',
-      title: `${user.name} signed in`,
+      title: `${who(user)} signed in`,
       body: `${where} · ${user.email}`,
       actorId: user._id,
-      actorName: user.name,
+      actorName: who(user),
       meta: { email: user.email, role: user.role, browser: info.browser, os: info.os, at },
     });
   }
@@ -82,16 +86,16 @@ export async function notifyEmailVerified({ user }) {
     userId: user._id,
     type: 'email_verified',
     title: 'Your email was confirmed',
-    body: 'Your account is ready. You can sign in now.',
+    body: 'Choose your name and password to finish setting up your account.',
     actorId: user._id,
-    actorName: user.name,
+    actorName: who(user),
   });
   await notifyAdmins({
     type: 'user_verified',
-    title: `${user.name} confirmed their email`,
+    title: `${who(user)} confirmed their email`,
     body: `${user.email} · ${user.role.toLowerCase()}`,
     actorId: user._id,
-    actorName: user.name,
+    actorName: who(user),
     meta: { email: user.email, role: user.role },
   });
 }
@@ -103,15 +107,15 @@ export async function notifyPasswordChanged({ user, by = 'user' }) {
     title: 'Your password was changed',
     body: 'Every device was signed out for safety.',
     actorId: user._id,
-    actorName: user.name,
+    actorName: who(user),
   });
   if (user.role !== 'ADMIN') {
     await notifyAdmins({
       type: 'user_password_changed',
-      title: `${user.name} changed their password`,
+      title: `${who(user)} changed their password`,
       body: by === 'admin' ? `Reset from the users screen · ${user.email}` : user.email,
       actorId: user._id,
-      actorName: user.name,
+      actorName: who(user),
       meta: { email: user.email, role: user.role, by },
     });
   }

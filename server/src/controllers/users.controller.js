@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import argon2 from 'argon2';
 import { User } from '../models/User.js';
 import { AppError } from '../utils/AppError.js';
@@ -8,10 +9,24 @@ import { forgetDevicesForUser } from '../services/device.service.js';
 import { forgetUser } from '../services/user.service.js';
 import { removeAllForUser } from '../services/push.service.js';
 import { deliverVerifyLink, deliverResetLink } from '../services/linkDelivery.js';
-import { sendAccountCreated, sendAccountDisabled, sendTempPassword } from '../services/mail.service.js';
+import { sendAccountCreated } from '../services/mail.service.js';
 import { audit } from '../services/audit.service.js';
 
 const ONLY_ONE_ADMIN = 'The system has a single administrator account, and it already exists. Pick another role.';
+
+// A password that nobody knows and that no sign-in can ever match. It is what a brand new
+// account holds until its owner chooses their own.
+const unusableHash = () => argon2.hash(crypto.randomBytes(32).toString('hex'));
+
+// Disabling or removing somebody throws them out on every device, so the administrator
+// proves who they are first. A wrong password is written to the audit log.
+async function confirmAdminPassword(req, password) {
+  const admin = await User.findById(req.user.id).select('+passwordHash');
+  if (!admin || !(await argon2.verify(admin.passwordHash, password ?? ''))) {
+    audit({ req, action: 'admin.confirm_failed', status: 'fail', targetType: 'user', targetId: req.user.id });
+    throw new AppError(400, 'WRONG_PASSWORD', 'That is not your password.');
+  }
+}
 
 // Never return the password hash, the lock state or anything else the screen does
 // not need.
@@ -62,7 +77,7 @@ export const listUsers = asyncHandler(async (req, res) => {
 });
 
 export const createUser = asyncHandler(async (req, res) => {
-  const { name, email, role, password } = req.body;
+  const { email, role } = req.body;
 
   if (role === 'ADMIN') throw new AppError(400, 'ONE_ADMIN_ONLY', ONLY_ONE_ADMIN);
 
@@ -71,11 +86,14 @@ export const createUser = asyncHandler(async (req, res) => {
     throw new AppError(409, 'EMAIL_TAKEN', 'An account with this email already exists.');
   }
 
+  // Nothing but the address and the role. No password is created here, and none is ever
+  // handed to the administrator: the person chooses their own name and password when
+  // they open the link that confirms the address.
   const user = await User.create({
-    name,
+    name: '',
     email,
     role,
-    passwordHash: await argon2.hash(password),
+    passwordHash: await unusableHash(),
     status: 'pending',
     emailVerified: false,
     mustChangePassword: true,
@@ -83,72 +101,61 @@ export const createUser = asyncHandler(async (req, res) => {
 
   // Confirming the address is done with a link, so the new account gets one straight
   // away. It stays good for a few hours and only works once. If the send fails the
-  // account still exists, and the confirmation link can be sent again from this screen.
+  // account still exists, and the link can be sent again from this screen.
   const sent = await deliverVerifyLink(user).catch(() => false);
-  void sendAccountCreated({ to: user.email, name: user.name, role: user.role });
+  void sendAccountCreated({ to: user.email, role: user.role });
   audit({ req, action: 'admin.user_created', targetType: 'user', targetId: user._id, meta: { role, verifyLinkSent: sent } });
   res.status(201).json({
     user: toRow(user),
     message: sent
-      ? 'Account created, and a confirmation link is in their inbox.'
-      : 'Account created, but the confirmation link could not be sent. Use Resend link.',
+      ? 'Account created, and a link is in their inbox so they can set their name and password.'
+      : 'Account created, but the link could not be sent. Use Resend link.',
   });
 });
 
+// Editing an account means turning it on or off. It is always confirmed with the
+// administrator's own password, because turning it off ends every session at once.
 export const updateUser = asyncHandler(async (req, res) => {
   const user = await loadUser(req.valid.params.id);
-  const { name, role, status, twoStepEnabled } = req.body;
+  const { status, password } = req.body;
   const isSelf = String(user._id) === String(req.user.id);
 
-  if (isSelf && role !== undefined && role !== user.role) {
-    throw new AppError(400, 'SELF_ROLE', 'You cannot change your own role.');
-  }
-  // Promoting somebody to administrator is refused for the same reason as creating a
-  // second one: the system is built around a single administrator.
-  if (role === 'ADMIN' && user.role !== 'ADMIN') {
-    throw new AppError(400, 'ONE_ADMIN_ONLY', ONLY_ONE_ADMIN);
-  }
+  await confirmAdminPassword(req, password);
+
   if (isSelf && status === 'disabled') {
     throw new AppError(400, 'SELF_DISABLE', 'You cannot turn off your own account.');
   }
   if (status === 'disabled' && user.role === 'ADMIN') await ensureAnotherAdminStays(user._id);
 
-  const before = { name: user.name, role: user.role, status: user.status, twoStepEnabled: user.twoStepEnabled };
-  if (name !== undefined) user.name = name;
-  if (role !== undefined) user.role = role;
-  if (twoStepEnabled !== undefined) user.twoStepEnabled = twoStepEnabled;
-  if (status !== undefined) user.status = status;
+  const before = { status: user.status };
+  user.status = status;
   await user.save();
   forgetUser(user._id);
 
   const turnedOff = before.status !== 'disabled' && user.status === 'disabled';
-  const roleChanged = before.role !== user.role;
 
-  // The role inside an access token is up to ten minutes old, so a change of role or
-  // a turned-off account ends every session at once (build guide, phase 4).
-  if (turnedOff || roleChanged) {
-    await revokeAllForUser(user._id, turnedOff ? 'account_disabled' : 'role_changed');
-  }
-  // A turned-off account must stop receiving notices on every device.
+  // A turned-off account loses every session at once, and every device stops receiving
+  // notices for it. Nothing is emailed: the account is simply off.
   if (turnedOff) {
+    await revokeAllForUser(user._id, 'account_disabled');
     await removeAllForUser(user._id).catch(() => {});
-    void sendAccountDisabled({ to: user.email, name: user.name });
   }
 
   audit({
     req,
-    action: turnedOff ? 'admin.user_disabled' : 'admin.user_updated',
+    action: turnedOff ? 'admin.user_disabled' : 'admin.user_enabled',
     targetType: 'user',
     targetId: user._id,
-    meta: { before, after: { name: user.name, role: user.role, status: user.status, twoStepEnabled: user.twoStepEnabled } },
+    meta: { before, after: { status: user.status } },
   });
-  res.json({ user: toRow(user) });
+  res.json({ user: toRow(user), message: turnedOff ? 'Account turned off, and every device was signed out.' : 'Account turned back on.' });
 });
 
-// Sends a fresh confirmation link, for when the first one ran out or was lost.
+// Sends a fresh confirmation link, for when the first one ran out or was lost. That
+// includes an account whose email was confirmed but was never finished.
 export const resendUserCode = asyncHandler(async (req, res) => {
   const user = await loadUser(req.valid.params.id);
-  if (user.emailVerified) {
+  if (user.emailVerified && !user.mustChangePassword) {
     throw new AppError(400, 'ALREADY_VERIFIED', 'This email is already confirmed. Send a reset link instead.');
   }
   const sent = await deliverVerifyLink(user);
@@ -156,34 +163,7 @@ export const resendUserCode = asyncHandler(async (req, res) => {
     throw new AppError(429, 'WAIT_BEFORE_RESEND', 'A link went out a moment ago. Please wait before sending another.');
   }
   audit({ req, action: 'admin.user_verify_link_resent', targetType: 'user', targetId: user._id });
-  res.json({ message: 'A new confirmation link is on its way.' });
-});
-
-// Handing out a fresh temporary password, for when the first one was lost. Only for an
-// account that has not confirmed its email yet: once the email is confirmed, the person
-// owns their password and an administrator must not be able to set it.
-export const setTempPassword = asyncHandler(async (req, res) => {
-  const user = await loadUser(req.valid.params.id);
-  if (user.emailVerified) {
-    throw new AppError(
-      409,
-      'ALREADY_VERIFIED',
-      'This person confirmed their email and chose their own password. Send them a reset link instead.',
-    );
-  }
-
-  user.passwordHash = await argon2.hash(req.body.password);
-  user.mustChangePassword = true;
-  user.passwordChangedAt = new Date();
-  user.failedLogins = 0;
-  user.lockUntil = undefined;
-  await user.save();
-  forgetUser(user._id);
-
-  await deleteAllForUser(user._id);
-  void sendTempPassword({ to: user.email, name: user.name });
-  audit({ req, action: 'admin.user_temp_password', targetType: 'user', targetId: user._id });
-  res.json({ user: toRow(user), message: 'Temporary password set. Every device was signed out.' });
+  res.json({ message: user.mustChangePassword ? 'A new setup link is on its way.' : 'A new confirmation link is on its way.' });
 });
 
 // For a person who has confirmed their email but lost access: a single-use link that
@@ -193,6 +173,9 @@ export const sendResetLink = asyncHandler(async (req, res) => {
   const user = await loadUser(req.valid.params.id);
   if (user.status === 'disabled') {
     throw new AppError(400, 'ACCOUNT_DISABLED', 'This account is turned off. Turn it back on first.');
+  }
+  if (user.mustChangePassword) {
+    throw new AppError(400, 'NOT_SET_UP', 'This person has not finished setting up. Send a confirmation link instead.');
   }
   if (!user.emailVerified) {
     throw new AppError(400, 'NOT_VERIFIED', 'This email is not confirmed yet. Send a new confirmation link instead.');
@@ -211,13 +194,17 @@ export const signOutUser = asyncHandler(async (req, res) => {
   res.json({ message: ended ? 'Every device was signed out.' : 'That account had no active sessions.' });
 });
 
-// Soft delete, as the design plan asks: the account stops working, the history stays.
+// Soft delete, as the design plan asks: the account is gone from the list and can never
+// sign in again, but the history stays readable. Confirmed with the administrator's own
+// password, like turning an account off, and nothing is emailed to the account.
 export const removeUser = asyncHandler(async (req, res) => {
   const user = await loadUser(req.valid.params.id);
   if (String(user._id) === String(req.user.id)) {
     throw new AppError(400, 'SELF_REMOVE', 'You cannot remove your own account.');
   }
   if (user.role === 'ADMIN') await ensureAnotherAdminStays(user._id);
+
+  await confirmAdminPassword(req, req.body.password);
 
   user.deletedAt = new Date();
   user.status = 'disabled';

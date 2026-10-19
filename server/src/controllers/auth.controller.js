@@ -9,7 +9,7 @@ import { signAccess, signTicket, readTicket, sha256 } from '../services/token.se
 import { checkCode, resendWaitMessage } from '../services/code.service.js';
 import { sendCode } from '../services/codeDelivery.js';
 import { deliverVerifyLink } from '../services/linkDelivery.js';
-import { consumeVerifyLink } from '../services/link.service.js';
+import { consumeVerifyLink, consumeSetupTicket, issueSetupTicket } from '../services/link.service.js';
 import {
   createSession,
   rotateSession,
@@ -84,15 +84,58 @@ export const verifyEmail = asyncHandler(async (req, res) => {
   const info = await describeRequest(req);
   await rememberDevice({ userId: user._id, key: deviceKey(deviceFingerprint(req), ensureDeviceId(req, res)), info }).catch(() => {});
 
+  // A brand new account still has no name and no password, so confirming the address is
+  // only half of it. The browser gets a short ticket to finish the job right here,
+  // instead of being sent to the sign-in page it cannot use yet.
+  const setupTicket = user.mustChangePassword ? issueSetupTicket(user) : null;
+
   res.json({
-    message: firstTime ? 'Email confirmed. You can sign in now.' : 'This email was already confirmed.',
+    message: user.mustChangePassword
+      ? 'Email confirmed. Now choose your name and password.'
+      : firstTime
+        ? 'Email confirmed. You can sign in now.'
+        : 'This email was already confirmed.',
     email: user.email,
+    setupTicket,
   });
+});
+
+// The second half of the same flow: the address is already confirmed, so this sets the
+// name and the password its owner chose. The ticket is bound to the account and stops
+// working the moment a password exists.
+export const setupAccount = asyncHandler(async (req, res) => {
+  const payload = consumeSetupTicket(req.body.ticket);
+  const user = await User.findById(payload.sub).select('+passwordHash');
+  if (!user || user.deletedAt) throw new AppError(400, 'SETUP_TICKET_INVALID', 'That link is no longer good. Ask for a new one.');
+  if (user.status === 'disabled') {
+    throw new AppError(403, 'ACCOUNT_DISABLED', 'This account is turned off. Please contact the administrator.');
+  }
+  if (!user.mustChangePassword) {
+    throw new AppError(400, 'ALREADY_SET_UP', 'This account is already set up. Please sign in.');
+  }
+
+  user.name = req.body.name;
+  user.passwordHash = await argon2.hash(req.body.password);
+  user.passwordChangedAt = new Date();
+  user.failedLogins = 0;
+  user.lockUntil = undefined;
+  user.mustChangePassword = false;
+  user.emailVerified = true;
+  if (user.status === 'pending') user.status = 'active';
+  await user.save();
+  forgetUser(user._id);
+
+  audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.account_setup', targetType: 'user', targetId: user._id });
+  res.json({ message: 'Your account is ready. Sign in with your new password.', email: user.email });
 });
 
 export const resendVerification = asyncHandler(async (req, res) => {
   const user = await User.findOne({ email: req.body.email });
-  if (user && !user.emailVerified && user.status !== 'disabled') await deliverVerifyLink(user);
+  // Somebody whose account is set up cannot use a confirm link for anything, so they get
+  // nothing. Everybody else does: either the address is still unconfirmed, or it is
+  // confirmed but the account was never finished.
+  const wantsLink = user && (!user.emailVerified || user.mustChangePassword);
+  if (wantsLink && user.status !== 'disabled') await deliverVerifyLink(user);
   res.json({ message: 'If that email still needs confirming, we sent a new link.' });
 });
 
@@ -102,6 +145,18 @@ export const login = asyncHandler(async (req, res) => {
 
   if (user?.lockUntil && user.lockUntil > new Date()) {
     throw new AppError(429, 'ACCOUNT_LOCKED', 'Too many wrong attempts. Try again in about 15 minutes, or reset your password.');
+  }
+
+  // An account that was never finished has no password to compare, so it must not fall
+  // through to the wrong-password branch and get locked out. It gets a fresh link
+  // instead, which opens the page where the name and password are chosen.
+  if (user?.mustChangePassword) {
+    if (user.status === 'disabled' || user.deletedAt) {
+      throw new AppError(403, 'ACCOUNT_DISABLED', 'This account is turned off. Please contact the administrator.');
+    }
+    await deliverVerifyLink(user).catch(() => {});
+    audit({ req, actorId: user._id, action: 'auth.login_not_set_up', status: 'fail' });
+    throw new AppError(403, 'ACCOUNT_NOT_SET_UP', 'Finish setting up your account first. We sent a fresh link to your inbox.', { email: user.email });
   }
 
   const passwordOk = await argon2.verify(user?.passwordHash ?? DUMMY_HASH, password);
@@ -213,11 +268,9 @@ export const changePassword = asyncHandler(async (req, res) => {
     throw new AppError(401, 'SESSION_ENDED', 'This account is not available. Please contact the administrator.');
   }
 
-  // A forced change happens straight after signing in with the temporary password, and
-  // that password was already proved at the sign-in step. Asking for it again would mean
-  // asking for the very password being replaced. A voluntary change from the profile
-  // page always has to prove the current one.
-  if (!user.mustChangePassword && !(await argon2.verify(user.passwordHash, currentPassword ?? ''))) {
+  // The profile page is the only place a password changes now, and it always has to
+  // prove the current one.
+  if (!(await argon2.verify(user.passwordHash, currentPassword))) {
     audit({ req, action: 'auth.password_change_failed', status: 'fail', targetType: 'user', targetId: user._id });
     throw new AppError(400, 'WRONG_PASSWORD', 'That is not your current password.');
   }

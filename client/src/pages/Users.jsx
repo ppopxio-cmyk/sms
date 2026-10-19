@@ -4,17 +4,17 @@ import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
 import {
-  CircleCheck, KeyRound, Lock, LogOut, MailCheck, Mails, RefreshCw, Search, ShieldCheck, Trash2, TriangleAlert, UserPlus, UserRound,
+  CircleCheck, Lock, LogOut, MailCheck, Mails, RefreshCw, Search, Trash2, UserPlus, UserRound,
 } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
-import { createUserSchema, updateUserSchema, tempPasswordSchema, ROLES, ASSIGNABLE_ROLES, nameField, emailField } from '../lib/validation';
+import { createUserSchema, editUserSchema, removeUserSchema, ROLES, ASSIGNABLE_ROLES, emailField } from '../lib/validation';
+import { useAuth } from '../store/auth';
 import { formatEthiopian } from '../lib/ethiopianDate';
 import Card, { CardBody, CardHeader } from '../components/ui/Card';
 import Badge, { RoleBadge } from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Field from '../components/ui/Field';
 import Modal from '../components/ui/Modal';
-import PasswordMeter from '../components/ui/PasswordMeter';
 import { Skeleton } from '../components/ui/Skeleton';
 import { EmptyState, ErrorState } from '../components/ui/StatePanel';
 
@@ -24,9 +24,9 @@ const STATUS = {
   disabled: { tone: 'danger', label: 'turned off' },
 };
 
-const initials = (name) =>
-  (name || '')
-    .split(' ')
+const initials = (value) =>
+  (value || '')
+    .split(/[\s@._-]+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((p) => p[0])
@@ -45,6 +45,7 @@ function useDebounced(value, delay = 300) {
 
 export default function Users() {
   const queryClient = useQueryClient();
+  const me = useAuth((s) => s.user);
 
   const [search, setSearch] = useState('');
   const [role, setRole] = useState('');
@@ -53,7 +54,6 @@ export default function Users() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [tempFor, setTempFor] = useState(null);
   const [removing, setRemoving] = useState(null);
 
   const users = useQuery({
@@ -73,42 +73,36 @@ export default function Users() {
   const createForm = useForm({
     resolver: zodResolver(createUserSchema),
     mode: 'onTouched',
-    defaultValues: { name: '', email: '', role: 'TEACHER', password: '', confirm: '' },
+    defaultValues: { email: '', role: 'TEACHER' },
   });
   const editForm = useForm({
-    resolver: zodResolver(updateUserSchema),
+    resolver: zodResolver(editUserSchema),
     mode: 'onTouched',
-    defaultValues: { name: '', role: 'TEACHER', status: 'active', twoStepEnabled: false },
+    defaultValues: { status: 'active', password: '' },
   });
-  const tempForm = useForm({
-    resolver: zodResolver(tempPasswordSchema),
+  const removeForm = useForm({
+    resolver: zodResolver(removeUserSchema),
     mode: 'onTouched',
-    defaultValues: { password: '', confirm: '' },
+    defaultValues: { password: '' },
   });
 
-  const createName = useWatch({ control: createForm.control, name: 'name' }) ?? '';
   const createEmail = useWatch({ control: createForm.control, name: 'email' }) ?? '';
-  const createPassword = useWatch({ control: createForm.control, name: 'password' }) ?? '';
-  const createConfirm = useWatch({ control: createForm.control, name: 'confirm' }) ?? '';
-  const tempPassword = useWatch({ control: tempForm.control, name: 'password' }) ?? '';
-  const tempConfirm = useWatch({ control: tempForm.control, name: 'confirm' }) ?? '';
+  const createEmailOk = createEmail.length > 0 && emailField.safeParse(createEmail).success;
 
   useEffect(() => {
     if (!editing) return;
-    editForm.reset({
-      name: editing.name,
-      role: editing.role,
-      status: editing.status === 'disabled' ? 'disabled' : 'active',
-      twoStepEnabled: !!editing.twoStepEnabled,
-    });
+    editForm.reset({ status: editing.status === 'disabled' ? 'disabled' : 'active', password: '' });
   }, [editing, editForm]);
 
+  useEffect(() => {
+    if (!removing) return;
+    removeForm.reset({ password: '' });
+  }, [removing, removeForm]);
+
   const create = useMutation({
-    mutationFn: (values) =>
-      api.post('/admin/users', { name: values.name, email: values.email, role: values.role, password: values.password }),
+    mutationFn: (values) => api.post('/admin/users', values),
     onSuccess: (res) => {
       toast.success(res.data?.message || 'Account created.');
-      toast.info('Give them the temporary password. A confirmation link is already in their inbox.');
       setCreateOpen(false);
       createForm.reset();
       refresh();
@@ -118,8 +112,8 @@ export default function Users() {
 
   const update = useMutation({
     mutationFn: ({ id, values }) => api.patch(`/admin/users/${id}`, values),
-    onSuccess: () => {
-      toast.success('Account updated.');
+    onSuccess: (res) => {
+      toast.success(res.data?.message || 'Account updated.');
       setEditing(null);
       refresh();
     },
@@ -128,27 +122,16 @@ export default function Users() {
 
   const resend = useMutation({
     mutationFn: (id) => api.post(`/admin/users/${id}/resend-verification`),
-    onSuccess: (res) => toast.success(res.data?.message || 'A new confirmation link is on its way.'),
+    onSuccess: (res) => toast.success(res.data?.message || 'A new link is on its way.'),
     onError: (err) => fail(err, 'We could not send a new link.'),
   });
 
-  // For somebody who confirmed their email but lost access. No password is ever handed
-  // out once the email is confirmed: they choose their own from the link.
+  // For somebody whose account is finished but who lost access. No password is ever
+  // handed out: they choose their own from the link.
   const resetLink = useMutation({
     mutationFn: (id) => api.post(`/admin/users/${id}/reset-link`),
     onSuccess: (res) => toast.success(res.data?.message || 'A reset link is on its way.'),
     onError: (err) => fail(err, 'We could not send a reset link.'),
-  });
-
-  const setTemp = useMutation({
-    mutationFn: ({ id, password }) => api.post(`/admin/users/${id}/password`, { password }),
-    onSuccess: (res) => {
-      toast.success(res.data?.message || 'Temporary password set.');
-      setTempFor(null);
-      tempForm.reset();
-      refresh();
-    },
-    onError: (err) => fail(err, 'We could not set that password.'),
   });
 
   const signOut = useMutation({
@@ -158,7 +141,7 @@ export default function Users() {
   });
 
   const remove = useMutation({
-    mutationFn: (id) => api.delete(`/admin/users/${id}`),
+    mutationFn: ({ id, password }) => api.delete(`/admin/users/${id}`, { data: { password } }),
     onSuccess: (res) => {
       toast.success(res.data?.message || 'That account was removed.');
       setRemoving(null);
@@ -172,19 +155,14 @@ export default function Users() {
     createForm.reset();
   };
 
-  const createNameOk = createName.length > 0 && nameField.safeParse(createName).success;
-  const createEmailOk = createEmail.length > 0 && emailField.safeParse(createEmail).success;
-  const createMatches = createConfirm.length > 0 && createPassword === createConfirm;
-  const tempMatches = tempConfirm.length > 0 && tempPassword === tempConfirm;
-
   return (
     <div className="space-y-6">
       <header className="animate-rise flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">Users</h1>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
-            Create the account, hand over the temporary password, and they confirm their email with the link we send. After that
-            only they can choose a password.
+            Add an account with an email address and a role. The person opens the link we email them, confirms the address, and
+            chooses their own full name and password. Nobody but them ever knows that password.
           </p>
         </div>
         <Button onClick={() => setCreateOpen(true)}>
@@ -261,19 +239,21 @@ export default function Users() {
             <div className="space-y-3">
               {rows.map((u) => {
                 const tone = STATUS[u.status] ?? STATUS.pending;
+                const isSelf = me?.id === u.id;
+                const label = u.name || u.email;
                 return (
                   <div key={u.id} className="flex flex-col gap-4 rounded-2xl border border-slate-100 bg-white/70 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
                     <div className="flex min-w-0 gap-3.5">
                       <span className="brand-gradient flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-bold text-white">
-                        {initials(u.name)}
+                        {initials(label)}
                       </span>
                       <div className="min-w-0">
                         <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-800">
-                          {u.name}
+                          <span className={u.name ? '' : 'text-slate-500'}>{label}</span>
                           <RoleBadge role={u.role} />
                           <Badge tone={tone.tone}>{tone.label}</Badge>
                           {u.twoStepEnabled ? <Badge tone="brand">2-step on</Badge> : null}
-                          {u.mustChangePassword ? <Badge tone="warning">temporary password</Badge> : null}
+                          {u.mustChangePassword ? <Badge tone="warning">waiting to set up</Badge> : null}
                         </p>
                         <p className="mt-0.5 truncate text-xs text-slate-500">{u.email}</p>
                         <p className="mt-0.5 text-xs text-slate-400">
@@ -283,36 +263,42 @@ export default function Users() {
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant="secondary" size="sm" onClick={() => setEditing(u)}>
-                        Edit
-                      </Button>
-                      {!u.emailVerified ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {isSelf ? (
+                        <span className="rounded-xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
+                          This is your account
+                        </span>
+                      ) : (
                         <>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => resend.mutate(u.id)}
-                            loading={resend.isPending && resend.variables === u.id}
-                          >
-                            <Mails className="h-3.5 w-3.5" />
-                            Resend link
+                          <Button variant="secondary" size="sm" onClick={() => setEditing(u)}>
+                            Edit
                           </Button>
-                          <Button variant="secondary" size="sm" onClick={() => { tempForm.reset(); setTempFor(u); }}>
-                            <KeyRound className="h-3.5 w-3.5" />
-                            New password
+                          {u.emailVerified && !u.mustChangePassword ? (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => resetLink.mutate(u.id)}
+                              loading={resetLink.isPending && resetLink.variables === u.id}
+                            >
+                              <MailCheck className="h-3.5 w-3.5" />
+                              Send reset link
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => resend.mutate(u.id)}
+                              loading={resend.isPending && resend.variables === u.id}
+                            >
+                              <Mails className="h-3.5 w-3.5" />
+                              Resend link
+                            </Button>
+                          )}
+                          <Button variant="danger" size="sm" onClick={() => setRemoving(u)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Remove
                           </Button>
                         </>
-                      ) : (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => resetLink.mutate(u.id)}
-                          loading={resetLink.isPending && resetLink.variables === u.id}
-                        >
-                          <MailCheck className="h-3.5 w-3.5" />
-                          Send reset link
-                        </Button>
                       )}
                       <Button
                         variant="secondary"
@@ -322,10 +308,6 @@ export default function Users() {
                       >
                         <LogOut className="h-3.5 w-3.5" />
                         Sign out
-                      </Button>
-                      <Button variant="danger" size="sm" onClick={() => setRemoving(u)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Remove
                       </Button>
                     </div>
                   </div>
@@ -346,7 +328,7 @@ export default function Users() {
       <Modal
         open={createOpen}
         title="Add a user"
-        subtitle="They get a temporary password from you and a link in their inbox to confirm their email."
+        subtitle="Only the email address and the role. They set their own name and password from the link we send."
         onClose={closeCreate}
         footer={
           <>
@@ -360,15 +342,6 @@ export default function Users() {
         }
       >
         <form id="create-user-form" onSubmit={createForm.handleSubmit((values) => create.mutate(values))} className="space-y-4" noValidate>
-          <Field
-            label="Full name"
-            icon={UserRound}
-            placeholder="Haile Michael"
-            status={createNameOk ? 'ok' : undefined}
-            hint="First name and last name."
-            error={createForm.formState.errors.name?.message}
-            {...createForm.register('name')}
-          />
           <Field
             label="Gmail address"
             type="email"
@@ -398,40 +371,20 @@ export default function Users() {
               There is a single administrator account, so it is not something you can add here.
             </p>
           </div>
-          <Field
-            label="Temporary password"
-            type="password"
-            icon={Lock}
-            autoComplete="new-password"
-            placeholder="Choose a temporary password"
-            error={createForm.formState.errors.password?.message}
-            {...createForm.register('password')}
-          >
-            <PasswordMeter value={createPassword} className="mt-3" />
-          </Field>
-          <Field
-            label="Repeat temporary password"
-            type="password"
-            icon={Lock}
-            autoComplete="new-password"
-            placeholder="Type it again"
-            error={createConfirm.length === 0 ? createForm.formState.errors.confirm?.message : undefined}
-            {...createForm.register('confirm')}
-          >
-            {createConfirm.length > 0 ? (
-              <p className={`animate-rise mt-1.5 flex items-center gap-1.5 text-xs font-semibold ${createMatches ? 'text-emerald-600' : 'text-rose-500'}`}>
-                {createMatches ? <CircleCheck className="animate-pop h-3.5 w-3.5" /> : <TriangleAlert className="h-3.5 w-3.5" />}
-                {createMatches ? 'Passwords match' : 'Passwords do not match'}
-              </p>
-            ) : null}
-          </Field>
+          <div className="rounded-2xl border border-brand-100 bg-brand-50/60 px-4 py-3">
+            <p className="flex items-start gap-2 text-xs leading-relaxed text-brand-800">
+              <CircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-brand-500" />
+              A link goes to their inbox straight away. They confirm the address, choose their full name and password, and only
+              then can they sign in. No password is ever shared with you.
+            </p>
+          </div>
         </form>
       </Modal>
 
-      {/* Edit a user */}
+      {/* Edit a user: turn the account on or off */}
       <Modal
         open={!!editing}
-        title={editing ? `Edit ${editing.name}` : 'Edit'}
+        title={editing ? `Edit ${editing.name || editing.email}` : 'Edit'}
         subtitle={editing?.email}
         onClose={() => setEditing(null)}
         footer={
@@ -439,12 +392,7 @@ export default function Users() {
             <Button variant="secondary" onClick={() => setEditing(null)}>
               Cancel
             </Button>
-            <Button
-              type="submit"
-              form="edit-user-form"
-              loading={update.isPending}
-              disabled={!editForm.formState.isDirty}
-            >
+            <Button type="submit" form="edit-user-form" loading={update.isPending}>
               Save changes
             </Button>
           </>
@@ -456,35 +404,6 @@ export default function Users() {
           className="space-y-4"
           noValidate
         >
-          <Field
-            label="Full name"
-            icon={UserRound}
-            placeholder="Haile Michael"
-            error={editForm.formState.errors.name?.message}
-            {...editForm.register('name')}
-          />
-          <div>
-            <label htmlFor="edit-role" className="mb-1.5 block text-sm font-medium text-slate-700">
-              Role
-            </label>
-            {editing?.role === 'ADMIN' ? (
-              <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
-                administrator — there is only one, and it stays that way.
-              </p>
-            ) : (
-              <select
-                id="edit-role"
-                className="focus-ring h-11 w-full rounded-xl border border-slate-200 bg-white/80 px-3 text-sm text-slate-800"
-                {...editForm.register('role')}
-              >
-                {ASSIGNABLE_ROLES.map((r) => (
-                  <option key={r} value={r}>
-                    {r.toLowerCase()}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
           <div>
             <label htmlFor="edit-status" className="mb-1.5 block text-sm font-medium text-slate-700">
               Account
@@ -497,79 +416,20 @@ export default function Users() {
               <option value="active">active</option>
               <option value="disabled">turned off</option>
             </select>
-            <p className="mt-1.5 text-xs text-slate-400">Turning an account off signs it out everywhere at once.</p>
+            <p className="mt-1.5 text-xs text-slate-400">
+              Turning an account off signs it out on every device at once. No email is sent.
+            </p>
           </div>
-          <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white/70 px-4 py-3">
-            <input type="checkbox" className="focus-ring mt-0.5 h-4 w-4 rounded" {...editForm.register('twoStepEnabled')} />
-            <span className="text-sm text-slate-700">
-              <span className="flex items-center gap-1.5 font-semibold text-slate-800">
-                <ShieldCheck className="h-4 w-4 text-brand-500" />
-                Ask for a code at every sign-in
-              </span>
-              <span className="mt-0.5 block text-xs text-slate-500">
-                A new browser always asks for one, whether this is on or off.
-              </span>
-            </span>
-          </label>
-        </form>
-      </Modal>
-
-      {/* Hand out a new temporary password */}
-      <Modal
-        open={!!tempFor}
-        title="Set a temporary password"
-        subtitle={tempFor ? `For ${tempFor.name}. They choose their own at the next sign-in. Every device is signed out.` : ''}
-        onClose={() => setTempFor(null)}
-        size="sm"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setTempFor(null)}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              form="temp-password-form"
-              loading={setTemp.isPending}
-              disabled={!tempMatches}
-            >
-              Set password
-            </Button>
-          </>
-        }
-      >
-        <form
-          id="temp-password-form"
-          onSubmit={tempForm.handleSubmit((values) => setTemp.mutate({ id: tempFor.id, password: values.password }))}
-          className="space-y-4"
-          noValidate
-        >
           <Field
-            label="Temporary password"
+            label="Your password"
             type="password"
             icon={Lock}
-            autoComplete="new-password"
-            placeholder="Choose a temporary password"
-            error={tempForm.formState.errors.password?.message}
-            {...tempForm.register('password')}
-          >
-            <PasswordMeter value={tempPassword} className="mt-3" />
-          </Field>
-          <Field
-            label="Repeat temporary password"
-            type="password"
-            icon={Lock}
-            autoComplete="new-password"
-            placeholder="Type it again"
-            error={tempConfirm.length === 0 ? tempForm.formState.errors.confirm?.message : undefined}
-            {...tempForm.register('confirm')}
-          >
-            {tempConfirm.length > 0 ? (
-              <p className={`animate-rise mt-1.5 flex items-center gap-1.5 text-xs font-semibold ${tempMatches ? 'text-emerald-600' : 'text-rose-500'}`}>
-                {tempMatches ? <CircleCheck className="animate-pop h-3.5 w-3.5" /> : <TriangleAlert className="h-3.5 w-3.5" />}
-                {tempMatches ? 'Passwords match' : 'Passwords do not match'}
-              </p>
-            ) : null}
-          </Field>
+            autoComplete="current-password"
+            placeholder="Confirm with your password"
+            hint="Both changes here are confirmed with your own password."
+            error={editForm.formState.errors.password?.message}
+            {...editForm.register('password')}
+          />
         </form>
       </Modal>
 
@@ -577,7 +437,7 @@ export default function Users() {
       <Modal
         open={!!removing}
         title="Remove this account?"
-        subtitle={removing ? `${removing.name} (${removing.email}) stops working right away.` : ''}
+        subtitle={removing ? `${removing.name || removing.email} (${removing.email}) stops working right away.` : ''}
         onClose={() => setRemoving(null)}
         size="sm"
         footer={
@@ -585,16 +445,32 @@ export default function Users() {
             <Button variant="secondary" onClick={() => setRemoving(null)}>
               Keep it
             </Button>
-            <Button variant="danger" onClick={() => remove.mutate(removing.id)} loading={remove.isPending}>
+            <Button type="submit" form="remove-user-form" variant="danger" loading={remove.isPending}>
               Remove account
             </Button>
           </>
         }
       >
-        <p className="text-sm leading-relaxed text-slate-600">
-          The account is kept in the records, so the history stays readable, but the email stays reserved and nobody can sign in
-          with it again.
-        </p>
+        <form
+          id="remove-user-form"
+          onSubmit={removeForm.handleSubmit((values) => remove.mutate({ id: removing.id, password: values.password }))}
+          className="space-y-4"
+          noValidate
+        >
+          <p className="text-sm leading-relaxed text-slate-600">
+            The account is kept in the records, so the history stays readable, but the email stays reserved and nobody can sign in
+            with it again. Every device is signed out, and no email is sent.
+          </p>
+          <Field
+            label="Your password"
+            type="password"
+            icon={Lock}
+            autoComplete="current-password"
+            placeholder="Confirm with your password"
+            error={removeForm.formState.errors.password?.message}
+            {...removeForm.register('password')}
+          />
+        </form>
       </Modal>
     </div>
   );

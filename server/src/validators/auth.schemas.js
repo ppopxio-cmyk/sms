@@ -33,20 +33,25 @@ const password = z
   .regex(/[0-9]/, 'Add at least one number.');
 
 const role = z.enum(ROLES);
+// The single administrator cannot be handed out, so it is not something an
+// administrator can pick when creating an account.
+const assignableRole = z.enum(ROLES.filter((value) => value !== 'ADMIN'));
 const code = z.string().regex(/^[0-9]{6}$/, 'The code is 6 digits.');
 const ticket = z.string().min(10).max(2000);
+const adminPassword = z.string().min(1, 'Enter your password.').max(128);
 
 export const emailOnlySchema = z.strictObject({ email });
 // Confirming an email carries a link with the token in it, never a typed code.
 export const verifyEmailSchema = z.strictObject({ token: ticket });
+// Finishing the account: the name and the password are both chosen by the person who
+// opened the link in their own mailbox.
+export const setupAccountSchema = z.strictObject({ ticket, name, password });
 export const loginSchema = z.strictObject({ email, password: z.string().min(1).max(128) });
 export const loginVerifySchema = z.strictObject({ ticket, code });
 export const ticketSchema = z.strictObject({ ticket });
 export const resetPasswordSchema = z.strictObject({ resetToken: ticket, newPassword: password });
-// currentPassword is optional because the forced change right after a temporary password
-// has nothing to prove: that password was proved at the sign-in step.
 export const changePasswordSchema = z.strictObject({
-  currentPassword: z.string().min(1, 'Enter your current password.').max(128).optional(),
+  currentPassword: z.string().min(1, 'Enter your current password.').max(128),
   newPassword: password,
 });
 export const twoStepSchema = z.strictObject({ enabled: z.boolean(), currentPassword: z.string().min(1, 'Enter your password.').max(128) });
@@ -73,18 +78,19 @@ export const idParamSchema = z.strictObject({ id: z.string().regex(/^[a-f0-9]{24
 export const sessionConfirmSchema = z.strictObject({ code });
 
 // ---- Accounts that an administrator creates ------------------------------------
-export const createUserSchema = z.strictObject({ name, email, role, password });
+// An account starts as nothing but an email address and a role. No password is chosen,
+// stored or handed over: the person picks their own full name and password when they
+// open the link that confirms the address.
+export const createUserSchema = z.strictObject({ email, role: assignableRole });
 
-export const updateUserSchema = z
-  .strictObject({
-    name: name.optional(),
-    role: role.optional(),
-    status: z.enum(['active', 'disabled']).optional(),
-    twoStepEnabled: z.boolean().optional(),
-  })
-  .refine((value) => Object.keys(value).length > 0, 'Send at least one change.');
+// Editing an account means turning it on or off. Both that and removing an account ask
+// for the administrator's own password again before anything happens.
+export const updateUserSchema = z.strictObject({
+  status: z.enum(['active', 'disabled']),
+  password: adminPassword,
+});
 
-export const tempPasswordSchema = z.strictObject({ password });
+export const removeUserSchema = z.strictObject({ password: adminPassword });
 
 export const listUsersQuerySchema = z.strictObject({
   search: z.string().trim().max(100).optional(),

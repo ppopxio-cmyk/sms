@@ -13,7 +13,6 @@ import { SkeletonPage } from './components/ui/Skeleton';
 import Login from './pages/Login.jsx';
 import VerifyEmail from './pages/VerifyEmail.jsx';
 import ForgotPassword from './pages/ForgotPassword.jsx';
-import SetPassword from './pages/SetPassword.jsx';
 
 const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 const Sessions = lazy(() => import('./pages/Sessions.jsx'));
@@ -66,9 +65,6 @@ export default function App() {
         <Route path="/verify-email" element={<VerifyEmail />} />
 
         <Route element={<ProtectedRoute />}>
-          {/* Full screen, no navigation: nothing else opens until this is finished. */}
-          <Route path="/set-password" element={<SetPassword />} />
-
           <Route element={<AppShell />}>
             {/* The same pages for every role: the person, not the job. */}
             <Route path="/notifications" element={<Notifications />} />

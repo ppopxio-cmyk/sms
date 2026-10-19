@@ -3,11 +3,11 @@ import { authenticate, requirePasswordChanged } from '../middleware/authenticate
 import { requirePermission } from '../middleware/authorize.js';
 import { validate } from '../middleware/validate.js';
 import {
-  idParamSchema, createUserSchema, updateUserSchema, tempPasswordSchema, listUsersQuerySchema,
+  idParamSchema, createUserSchema, updateUserSchema, removeUserSchema, listUsersQuerySchema,
 } from '../validators/auth.schemas.js';
 import { listSessions, terminateSession } from '../controllers/admin.controller.js';
 import {
-  listUsers, createUser, updateUser, resendUserCode, setTempPassword, signOutUser, removeUser, sendResetLink,
+  listUsers, createUser, updateUser, resendUserCode, signOutUser, removeUser, sendResetLink,
 } from '../controllers/users.controller.js';
 
 const r = Router();
@@ -21,6 +21,8 @@ r.delete('/sessions/:id', requirePermission('sessions:terminate'), validate(idPa
 // it that way; nobody else can reach any of these routes.
 r.get('/users', requirePermission('users:manage'), validate(listUsersQuerySchema, 'query'), listUsers);
 r.post('/users', requirePermission('users:manage'), validate(createUserSchema), createUser);
+// Editing an account is turning it on or off; removing it keeps the record but hides
+// it. Both ask for the administrator's own password in the body.
 r.patch(
   '/users/:id',
   requirePermission('users:manage'),
@@ -42,14 +44,13 @@ r.post(
   validate(idParamSchema, 'params'),
   sendResetLink,
 );
-r.post(
-  '/users/:id/password',
+r.post('/users/:id/sign-out', requirePermission('users:manage'), validate(idParamSchema, 'params'), signOutUser);
+r.delete(
+  '/users/:id',
   requirePermission('users:manage'),
   validate(idParamSchema, 'params'),
-  validate(tempPasswordSchema),
-  setTempPassword,
+  validate(removeUserSchema),
+  removeUser,
 );
-r.post('/users/:id/sign-out', requirePermission('users:manage'), validate(idParamSchema, 'params'), signOutUser);
-r.delete('/users/:id', requirePermission('users:manage'), validate(idParamSchema, 'params'), removeUser);
 
 export default r;
