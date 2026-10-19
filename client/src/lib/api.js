@@ -7,6 +7,37 @@ export const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 // The access token lives in memory only. It is never written to localStorage,
 // so an injected script cannot read it back after the page is closed.
+//
+// The refresh cookie is HttpOnly and cannot be read here, so a one-word hint is kept
+// instead: it says whether this browser ever had a session. Without it a visitor who has
+// never signed in would still ask for a refresh on every visit and be answered 401 - a
+// wasted round trip and a scary line in the console.
+const SESSION_HINT = 'sms.session';
+
+export const markSessionHint = () => {
+  try {
+    localStorage.setItem(SESSION_HINT, '1');
+  } catch {
+    // a browser that refuses storage simply asks once more; nothing breaks
+  }
+};
+
+export const clearSessionHint = () => {
+  try {
+    localStorage.removeItem(SESSION_HINT);
+  } catch {
+    // nothing to do
+  }
+};
+
+export const hasSessionHint = () => {
+  try {
+    return localStorage.getItem(SESSION_HINT) === '1';
+  } catch {
+    return true;
+  }
+};
+
 let accessToken = null;
 let onSessionRefreshed = null;
 let onSessionLost = null;
@@ -55,7 +86,13 @@ function refreshSession() {
   return refreshInFlight;
 }
 
-export const bootstrapSession = refreshSession;
+// Called on start-up. A visitor who has never signed in never reaches the network.
+export async function bootstrapSessionIfSignedIn() {
+  if (!hasSessionHint()) return null;
+  const data = await refreshSession();
+  markSessionHint();
+  return data;
+}
 
 const SESSION_DEAD = new Set(['SESSION_ENDED', 'NO_SESSION', 'TICKET_INVALID']);
 

@@ -1,5 +1,12 @@
 import { create } from 'zustand';
-import { api, bootstrapSession, setAccessToken, setSessionHandlers } from '../lib/api';
+import {
+  api,
+  bootstrapSessionIfSignedIn,
+  markSessionHint,
+  clearSessionHint,
+  setAccessToken,
+  setSessionHandlers,
+} from '../lib/api';
 import { clearFlows } from '../lib/session-flow';
 
 export const useAuth = create((set) => ({
@@ -9,21 +16,29 @@ export const useAuth = create((set) => ({
 
   setSession: (data) => {
     setAccessToken(data.accessToken);
+    markSessionHint();
     set({ user: data.user, status: 'ready' });
   },
 
   clear: () => {
     setAccessToken(null);
+    clearSessionHint();
     set({ user: null, status: 'guest' });
   },
 
   async bootstrap() {
     try {
-      const data = await bootstrapSession();
+      const data = await bootstrapSessionIfSignedIn();
+      if (!data) {
+        setAccessToken(null);
+        set({ user: null, status: 'guest' });
+        return;
+      }
       setAccessToken(data.accessToken);
       set({ user: data.user, status: 'ready' });
     } catch {
       setAccessToken(null);
+      clearSessionHint();
       set({ user: null, status: 'guest' });
     }
   },
@@ -36,6 +51,7 @@ export const useAuth = create((set) => ({
     }
     clearFlows();
     setAccessToken(null);
+    clearSessionHint();
     set({ user: null, status: 'guest' });
   },
 
@@ -48,8 +64,14 @@ export const useAuth = create((set) => ({
 
 // When a silent token refresh succeeds, keep the store in step.
 setSessionHandlers({
-  refreshed: (data) => useAuth.setState({ user: data.user, status: 'ready' }),
-  lost: () => useAuth.setState({ user: null, status: 'guest' }),
+  refreshed: (data) => {
+    markSessionHint();
+    useAuth.setState({ user: data.user, status: 'ready' });
+  },
+  lost: () => {
+    clearSessionHint();
+    useAuth.setState({ user: null, status: 'guest' });
+  },
 });
 
 export const hasRole = (user, roles) => !!user && (roles.length === 0 || roles.includes(user.role));
