@@ -8,3 +8,5 @@ coverage
 dist
 dist-ssr
 .DS_Store
+client_id.json
+client_secret*.json

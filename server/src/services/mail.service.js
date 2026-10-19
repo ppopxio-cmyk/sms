@@ -1,14 +1,21 @@
 import nodemailer from 'nodemailer';
-import { env } from '../config/env.js';
+import { env, gmailApiReady } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { formatEthiopian } from '../utils/ethiopianDate.js';
+import { checkGmailApi, sendViaGmailApi } from './gmailTransport.js';
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  pool: true,
-  maxConnections: 3,
-  auth: { user: env.SMTP_USER, pass: env.SMTP_APP_PASSWORD },
-});
+// How the mail leaves the building: the Gmail API over HTTPS when the Google values are
+// present, otherwise the app password over SMTP. Both send from the same school address.
+export const MAIL_TRANSPORT = gmailApiReady ? 'gmail-api' : 'smtp';
+
+const transporter = gmailApiReady
+  ? null
+  : nodemailer.createTransport({
+      service: 'gmail',
+      pool: true,
+      maxConnections: 3,
+      auth: { user: env.SMTP_USER, pass: env.SMTP_APP_PASSWORD },
+    });
 
 const ENTITIES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ENTITIES[c]);
@@ -103,15 +110,16 @@ function detailCard(rows) {
 
 async function deliver({ to, subject, html, text }) {
   try {
-    await transporter.sendMail({ from: `"${env.MAIL_FROM_NAME}" <${env.SMTP_USER}>`, to, subject, html, text });
+    if (gmailApiReady) await sendViaGmailApi({ to, subject, html, text });
+    else await transporter.sendMail({ from: `"${env.MAIL_FROM_NAME}" <${env.SMTP_USER}>`, to, subject, html, text });
     return true;
   } catch (err) {
-    logger.error({ err: err.message, subject }, 'email could not be sent');
+    logger.error({ err: err.message, subject, transport: MAIL_TRANSPORT }, 'email could not be sent');
     return false;
   }
 }
 
-export const verifyMail = () => transporter.verify();
+export const verifyMail = () => (gmailApiReady ? checkGmailApi() : transporter.verify());
 
 const COPY = {
   login_2fa: { subject: 'Your sign-in code', accent: 'Sign-in verification', title: 'Here is your sign-in code', intro: 'Someone is signing in to your account. Enter this code to continue.' },

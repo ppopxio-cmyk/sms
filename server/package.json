@@ -8,6 +8,7 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "gen:env": "node scripts/generate-env.js",
+    "google:token": "node scripts/google-token.js",
     "test:db": "node scripts/test-db.js",
     "test:mail": "node scripts/test-mail.js",
     "seed:admin": "node scripts/seed-admin.js",
