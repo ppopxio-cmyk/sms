@@ -121,7 +121,11 @@ export default function Login() {
 
   // The button only appears when the server is actually configured for Google sign-in, so
   // a half-finished setup never shows people a door that does not open.
+  //
+  // The code step replaces the whole form, taking the slot with it, so this runs again when
+  // the form comes back - otherwise the button would be gone after "use a different account".
   useEffect(() => {
+    if (step !== 'password') return undefined;
     let alive = true;
     mountGoogleButton(googleSlot.current, (credential) => googleHandler.current?.(credential))
       .then((shown) => {
@@ -131,7 +135,7 @@ export default function Login() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [step]);
 
   const onVerify = async () => {
     setServerError(null);
