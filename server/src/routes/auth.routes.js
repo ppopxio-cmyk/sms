@@ -5,11 +5,10 @@ import { authenticate, requirePasswordChanged } from '../middleware/authenticate
 import {
   emailOnlySchema, verifyEmailSchema, loginSchema, loginVerifySchema, ticketSchema,
   setupAccountSchema, changePasswordSchema, sessionConfirmSchema, idParamSchema, twoStepSchema,
-  deletePasswordSchema, deleteAccountSchema, googleSignInSchema,
+  deletePasswordSchema, deleteAccountSchema,
 } from '../validators/auth.schemas.js';
 import {
   verifyEmail, setupAccount, resendVerification, login, loginVerify, loginResend,
-  googleConfig, googleSignIn,
   refresh, logout, me, heartbeat, changePassword, listMySessions,
   requestSessionCode, terminateMySession, setTwoStep, requestDeleteCode, deleteAccount,
 } from '../controllers/auth.controller.js';
@@ -25,11 +24,6 @@ r.post('/resend-verification', codeLimiter, validate(emailOnlySchema), resendVer
 r.post('/login', authLimiter, validate(loginSchema), login);
 r.post('/login/verify', codeLimiter, validate(loginVerifySchema), loginVerify);
 r.post('/login/resend', codeLimiter, validate(ticketSchema), loginResend);
-
-// Signing in with Google. The browser needs the public client id to draw the button, and
-// it is the same value the server checks every token against.
-r.get('/google/config', googleConfig);
-r.post('/google', authLimiter, validate(googleSignInSchema), googleSignIn);
 
 r.post('/refresh', refresh);
 r.post('/logout', logout);
