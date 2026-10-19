@@ -31,6 +31,13 @@ export default function AuthLayout({ title, subtitle, children, footer }) {
       <div className="animate-rise w-full max-w-md">
         <AuthMotif />
 
+        {/* The product's full name is stated here, in plain sight and before the sign-in
+            card, so the page identifies itself to anybody who opens it. */}
+        <div className="mb-5 text-center">
+          <h1 className="text-xl font-bold tracking-tight text-slate-900">School Management System</h1>
+          <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-brand-600">SMS Portal</p>
+        </div>
+
         <main className="glass rounded-3xl p-6 sm:p-8">
           <h2 className="text-2xl font-bold tracking-tight text-slate-900">{title}</h2>
           {subtitle ? <p className="mt-1.5 text-sm leading-relaxed text-slate-500">{subtitle}</p> : null}

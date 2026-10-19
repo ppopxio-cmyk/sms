@@ -1,0 +1,57 @@
+# Render Blueprint for the API.
+#
+# The service that is already running can keep its dashboard settings — this file is the
+# same configuration written down, and it is what Render reads if the service is ever
+# created from a Blueprint (Render → New → Blueprint).
+#
+# "sync: false" marks a value that must never live in Git. Render asks for it once, in the
+# dashboard, and keeps it there.
+
+services:
+  - type: web
+    name: sms-api
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # Not secret: written down here so the deploy is reproducible.
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 24.21.0
+      # Render sits behind one proxy. Raise this to 2 only if the client reaches the API
+      # through the Vercel rewrite and the audit trail shows the wrong address.
+      - key: TRUST_PROXY
+        value: 1
+      # Must match the site people open: it decides CORS, the CSRF check, and every link
+      # inside an email. No trailing slash.
+      - key: CLIENT_ORIGIN
+        value: https://sms-two-kappa.vercel.app
+      - key: MAIL_FROM_NAME
+        value: School Management System
+      - key: SMTP_USER
+        value: haile12michaell@gmail.com
+      - key: VAPID_SUBJECT
+        value: mailto:haile12michaell@gmail.com
+      - key: GOOGLE_CLIENT_ID
+        value: 352281617965-8g622pa9pfbmq1cvhppe6tgt047g2i2s.apps.googleusercontent.com
+
+      # Secrets: fill these in the Render dashboard.
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: CODE_HMAC_SECRET
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REFRESH_TOKEN
+        sync: false
