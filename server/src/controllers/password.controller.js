@@ -6,6 +6,7 @@ import { signTicket, readTicket } from '../services/token.service.js';
 import { checkCode } from '../services/code.service.js';
 import { sendCode } from '../services/codeDelivery.js';
 import { revokeAllForUser } from '../services/session.service.js';
+import { forgetUser } from '../services/user.service.js';
 import { sendPasswordChanged } from '../services/mail.service.js';
 import { audit } from '../services/audit.service.js';
 
@@ -44,8 +45,10 @@ export const resetPassword = asyncHandler(async (req, res) => {
   user.failedLogins = 0;
   user.lockUntil = undefined;
   user.emailVerified = true;
+  user.mustChangePassword = false;
   if (user.status === 'pending') user.status = 'active';
   await user.save();
+  forgetUser(user._id);
 
   await revokeAllForUser(user._id, 'password_reset');
   void sendPasswordChanged({ to: user.email, name: user.name });

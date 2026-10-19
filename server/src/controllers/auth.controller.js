@@ -3,13 +3,22 @@ import { User } from '../models/User.js';
 import { Session } from '../models/Session.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { ensureDeviceId, describeRequest } from '../utils/device.js';
+import { ensureDeviceId, describeRequest, deviceFingerprint, deviceKey } from '../utils/device.js';
 import { REFRESH_COOKIE, refreshCookieOptions, clearRefreshOptions } from '../utils/cookies.js';
 import { signAccess, signTicket, readTicket, sha256 } from '../services/token.service.js';
-import { checkCode } from '../services/code.service.js';
+import { checkCode, resendWaitMessage } from '../services/code.service.js';
 import { sendCode } from '../services/codeDelivery.js';
-import { createSession, rotateSession, revokeSession } from '../services/session.service.js';
-import { sendLoginAlert } from '../services/mail.service.js';
+import {
+  createSession,
+  rotateSession,
+  revokeSession,
+  deleteSessionRows,
+  deleteDeviceSessions,
+  deleteAllForUserExcept,
+} from '../services/session.service.js';
+import { isNewDevice, rememberDevice } from '../services/device.service.js';
+import { forgetUser } from '../services/user.service.js';
+import { sendLoginAlert, sendPasswordChanged } from '../services/mail.service.js';
 import { audit } from '../services/audit.service.js';
 
 // Used when the email does not exist, so a wrong email takes as long as a wrong password.
@@ -24,30 +33,20 @@ export const safeUser = (u) => ({
   role: u.role,
   emailVerified: u.emailVerified,
   twoStepEnabled: u.twoStepEnabled,
+  mustChangePassword: !!u.mustChangePassword,
 });
 
-async function startSession(req, res, user) {
-  const deviceId = ensureDeviceId(req, res);
+async function startSession(req, res, user, { deviceId, fingerprint }) {
   const info = await describeRequest(req);
-  const { session, refresh } = await createSession({ user, deviceId, info });
+  const { session, refresh } = await createSession({ user, deviceId, fingerprint, info });
   res.cookie(REFRESH_COOKIE, refresh, refreshCookieOptions(session.expiresAt.getTime() - Date.now()));
   await User.updateOne({ _id: user._id }, { lastLoginAt: new Date(), failedLogins: 0, $unset: { lockUntil: 1 } });
+  // This browser has now signed in, so the next sign-in from it is not "new".
+  void rememberDevice({ userId: user._id, key: deviceKey(fingerprint, deviceId), info }).catch(() => {});
   void sendLoginAlert({ to: user.email, name: user.name, ...info, at: new Date() });
   audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.login', targetType: 'session', targetId: session._id, meta: { browser: info.browser, os: info.os } });
   return { accessToken: signAccess(user, session._id), user: safeUser(user), session: { id: session._id } };
 }
-
-export const register = asyncHandler(async (req, res) => {
-  const { name, email, password } = req.body;
-  if (await User.exists({ email })) {
-    throw new AppError(409, 'EMAIL_TAKEN', 'An account with this email already exists. Try signing in.');
-  }
-  // The role is never taken from the request. Self-registered accounts start as TEACHER with no data access.
-  const user = await User.create({ name, email, passwordHash: await argon2.hash(password) });
-  await sendCode(user, 'email_verify');
-  audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.register', targetType: 'user', targetId: user._id });
-  res.status(201).json({ message: 'Account created. We sent a 6-digit code to your email.', email: user.email });
-});
 
 export const verifyEmail = asyncHandler(async (req, res) => {
   const { email, code } = req.body;
@@ -57,6 +56,13 @@ export const verifyEmail = asyncHandler(async (req, res) => {
   user.emailVerified = true;
   if (user.status === 'pending') user.status = 'active';
   await user.save();
+  forgetUser(user._id);
+
+  // The person just proved they read the mailbox from this browser, so the sign-in
+  // that follows counts as a known device and does not ask for a second code.
+  const info = await describeRequest(req);
+  await rememberDevice({ userId: user._id, key: deviceKey(deviceFingerprint(req), ensureDeviceId(req, res)), info }).catch(() => {});
+
   audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.email_verified', targetType: 'user', targetId: user._id });
   res.json({ message: 'Email confirmed. You can sign in now.' });
 });
@@ -87,7 +93,7 @@ export const login = asyncHandler(async (req, res) => {
     throw new AppError(401, 'INVALID_CREDENTIALS', 'That email or password is not right.');
   }
 
-  if (user.status === 'disabled') {
+  if (user.status === 'disabled' || user.deletedAt) {
     throw new AppError(403, 'ACCOUNT_DISABLED', 'This account is turned off. Please contact the administrator.');
   }
 
@@ -96,28 +102,38 @@ export const login = asyncHandler(async (req, res) => {
     throw new AppError(403, 'EMAIL_NOT_VERIFIED', 'Please confirm your email first. We sent you a code.', { email: user.email });
   }
 
-  if (user.twoStepEnabled) {
+  const deviceId = ensureDeviceId(req, res);
+  const fingerprint = deviceFingerprint(req);
+  const fresh = await isNewDevice(user._id, deviceKey(fingerprint, deviceId));
+
+  // A code is asked for when the account turned 2-step on, or when this browser has
+  // never signed in before.
+  if (user.twoStepEnabled || fresh) {
     await sendCode(user, 'login_2fa');
-    return res.json({ requires2fa: true, ticket: signTicket(user._id, 'login-2fa', '5m') });
+    return res.json({
+      requires2fa: true,
+      reason: user.twoStepEnabled ? 'twoStep' : 'newDevice',
+      ticket: signTicket(user._id, 'login-2fa', '5m'),
+    });
   }
 
-  res.json(await startSession(req, res, user));
+  res.json(await startSession(req, res, user, { deviceId, fingerprint }));
 });
 
 export const loginVerify = asyncHandler(async (req, res) => {
   const payload = readTicket(req.body.ticket, 'login-2fa');
   const user = await User.findById(payload.sub);
-  if (!user || user.status === 'disabled') {
+  if (!user || user.status === 'disabled' || user.deletedAt) {
     throw new AppError(401, 'TICKET_INVALID', 'That step has expired. Please start again.');
   }
   await checkCode(user._id, 'login_2fa', req.body.code);
-  res.json(await startSession(req, res, user));
+  res.json(await startSession(req, res, user, { deviceId: ensureDeviceId(req, res), fingerprint: deviceFingerprint(req) }));
 });
 
 export const loginResend = asyncHandler(async (req, res) => {
   const payload = readTicket(req.body.ticket, 'login-2fa');
   const user = await User.findById(payload.sub);
-  if (user && user.status !== 'disabled') await sendCode(user, 'login_2fa');
+  if (user && user.status !== 'disabled' && !user.deletedAt) await sendCode(user, 'login_2fa');
   res.json({ message: 'We sent a new code.' });
 });
 
@@ -128,8 +144,9 @@ export const refresh = asyncHandler(async (req, res) => {
   try {
     const { session, refresh: next } = await rotateSession(raw);
     const user = await User.findById(session.userId);
-    if (!user || user.status === 'disabled') {
+    if (!user || user.status === 'disabled' || user.deletedAt) {
       await revokeSession(session._id, { reason: 'account_unavailable' });
+      forgetUser(session.userId);
       throw new AppError(401, 'NO_SESSION', 'Please sign in.');
     }
     if (next) res.cookie(REFRESH_COOKIE, next, refreshCookieOptions(session.expiresAt.getTime() - Date.now()));
@@ -140,13 +157,15 @@ export const refresh = asyncHandler(async (req, res) => {
   }
 });
 
+// Signing out deletes the session row: the slot is freed and the database keeps no
+// stale "still signed in" row. The audit log is the history.
 export const logout = asyncHandler(async (req, res) => {
   const raw = req.cookies?.[REFRESH_COOKIE];
   if (raw) {
     const session = await Session.findOne({ refreshHash: sha256(raw) });
     if (session) {
-      await revokeSession(session._id, { by: session.userId, reason: 'logout' });
-      audit({ req, actorId: session.userId, action: 'auth.logout', targetType: 'session', targetId: session._id });
+      const ended = await deleteDeviceSessions(session.userId, { deviceId: session.deviceId, fingerprint: session.fingerprint });
+      audit({ req, actorId: session.userId, action: 'auth.logout', targetType: 'session', targetId: session._id, meta: { sessionsEnded: ended } });
     }
   }
   res.clearCookie(REFRESH_COOKIE, clearRefreshOptions);
@@ -155,8 +174,36 @@ export const logout = asyncHandler(async (req, res) => {
 
 export const me = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user.id);
-  if (!user) throw new AppError(401, 'SESSION_ENDED', 'This session was ended. Please sign in again.');
+  if (!user || user.deletedAt) throw new AppError(401, 'SESSION_ENDED', 'This session was ended. Please sign in again.');
   res.json({ user: safeUser(user) });
+});
+
+export const changePassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const user = await User.findById(req.user.id).select('+passwordHash');
+  if (!user || user.status === 'disabled' || user.deletedAt) {
+    throw new AppError(401, 'SESSION_ENDED', 'This account is not available. Please contact the administrator.');
+  }
+
+  if (!(await argon2.verify(user.passwordHash, currentPassword))) {
+    audit({ req, action: 'auth.password_change_failed', status: 'fail', targetType: 'user', targetId: user._id });
+    throw new AppError(400, 'WRONG_PASSWORD', 'That is not your current password.');
+  }
+  if (await argon2.verify(user.passwordHash, newPassword)) {
+    throw new AppError(400, 'SAME_PASSWORD', 'Pick a password that is different from your current one.');
+  }
+
+  user.passwordHash = await argon2.hash(newPassword);
+  user.passwordChangedAt = new Date();
+  user.mustChangePassword = false;
+  await user.save();
+  forgetUser(user._id);
+
+  // Every other device is signed out; the browser making the change stays in.
+  const ended = await deleteAllForUserExcept(user._id, req.user.sid);
+  void sendPasswordChanged({ to: user.email, name: user.name });
+  audit({ req, action: 'auth.password_changed', targetType: 'user', targetId: user._id, meta: { otherSessionsEnded: ended } });
+  res.json({ message: 'Password changed.', user: safeUser(user) });
 });
 
 // authenticate already refreshes lastSeenAt (at most once a minute), which is what makes "active now" work.
@@ -182,10 +229,25 @@ export const listMySessions = asyncHandler(async (req, res) => {
   });
 });
 
-export const revokeMySession = asyncHandler(async (req, res) => {
+// Signing one of your own devices out asks for a code first, so a borrowed laptop
+// cannot quietly kick your other devices off.
+export const requestSessionCode = asyncHandler(async (req, res) => {
   const session = await Session.findOne({ _id: req.valid.params.id, userId: req.user.id, status: 'active' });
   if (!session) throw new AppError(404, 'NOT_FOUND', 'That session was not found.');
-  await revokeSession(session._id, { by: req.user.id, reason: 'signed_out_from_list' });
+  const user = await User.findById(req.user.id);
+  if (!user) throw new AppError(401, 'SESSION_ENDED', 'Please sign in again.');
+
+  const sent = await sendCode(user, 'session_terminate');
+  if (!sent) throw new AppError(429, 'WAIT_BEFORE_RESEND', resendWaitMessage);
+  audit({ req, action: 'auth.session_signout_code_sent', targetType: 'session', targetId: session._id });
+  res.json({ message: 'We emailed you a code to confirm this.' });
+});
+
+export const terminateMySession = asyncHandler(async (req, res) => {
+  const session = await Session.findOne({ _id: req.valid.params.id, userId: req.user.id, status: 'active' });
+  if (!session) throw new AppError(404, 'NOT_FOUND', 'That session was not found.');
+  await checkCode(req.user.id, 'session_terminate', req.body.code);
+  await deleteSessionRows([session._id]);
   audit({ req, action: 'auth.session_signed_out', targetType: 'session', targetId: session._id });
   res.json({ message: 'That device was signed out.' });
 });

@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Fingerprint } from 'lucide-react';
@@ -6,26 +8,62 @@ import { formatEthiopian, timeAgo } from '../lib/ethiopianDate';
 import Card, { CardBody, CardHeader } from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
+import CodeInput from '../components/ui/CodeInput';
 import DeviceIcon from '../components/ui/DeviceIcon';
+import Modal from '../components/ui/Modal';
 import { Skeleton } from '../components/ui/Skeleton';
 import { EmptyState, ErrorState } from '../components/ui/StatePanel';
+import { useAuth } from '../store/auth';
 
 export default function Sessions() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const logout = useAuth((s) => s.logout);
+
+  const [target, setTarget] = useState(null);
+  const [code, setCode] = useState('');
+  const [shake, setShake] = useState(0);
 
   const sessions = useQuery({
     queryKey: ['my-sessions'],
     queryFn: async () => (await api.get('/auth/sessions')).data,
   });
 
-  const revoke = useMutation({
-    mutationFn: (id) => api.delete(`/auth/sessions/${id}`),
+  // Signing one of your own devices out asks for a code first, so a borrowed laptop
+  // cannot quietly kick your other devices off.
+  const askCode = useMutation({
+    mutationFn: (id) => api.post(`/auth/sessions/${id}/code`),
+    onSuccess: (res) => toast.success(res.data?.message || 'We emailed you a code.'),
+    onError: (err) => toast.error(errorMessage(err, 'We could not send a code.')),
+  });
+
+  const terminate = useMutation({
+    mutationFn: (values) => api.post(`/auth/sessions/${values.id}/terminate`, { code: values.code }),
     onSuccess: () => {
       toast.success('That device was signed out.');
+      setTarget(null);
+      setCode('');
       queryClient.invalidateQueries({ queryKey: ['my-sessions'] });
     },
-    onError: (err) => toast.error(errorMessage(err, 'We could not sign that device out.')),
+    onError: (err) => {
+      toast.error(errorMessage(err, 'We could not sign that device out.'));
+      if (err?.response?.data?.code === 'CODE_WRONG') {
+        setCode('');
+        setShake((n) => n + 1);
+      }
+    },
   });
+
+  const startSignOut = (session) => {
+    setTarget(session);
+    setCode('');
+    askCode.mutate(session.id);
+  };
+
+  const signOutThisDevice = async () => {
+    await logout();
+    navigate('/login', { replace: true });
+  };
 
   const rows = sessions.data?.sessions ?? [];
 
@@ -83,10 +121,10 @@ export default function Sessions() {
                 </div>
 
                 <Button
-                  variant={s.current ? 'secondary' : 'danger'}
+                  variant="danger"
                   size="sm"
-                  onClick={() => revoke.mutate(s.id)}
-                  loading={revoke.isPending && revoke.variables === s.id}
+                  onClick={() => (s.current ? signOutThisDevice() : startSignOut(s))}
+                  loading={!s.current && askCode.isPending && askCode.variables === s.id}
                   className="shrink-0"
                 >
                   {s.current ? 'Sign this one out' : 'Sign out'}
@@ -96,6 +134,53 @@ export default function Sessions() {
           )}
         </CardBody>
       </Card>
+
+      <Modal
+        open={!!target}
+        title="Confirm this sign-out"
+        subtitle={target ? `We emailed a 6-digit code to confirm signing out ${target.browser} on ${target.os}.` : ''}
+        onClose={() => {
+          setTarget(null);
+          setCode('');
+        }}
+        size="sm"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setTarget(null);
+                setCode('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              loading={terminate.isPending}
+              disabled={code.length !== 6}
+              onClick={() => terminate.mutate({ id: target.id, code })}
+            >
+              Sign that device out
+            </Button>
+          </>
+        }
+      >
+        <CodeInput value={code} onChange={setCode} disabled={terminate.isPending} shake={shake} />
+        <div className="mt-4 text-center text-sm text-slate-500">
+          {askCode.isPending ? (
+            <span>Sending a code…</span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => askCode.mutate(target.id)}
+              className="focus-ring rounded-lg font-semibold text-brand-600 hover:text-brand-700"
+            >
+              Send another code
+            </button>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }

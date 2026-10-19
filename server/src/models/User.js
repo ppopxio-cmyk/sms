@@ -14,6 +14,11 @@ const userSchema = new mongoose.Schema(
     lockUntil: Date,
     lastLoginAt: Date,
     passwordChangedAt: Date,
+    // Set when an administrator creates the account or hands out a temporary
+    // password. The person must choose their own password before anything else.
+    mustChangePassword: { type: Boolean, default: false },
+    // Soft delete: the account stops working but the audit trail keeps its history.
+    deletedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

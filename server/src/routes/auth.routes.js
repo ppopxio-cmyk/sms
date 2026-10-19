@@ -1,19 +1,20 @@
 import { Router } from 'express';
 import { authLimiter, codeLimiter } from '../middleware/rateLimit.js';
 import { validate } from '../middleware/validate.js';
-import { authenticate } from '../middleware/authenticate.js';
+import { authenticate, requirePasswordChanged } from '../middleware/authenticate.js';
 import {
-  registerSchema, emailOnlySchema, verifyEmailSchema, loginSchema,
-  loginVerifySchema, ticketSchema, idParamSchema,
+  emailOnlySchema, verifyEmailSchema, loginSchema, loginVerifySchema, ticketSchema,
+  changePasswordSchema, sessionConfirmSchema, idParamSchema,
 } from '../validators/auth.schemas.js';
 import {
-  register, verifyEmail, resendVerification, login, loginVerify, loginResend,
-  refresh, logout, me, heartbeat, listMySessions, revokeMySession,
+  verifyEmail, resendVerification, login, loginVerify, loginResend,
+  refresh, logout, me, heartbeat, changePassword, listMySessions,
+  requestSessionCode, terminateMySession,
 } from '../controllers/auth.controller.js';
 
 const r = Router();
 
-r.post('/register', authLimiter, validate(registerSchema), register);
+// There is no self-registration on purpose: an administrator creates every account.
 r.post('/verify-email', codeLimiter, validate(verifyEmailSchema), verifyEmail);
 r.post('/resend-verification', codeLimiter, validate(emailOnlySchema), resendVerification);
 
@@ -25,8 +26,25 @@ r.post('/refresh', refresh);
 r.post('/logout', logout);
 
 r.get('/me', authenticate, me);
-r.post('/heartbeat', authenticate, heartbeat);
-r.get('/sessions', authenticate, listMySessions);
-r.delete('/sessions/:id', authenticate, validate(idParamSchema, 'params'), revokeMySession);
+r.post('/change-password', authLimiter, authenticate, validate(changePasswordSchema), changePassword);
+r.post('/heartbeat', authenticate, requirePasswordChanged, heartbeat);
+r.get('/sessions', authenticate, requirePasswordChanged, listMySessions);
+r.post(
+  '/sessions/:id/code',
+  authenticate,
+  requirePasswordChanged,
+  codeLimiter,
+  validate(idParamSchema, 'params'),
+  requestSessionCode,
+);
+r.post(
+  '/sessions/:id/terminate',
+  authenticate,
+  requirePasswordChanged,
+  codeLimiter,
+  validate(idParamSchema, 'params'),
+  validate(sessionConfirmSchema),
+  terminateMySession,
+);
 
 export default r;

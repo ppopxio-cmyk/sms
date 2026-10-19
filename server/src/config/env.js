@@ -5,6 +5,12 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(5000),
   CLIENT_ORIGIN: z.url().transform((s) => s.replace(/\/+$/, '')),
+  // Optional extra origins, comma-separated. Useful when the dev server lands on
+  // another port, or when the site is served from a second domain in production.
+  CLIENT_ORIGINS: z
+    .string()
+    .optional()
+    .transform((s) => (s ? s.split(',').map((v) => v.trim().replace(/\/+$/, '')).filter(Boolean) : [])),
   TRUST_PROXY: z.coerce.number().default(0),
   MONGODB_URI: z.string().min(10),
   JWT_ACCESS_SECRET: z.string().min(32),
@@ -13,6 +19,8 @@ const schema = z.object({
   REFRESH_TTL_DAYS: z.coerce.number().default(7),
   REFRESH_ABSOLUTE_DAYS: z.coerce.number().default(30),
   CODE_TTL_MINUTES: z.coerce.number().default(5),
+  // How long somebody must wait between two codes for the same purpose.
+  CODE_RESEND_WAIT_SECONDS: z.coerce.number().default(120),
   MAX_DEVICES_USER: z.coerce.number().default(3),
   MAX_DEVICES_ADMIN: z.coerce.number().default(2),
   SMTP_USER: z.email(),

@@ -55,7 +55,7 @@ export default function AdminSessions() {
         <div className="flex items-center gap-3">
           {all.data ? (
             <Badge tone={all.data.onlineCount > 0 ? 'success' : 'neutral'}>
-              <span className="h-1.5 w-1.5 rounded-full bg-current" />
+              <span className="animate-pulse-dot h-1.5 w-1.5 rounded-full bg-current" />
               {all.data.onlineCount} online now
             </Badge>
           ) : null}
@@ -107,7 +107,14 @@ export default function AdminSessions() {
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-semibold text-slate-800">{s.user?.name}</p>
                         <RoleBadge role={s.user?.role} />
-                        {s.online ? <Badge tone="success">Online</Badge> : <Badge tone="neutral">Away</Badge>}
+                        {s.online ? (
+                          <Badge tone="success">
+                            <span className="animate-pulse-dot h-1.5 w-1.5 rounded-full bg-current" />
+                            Online
+                          </Badge>
+                        ) : (
+                          <Badge tone="neutral">Away</Badge>
+                        )}
                       </div>
                       <p className="mt-0.5 truncate text-xs text-slate-500">{s.user?.email}</p>
                       <p className="mt-0.5 truncate text-xs text-slate-500">

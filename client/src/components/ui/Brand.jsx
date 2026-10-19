@@ -15,8 +15,10 @@ export default function Brand({ size = 'md', subtitle = 'School Management Syste
         <GraduationCap className={s.icon} />
       </span>
       <div>
-        <p className={`${s.title} font-bold tracking-tight text-slate-900`}>
+        <p className={`${s.title} font-bold tracking-tight`}>
           <span className="text-brand-gradient">SMS</span>
+          <span className="text-slate-300"> - </span>
+          <span className="text-slate-700">PORTAL</span>
         </p>
         <p className={`${s.sub} text-slate-500`}>{subtitle}</p>
       </div>

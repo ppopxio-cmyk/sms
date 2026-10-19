@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { toast } from 'sonner';
 import { ArrowLeft, Lock, Mail } from 'lucide-react';
 import AuthLayout from '../components/layout/AuthLayout';
@@ -11,12 +10,10 @@ import Button from '../components/ui/Button';
 import Alert from '../components/ui/Alert';
 import CodeInput from '../components/ui/CodeInput';
 import { api, errorMessage } from '../lib/api';
+import { loginSchema, emailField } from '../lib/validation';
+import { FLOW_KEYS, clearFlow, writeFlow } from '../lib/session-flow';
+import useResendTimer, { formatWait } from '../lib/useResendTimer';
 import { useAuth } from '../store/auth';
-
-const schema = z.object({
-  email: z.string().trim().toLowerCase().email('Enter a valid email address.'),
-  password: z.string().min(1, 'Enter your password.'),
-});
 
 export default function Login() {
   const setSession = useAuth((s) => s.setSession);
@@ -27,17 +24,27 @@ export default function Login() {
   const [ticket, setTicket] = useState(null);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const [shake, setShake] = useState(0);
   const [serverError, setServerError] = useState(null);
   const [unverified, setUnverified] = useState(null);
+
+  // One countdown per journey, kept in sessionStorage so a refresh does not restart it.
+  const loginTimer = useResendTimer('login');
+  const verifyTimer = useResendTimer('verify-email');
 
   const {
     register,
     handleSubmit,
     getValues,
+    control,
     formState: { errors, isSubmitting },
-  } = useForm({ resolver: zodResolver(schema), defaultValues: { email: '', password: '' } });
+  } = useForm({ resolver: zodResolver(loginSchema), mode: 'onTouched', defaultValues: { email: '', password: '' } });
+
+  const email = useWatch({ control, name: 'email' }) ?? '';
+  const emailOk = email.length > 0 && emailField.safeParse(email).success;
 
   const finish = (data, greeting) => {
+    clearFlow(FLOW_KEYS.pendingVerify);
     setSession(data);
     toast.success(greeting);
     navigate(location.state?.from || '/dashboard', { replace: true });
@@ -52,13 +59,22 @@ export default function Login() {
         setTicket(data.ticket);
         setCode('');
         setStep('code');
-        toast.info('We emailed you a 6-digit sign-in code.');
+        loginTimer.start();
+        toast.info(
+          data.reason === 'newDevice'
+            ? 'This browser is new, so we emailed you a code.'
+            : 'We emailed you a 6-digit sign-in code.',
+        );
         return;
       }
       finish(data, `Welcome back, ${data.user.name.split(' ')[0]}.`);
     } catch (err) {
       if (err?.response?.data?.code === 'EMAIL_NOT_VERIFIED') {
-        setUnverified(err.response.data?.data?.email || getValues('email'));
+        const target = err.response.data?.data?.email || getValues('email');
+        setUnverified(target);
+        // Remember where the code went, so a refresh of the confirm page still knows.
+        writeFlow(FLOW_KEYS.pendingVerify, { email: target });
+        verifyTimer.start();
       }
       setServerError(errorMessage(err, 'We could not sign you in.'));
     }
@@ -69,9 +85,14 @@ export default function Login() {
     setBusy(true);
     try {
       const { data } = await api.post('/auth/login/verify', { ticket, code });
+      loginTimer.clear();
       finish(data, 'Signed in.');
     } catch (err) {
       setServerError(errorMessage(err));
+      if (err?.response?.data?.code === 'CODE_WRONG') {
+        setCode('');
+        setShake((n) => n + 1);
+      }
     } finally {
       setBusy(false);
     }
@@ -81,6 +102,7 @@ export default function Login() {
     setServerError(null);
     try {
       await api.post('/auth/login/resend', { ticket });
+      loginTimer.start();
       toast.success('We sent a new code.');
     } catch (err) {
       setServerError(errorMessage(err));
@@ -91,9 +113,13 @@ export default function Login() {
     return (
       <AuthLayout
         title="Enter your code"
-        subtitle="For your security this account uses a second step. The code works for 5 minutes."
+        subtitle="Enter the 6-digit code we emailed you."
         footer={
-          <button type="button" onClick={() => setStep('password')} className="focus-ring inline-flex items-center gap-1.5 rounded-lg font-semibold text-brand-600 hover:text-brand-700">
+          <button
+            type="button"
+            onClick={() => setStep('password')}
+            className="focus-ring inline-flex items-center gap-1.5 rounded-lg font-semibold text-brand-600 hover:text-brand-700"
+          >
             <ArrowLeft className="h-4 w-4" />
             Use a different account
           </button>
@@ -101,15 +127,21 @@ export default function Login() {
       >
         <div className="space-y-5">
           {serverError ? <Alert tone="danger">{serverError}</Alert> : null}
-          <CodeInput value={code} onChange={setCode} disabled={busy} />
-          <div className="flex items-center gap-3 text-sm">
+
+          <CodeInput value={code} onChange={setCode} disabled={busy} shake={shake} />
+
+          <div className="flex items-center gap-3">
             <Button onClick={onVerify} loading={busy} disabled={code.length !== 6} className="flex-1">
               Verify and sign in
             </Button>
-            <Button variant="ghost" onClick={resend}>
-              Resend
+            <Button variant="ghost" onClick={resend} disabled={busy || loginTimer.left > 0}>
+              {loginTimer.left > 0 ? formatWait(loginTimer.left) : 'Resend'}
             </Button>
           </div>
+
+          {loginTimer.left > 0 ? (
+            <p className="text-center text-xs text-slate-400">You can ask for another code in {formatWait(loginTimer.left)}.</p>
+          ) : null}
         </div>
       </AuthLayout>
     );
@@ -118,22 +150,19 @@ export default function Login() {
   return (
     <AuthLayout
       title="Welcome back"
-      subtitle="Sign in with the email address your school registered for you."
-      footer={
-        <span>
-          No account yet?{' '}
-          <Link to="/register" className="focus-ring rounded-lg font-semibold text-brand-600 hover:text-brand-700">
-            Create one
-          </Link>
-        </span>
-      }
+      footer={<span>Accounts are created by your school administrator.</span>}
     >
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
         {serverError ? <Alert tone="danger">{serverError}</Alert> : null}
+
         {unverified ? (
           <Alert tone="info" title="Confirm your email first">
             We sent a fresh code to {unverified}.{' '}
-            <Link to="/verify-email" state={{ email: unverified }} className="focus-ring rounded font-semibold underline">
+            <Link
+              to="/verify-email"
+              state={{ email: unverified }}
+              className="focus-ring rounded font-semibold underline"
+            >
               Enter it now
             </Link>
             .
@@ -141,14 +170,17 @@ export default function Login() {
         ) : null}
 
         <Field
-          label="Email address"
+          label="Gmail address"
           type="email"
           icon={Mail}
           autoComplete="email"
-          placeholder="you@school.edu.et"
+          placeholder="you@gmail.com"
+          status={emailOk ? 'ok' : undefined}
+          hint="Must end with @gmail.com"
           error={errors.email?.message}
           {...register('email')}
         />
+
         <Field
           label="Password"
           type="password"

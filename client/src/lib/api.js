@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { deviceFingerprint } from './fingerprint';
 
 // Vite proxies /api to the Express server, so this stays same-origin in dev
 // and works unchanged if the built site is served by the API in production.
@@ -24,7 +25,7 @@ export const setSessionHandlers = ({ refreshed, lost }) => {
 export const api = axios.create({
   baseURL: API_URL,
   withCredentials: true,
-  headers: { 'X-Requested-With': 'sms-web' },
+  headers: { 'X-Requested-With': 'sms-web', 'X-Device-Fingerprint': deviceFingerprint() },
 });
 
 api.interceptors.request.use((config) => {
@@ -41,7 +42,11 @@ let refreshInFlight = null;
 function refreshSession() {
   if (!refreshInFlight) {
     refreshInFlight = axios
-      .post(`${API_URL}/auth/refresh`, {}, { withCredentials: true, headers: { 'X-Requested-With': 'sms-web' } })
+      .post(
+        `${API_URL}/auth/refresh`,
+        {},
+        { withCredentials: true, headers: { 'X-Requested-With': 'sms-web', 'X-Device-Fingerprint': deviceFingerprint() } },
+      )
       .then((res) => res.data)
       .finally(() => {
         refreshInFlight = null;

@@ -180,7 +180,10 @@ export default function Dashboard() {
         </div>
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {MODULES.map((m) => (
-            <Card key={m.label} className="p-5">
+            <Card
+              key={m.label}
+              className="p-5 transition duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-brand-600/10"
+            >
               <div className="flex items-center gap-3">
                 <span className="glass-soft flex h-10 w-10 items-center justify-center rounded-xl text-brand-600">
                   <m.icon className="h-5 w-5" />

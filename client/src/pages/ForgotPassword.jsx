@@ -1,51 +1,60 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { toast } from 'sonner';
-import { ArrowLeft, KeyRound, Lock, Mail } from 'lucide-react';
+import { ArrowLeft, CircleCheck, KeyRound, Lock, Mail, TriangleAlert } from 'lucide-react';
 import AuthLayout from '../components/layout/AuthLayout';
 import Field from '../components/ui/Field';
 import Button from '../components/ui/Button';
 import Alert from '../components/ui/Alert';
 import CodeInput from '../components/ui/CodeInput';
+import PasswordMeter from '../components/ui/PasswordMeter';
 import { api, errorMessage } from '../lib/api';
-
-const emailSchema = z.object({ email: z.string().trim().toLowerCase().email('Enter a valid email address.') });
-
-const passwordSchema = z
-  .object({
-    password: z
-      .string()
-      .min(8, 'Use at least 8 characters.')
-      .max(128, 'That password is too long.')
-      .regex(/[A-Za-z]/, 'Add at least one letter.')
-      .regex(/[0-9]/, 'Add at least one number.'),
-    confirm: z.string(),
-  })
-  .refine((v) => v.password === v.confirm, { path: ['confirm'], message: 'The two passwords do not match.' });
+import { emailOnlySchema, resetPasswordSchema, emailField } from '../lib/validation';
+import { FLOW_KEYS, clearFlow, readFlow, writeFlow } from '../lib/session-flow';
+import useResendTimer, { formatWait } from '../lib/useResendTimer';
 
 const STEPS = { email: 1, code: 2, password: 3 };
 
+// The journey is kept in sessionStorage, so a refresh in the middle of it — while a
+// code is valid, or after it has been accepted — carries on from where it was.
 export default function ForgotPassword() {
   const navigate = useNavigate();
-  const [step, setStep] = useState('email');
-  const [email, setEmail] = useState('');
+  // Read once on mount: whatever the last refresh left behind.
+  const [saved] = useState(() => readFlow(FLOW_KEYS.reset));
+
+  const [step, setStep] = useState(saved?.step ?? 'email');
+  const [email, setEmail] = useState(saved?.email ?? '');
   const [code, setCode] = useState('');
-  const [resetToken, setResetToken] = useState(null);
+  const [resetToken, setResetToken] = useState(saved?.resetToken ?? null);
   const [busy, setBusy] = useState(false);
+  const [shake, setShake] = useState(0);
   const [error, setError] = useState(null);
-  const [wait, setWait] = useState(0);
+  const timer = useResendTimer('forgot-password');
 
+  const emailOk = email.length > 0 && emailField.safeParse(email).success;
+
+  const emailForm = useForm({
+    resolver: zodResolver(emailOnlySchema),
+    mode: 'onTouched',
+    defaultValues: { email: saved?.email ?? '' },
+  });
+  const passwordForm = useForm({
+    resolver: zodResolver(resetPasswordSchema),
+    mode: 'onTouched',
+    defaultValues: { password: '', confirm: '' },
+  });
+
+  const password = useWatch({ control: passwordForm.control, name: 'password' }) ?? '';
+  const confirm = useWatch({ control: passwordForm.control, name: 'confirm' }) ?? '';
+  const matches = confirm.length > 0 && password === confirm;
+
+  // Remember the step for the next refresh.
   useEffect(() => {
-    if (wait <= 0) return undefined;
-    const t = setTimeout(() => setWait((w) => w - 1), 1000);
-    return () => clearTimeout(t);
-  }, [wait]);
-
-  const emailForm = useForm({ resolver: zodResolver(emailSchema), defaultValues: { email: '' } });
-  const passwordForm = useForm({ resolver: zodResolver(passwordSchema), defaultValues: { password: '', confirm: '' } });
+    if (step === 'email') clearFlow(FLOW_KEYS.reset);
+    else writeFlow(FLOW_KEYS.reset, { step, email, resetToken: resetToken ?? null });
+  }, [step, email, resetToken]);
 
   const requestCode = async (values) => {
     setError(null);
@@ -53,7 +62,7 @@ export default function ForgotPassword() {
       await api.post('/auth/forgot-password', { email: values.email });
       setEmail(values.email);
       setCode('');
-      setWait(60);
+      timer.start();
       setStep('code');
       toast.success('If that email has an account, a code is on its way.');
     } catch (err) {
@@ -70,6 +79,10 @@ export default function ForgotPassword() {
       setStep('password');
     } catch (err) {
       setError(errorMessage(err));
+      if (err?.response?.data?.code === 'CODE_WRONG') {
+        setCode('');
+        setShake((n) => n + 1);
+      }
     } finally {
       setBusy(false);
     }
@@ -79,7 +92,7 @@ export default function ForgotPassword() {
     setError(null);
     try {
       await api.post('/auth/forgot-password', { email });
-      setWait(60);
+      timer.start();
       toast.success('We sent a new code.');
     } catch (err) {
       setError(errorMessage(err));
@@ -90,11 +103,15 @@ export default function ForgotPassword() {
     setError(null);
     try {
       const { data } = await api.post('/auth/reset-password', { resetToken, newPassword: values.password });
+      clearFlow(FLOW_KEYS.reset);
+      timer.clear();
       toast.success(data.message || 'Password changed.');
       navigate('/login', { replace: true });
     } catch (err) {
       setError(errorMessage(err));
       if (err?.response?.data?.code === 'TICKET_INVALID') {
+        clearFlow(FLOW_KEYS.reset);
+        timer.clear();
         setStep('email');
         setResetToken(null);
       }
@@ -107,9 +124,9 @@ export default function ForgotPassword() {
   };
 
   const titles = {
-    email: ['Reset your password', 'Tell us the email address on your account and we will send a 6-digit code.'],
-    code: ['Enter your code', `We sent a 6-digit code to ${email}. It works for 5 minutes.`],
-    password: ['Choose a new password', 'This also signs you out on every device, including this one.'],
+    email: ['Reset your password', null],
+    code: ['Enter your code', `Sent to ${email}`],
+    password: ['Choose a new password', 'You will be signed out on every device.'],
   };
 
   return (
@@ -125,7 +142,11 @@ export default function ForgotPassword() {
             </Link>
           </span>
         ) : (
-          <button type="button" onClick={back} className="focus-ring inline-flex items-center gap-1.5 rounded-lg font-semibold text-brand-600 hover:text-brand-700">
+          <button
+            type="button"
+            onClick={back}
+            className="focus-ring inline-flex items-center gap-1.5 rounded-lg font-semibold text-brand-600 hover:text-brand-700"
+          >
             <ArrowLeft className="h-4 w-4" />
             Go back
           </button>
@@ -134,20 +155,29 @@ export default function ForgotPassword() {
     >
       <div className="mb-6 flex items-center gap-2">
         {Object.values(STEPS).map((n) => (
-          <span key={n} className={`h-1.5 flex-1 rounded-full transition ${STEPS[step] >= n ? 'brand-gradient' : 'bg-slate-200'}`} />
+          <span
+            key={n}
+            className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${STEPS[step] >= n ? 'brand-gradient' : 'bg-slate-200'}`}
+          />
         ))}
       </div>
 
-      {error ? <Alert tone="danger" className="mb-4">{error}</Alert> : null}
+      {error ? (
+        <Alert tone="danger" className="mb-4">
+          {error}
+        </Alert>
+      ) : null}
 
       {step === 'email' ? (
         <form onSubmit={emailForm.handleSubmit(requestCode)} className="space-y-4" noValidate>
           <Field
-            label="Email address"
+            label="Gmail address"
             type="email"
             icon={Mail}
             autoComplete="email"
-            placeholder="you@school.edu.et"
+            placeholder="you@gmail.com"
+            status={emailOk ? 'ok' : undefined}
+            hint="Must end with @gmail.com"
             error={emailForm.formState.errors.email?.message}
             {...emailForm.register('email')}
           />
@@ -159,12 +189,16 @@ export default function ForgotPassword() {
 
       {step === 'code' ? (
         <div className="space-y-5">
-          <CodeInput value={code} onChange={setCode} disabled={busy} />
+          <CodeInput value={code} onChange={setCode} disabled={busy} shake={shake} />
+
           <Button onClick={verifyCode} size="lg" loading={busy} disabled={code.length !== 6} className="w-full">
             Verify code
           </Button>
+
           <div className="text-center text-sm text-slate-500">
-            {wait > 0 ? <span>You can ask for another code in {wait}s.</span> : (
+            {timer.left > 0 ? (
+              <span>You can ask for another code in {formatWait(timer.left)}.</span>
+            ) : (
               <button type="button" onClick={resend} className="focus-ring rounded-lg font-semibold text-brand-600 hover:text-brand-700">
                 Send a new code
               </button>
@@ -180,19 +214,34 @@ export default function ForgotPassword() {
             type="password"
             icon={Lock}
             autoComplete="new-password"
-            placeholder="At least 8 characters"
+            placeholder="Choose a new password"
             error={passwordForm.formState.errors.password?.message}
             {...passwordForm.register('password')}
-          />
+          >
+            <PasswordMeter value={password} className="mt-3" />
+          </Field>
+
           <Field
-            label="Confirm new password"
+            label="Repeat new password"
             type="password"
             icon={KeyRound}
             autoComplete="new-password"
             placeholder="Type it again"
-            error={passwordForm.formState.errors.confirm?.message}
+            error={confirm.length === 0 ? passwordForm.formState.errors.confirm?.message : undefined}
             {...passwordForm.register('confirm')}
-          />
+          >
+            {confirm.length > 0 ? (
+              <p
+                className={`animate-rise mt-1.5 flex items-center gap-1.5 text-xs font-semibold ${
+                  matches ? 'text-emerald-600' : 'text-rose-500'
+                }`}
+              >
+                {matches ? <CircleCheck className="animate-pop h-3.5 w-3.5" /> : <TriangleAlert className="h-3.5 w-3.5" />}
+                {matches ? 'Passwords match' : 'Passwords do not match'}
+              </p>
+            ) : null}
+          </Field>
+
           <Button type="submit" size="lg" loading={passwordForm.formState.isSubmitting} className="w-full">
             Save new password
           </Button>

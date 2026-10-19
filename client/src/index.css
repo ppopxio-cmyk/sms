@@ -156,12 +156,87 @@ body {
   animation: fade-in 0.3s ease both;
 }
 
+/* Motion. Every one of these is switched off for people who ask for less motion. */
+.animate-pop {
+  animation: pop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes pop {
+  0% { transform: scale(0.55); opacity: 0; }
+  60% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+.animate-shake {
+  animation: shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@keyframes shake {
+  10%, 90% { transform: translateX(-2px); }
+  20%, 80% { transform: translateX(4px); }
+  30%, 50%, 70% { transform: translateX(-7px); }
+  40%, 60% { transform: translateX(7px); }
+}
+
+.animate-float {
+  animation: float 5.5s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(-2deg); }
+}
+
+.animate-bob {
+  animation: bob 3.6s ease-in-out infinite;
+}
+
+@keyframes bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-7px); }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 3s ease-out infinite;
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.85); opacity: 0.5; }
+  70%, 100% { transform: scale(1.3); opacity: 0; }
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 1.8s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+.animate-sweep {
+  background-size: 220% 100%;
+  animation: sweep 7s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .bg-ambient::before,
   .bg-ambient::after,
   .skeleton::after,
   .animate-rise,
-  .animate-fade {
+  .animate-fade,
+  .animate-pop,
+  .animate-shake,
+  .animate-float,
+  .animate-bob,
+  .animate-pulse-ring,
+  .animate-pulse-dot,
+  .animate-sweep {
     animation: none !important;
   }
 }

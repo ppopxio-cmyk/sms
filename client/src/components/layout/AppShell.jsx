@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Fingerprint, LayoutDashboard, LogOut, Menu, ShieldCheck, X } from 'lucide-react';
+import { Fingerprint, LayoutDashboard, LogOut, Menu, ShieldCheck, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../store/auth';
 import Brand from '../ui/Brand';
@@ -10,6 +10,7 @@ import { formatEthiopian } from '../../lib/ethiopianDate';
 const NAV = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/sessions', label: 'My devices', icon: Fingerprint },
+  { to: '/users', label: 'Users', icon: Users, roles: ['ADMIN'] },
   { to: '/admin/sessions', label: 'All sessions', icon: ShieldCheck, roles: ['ADMIN'] },
 ];
 
@@ -124,7 +125,7 @@ export default function AppShell() {
 
       <footer className="mx-auto max-w-6xl px-4 pb-10 sm:px-6">
         <p className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-          <Badge tone="neutral">SMS</Badge>
+          <Badge tone="neutral">SMS - PORTAL</Badge>
           <span>All times shown in the Ethiopian calendar, Africa/Addis_Ababa.</span>
         </p>
       </footer>

@@ -3,7 +3,23 @@ import { UAParser } from 'ua-parser-js';
 import { DEVICE_COOKIE, deviceCookieOptions } from './cookies.js';
 
 const UUID = /^[0-9a-f-]{36}$/i;
+const FINGERPRINT = /^[0-9a-f]{16,64}$/;
 let geo;
+
+// The client hashes a few stable browser signals into a short hex string. Anything
+// that does not look exactly like one is ignored, so a caller cannot push arbitrary
+// text into the database through this header.
+export function deviceFingerprint(req) {
+  const raw = String(req.get('x-device-fingerprint') || '')
+    .trim()
+    .toLowerCase();
+  return FINGERPRINT.test(raw) ? raw : null;
+}
+
+// One slot per browser. The fingerprint is the better signal because clearing the
+// device cookie cannot move you into a free slot, but the cookie is used whenever
+// the client does not send one, so older clients still work.
+export const deviceKey = (fingerprint, deviceId) => fingerprint || `cookie:${deviceId}`;
 
 export function ensureDeviceId(req, res) {
   let id = req.cookies?.[DEVICE_COOKIE];

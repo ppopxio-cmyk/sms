@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { api, bootstrapSession, setAccessToken, setSessionHandlers } from '../lib/api';
+import { clearFlows } from '../lib/session-flow';
 
 export const useAuth = create((set) => ({
   // loading -> the splash screen, so nobody ever sees a flash of the login page
@@ -33,6 +34,7 @@ export const useAuth = create((set) => ({
     } catch {
       // even if the call fails the local session is cleared below
     }
+    clearFlows();
     setAccessToken(null);
     set({ user: null, status: 'guest' });
   },

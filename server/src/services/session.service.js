@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { env } from '../config/env.js';
 import { Session } from '../models/Session.js';
 import { AppError } from '../utils/AppError.js';
+import { deviceKey } from '../utils/device.js';
 import { newRefreshToken, sha256 } from './token.service.js';
 import { audit } from './audit.service.js';
 
@@ -33,13 +34,16 @@ export async function isSessionActive(sid, userId) {
   return ok;
 }
 
-export async function createSession({ user, deviceId, info }) {
+export async function createSession({ user, deviceId, fingerprint, info }) {
   const now = Date.now();
-  const live = (await Session.find({ userId: user._id, status: 'active' }).select('deviceId expiresAt').lean()).filter(
+  const key = deviceKey(fingerprint, deviceId);
+  const live = (await Session.find({ userId: user._id, status: 'active' }).select('deviceId fingerprint expiresAt').lean()).filter(
     (s) => s.expiresAt.getTime() > now,
   );
   const limit = deviceLimitFor(user.role);
-  const otherDevices = new Set(live.filter((s) => s.deviceId !== deviceId).map((s) => s.deviceId));
+  // Count other browsers, never this one, so signing in again on the same browser
+  // is always allowed and simply takes that browser's slot back.
+  const otherDevices = new Set(live.map((s) => deviceKey(s.fingerprint, s.deviceId)).filter((k) => k !== key));
   if (otherDevices.size >= limit) {
     throw new AppError(
       403,
@@ -48,24 +52,50 @@ export async function createSession({ user, deviceId, info }) {
     );
   }
   // Signing in again on the same browser replaces its old session instead of using a new slot.
-  await Promise.all(
-    live
-      .filter((s) => s.deviceId === deviceId)
-      .map(async (s) => {
-        await Session.deleteOne({ _id: s._id });
-        forgetSession(s._id);
-      }),
+  await deleteSessionRows(
+    live.filter((s) => deviceKey(s.fingerprint, s.deviceId) === key).map((s) => s._id),
   );
   const refresh = newRefreshToken();
   const session = await Session.create({
     userId: user._id,
     deviceId,
+    fingerprint: fingerprint ?? undefined,
     refreshHash: sha256(refresh),
     ...info,
     expiresAt: new Date(now + env.REFRESH_TTL_DAYS * DAY),
     absoluteExpiresAt: new Date(now + env.REFRESH_ABSOLUTE_DAYS * DAY),
   });
   return { session, refresh };
+}
+
+// Deleting, not revoking. A signed-out session should hold no slot and leave no row
+// behind; the audit log is where the history of it lives.
+export async function deleteSessionRows(ids) {
+  await Promise.all(
+    ids.map(async (id) => {
+      await Session.deleteOne({ _id: id });
+      forgetSession(id);
+    }),
+  );
+  return ids.length;
+}
+
+// Everything belonging to one browser for one person.
+export async function deleteDeviceSessions(userId, { deviceId, fingerprint }) {
+  const key = deviceKey(fingerprint, deviceId);
+  const rows = await Session.find({ userId }).select('deviceId fingerprint').lean();
+  return deleteSessionRows(rows.filter((s) => deviceKey(s.fingerprint, s.deviceId) === key).map((s) => s._id));
+}
+
+export async function deleteAllForUser(userId) {
+  const rows = await Session.find({ userId }).select('_id').lean();
+  return deleteSessionRows(rows.map((s) => s._id));
+}
+
+// Used when a password changes: the device making the change stays signed in.
+export async function deleteAllForUserExcept(userId, keepSessionId) {
+  const rows = await Session.find({ userId }).select('_id').lean();
+  return deleteSessionRows(rows.filter((s) => String(s._id) !== String(keepSessionId)).map((s) => s._id));
 }
 
 export async function revokeSession(id, { by, reason } = {}) {

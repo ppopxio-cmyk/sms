@@ -10,12 +10,13 @@ import { SkeletonPage } from './components/ui/Skeleton';
 // login — including anything chart-heavy later — is split out of the first
 // download.
 import Login from './pages/Login.jsx';
-import Register from './pages/Register.jsx';
 import VerifyEmail from './pages/VerifyEmail.jsx';
 import ForgotPassword from './pages/ForgotPassword.jsx';
+import SetPassword from './pages/SetPassword.jsx';
 
 const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 const Sessions = lazy(() => import('./pages/Sessions.jsx'));
+const Users = lazy(() => import('./pages/Users.jsx'));
 const AdminSessions = lazy(() => import('./pages/AdminSessions.jsx'));
 const NotFound = lazy(() => import('./pages/NotFound.jsx'));
 
@@ -38,18 +39,22 @@ export default function App() {
       }
     >
       <Routes>
+        {/* There is no sign-up page on purpose: an administrator creates every account. */}
         <Route element={<GuestRoute />}>
           <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
           <Route path="/verify-email" element={<VerifyEmail />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
         </Route>
 
         <Route element={<ProtectedRoute />}>
+          {/* Full screen, no navigation: nothing else opens until this is finished. */}
+          <Route path="/set-password" element={<SetPassword />} />
+
           <Route element={<AppShell />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/sessions" element={<Sessions />} />
             <Route element={<RequireRole roles={['ADMIN']} />}>
+              <Route path="/users" element={<Users />} />
               <Route path="/admin/sessions" element={<AdminSessions />} />
             </Route>
           </Route>

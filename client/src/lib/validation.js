@@ -1,0 +1,99 @@
+import { z } from 'zod';
+
+// These mirror server/src/validators/auth.schemas.js exactly. If they ever drift,
+// the client would either block something the API accepts or promise something
+// the API rejects, so change both together.
+
+const GMAIL = /^[a-z0-9][a-z0-9._%+-]*@gmail\.com$/;
+
+export const emailField = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .email('Enter a valid email address.')
+  .max(254, 'That email is too long.')
+  .refine((value) => GMAIL.test(value), 'Use a Gmail address ending in @gmail.com.');
+
+export const passwordField = z
+  .string()
+  .min(8, 'Use at least 8 characters.')
+  .max(128, 'That password is too long.')
+  .regex(/[A-Za-z]/, 'Add at least one letter.')
+  .regex(/[0-9]/, 'Add at least one number.');
+
+export const nameField = z
+  .string()
+  .trim()
+  .min(5, 'Enter your full name, at least 5 characters.')
+  .max(100, 'That name is too long.')
+  .refine((value) => {
+    const words = value.split(/\s+/).filter(Boolean);
+    return words.length >= 2 && words.every((word) => word.replace(/[^\p{L}]/gu, '').length >= 2);
+  }, 'Enter your first name and your last name.');
+
+export const loginSchema = z.object({
+  email: emailField,
+  password: z.string().min(1, 'Enter your password.'),
+});
+
+export const emailOnlySchema = z.object({ email: emailField });
+
+export const resetPasswordSchema = z
+  .object({ password: passwordField, confirm: z.string().min(1, 'Repeat your new password.') })
+  .refine((v) => v.password === v.confirm, { path: ['confirm'], message: 'The two passwords do not match.' });
+
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Enter your current password.'),
+    password: passwordField,
+    confirm: z.string().min(1, 'Repeat your new password.'),
+  })
+  .refine((v) => v.password === v.confirm, { path: ['confirm'], message: 'The two passwords do not match.' });
+
+// Accounts are created by an administrator, never by the person themselves.
+export const ROLES = ['ADMIN', 'REGISTRAR', 'TEACHER', 'ACCOUNTANT'];
+
+export const createUserSchema = z
+  .object({
+    name: nameField,
+    email: emailField,
+    role: z.enum(ROLES),
+    password: passwordField,
+    confirm: z.string().min(1, 'Repeat the temporary password.'),
+  })
+  .refine((v) => v.password === v.confirm, { path: ['confirm'], message: 'The two passwords do not match.' });
+
+export const updateUserSchema = z.object({
+  name: nameField,
+  role: z.enum(ROLES),
+  status: z.enum(['active', 'disabled']),
+  twoStepEnabled: z.boolean(),
+});
+
+export const tempPasswordSchema = z
+  .object({ password: passwordField, confirm: z.string().min(1, 'Repeat the temporary password.') })
+  .refine((v) => v.password === v.confirm, { path: ['confirm'], message: 'The two passwords do not match.' });
+
+// The first three are exactly what the API requires, so a full green meter means
+// the server will accept the password. The last two only add strength.
+export const PASSWORD_RULES = [
+  { id: 'length', label: '8 or more characters', required: true, test: (v) => v.length >= 8 },
+  { id: 'letter', label: 'One letter', required: true, test: (v) => /[A-Za-z]/.test(v) },
+  { id: 'number', label: 'One number', required: true, test: (v) => /[0-9]/.test(v) },
+  { id: 'long', label: '12 or more characters', required: false, test: (v) => v.length >= 12 },
+  { id: 'symbol', label: 'One symbol', required: false, test: (v) => /[^A-Za-z0-9]/.test(v) },
+];
+
+const LABELS = ['Too short', 'Weak', 'Fair', 'Good', 'Strong'];
+
+export function meterState(value = '') {
+  const rules = PASSWORD_RULES.map((rule) => ({ ...rule, ok: rule.test(value) }));
+  const required = rules.filter((r) => r.required);
+  const okRequired = required.filter((r) => r.ok).length;
+  const bonus = rules.filter((r) => !r.required && r.ok).length;
+
+  let score = okRequired; // 0..3 from the required rules
+  if (okRequired === required.length && bonus > 0) score = 4; // bonus pushes it to Strong
+
+  return { rules, score, max: 4, label: LABELS[score], valid: okRequired === required.length };
+}

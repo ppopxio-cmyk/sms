@@ -4,6 +4,11 @@ const sessionSchema = new mongoose.Schema(
   {
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     deviceId: { type: String, required: true },
+    // An approximate browser fingerprint sent by the client. It is only ever used
+    // to count device slots and to replace a browser's own older session, never to
+    // decide who somebody is: a fingerprint is easy to fake or to change (see the
+    // security checklist, section 9).
+    fingerprint: { type: String },
     refreshHash: { type: String, required: true, index: true },
     prevRefreshHash: { type: String, index: true },
     rotatedAt: Date,

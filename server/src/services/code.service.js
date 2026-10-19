@@ -4,7 +4,10 @@ import { VerificationCode } from '../models/VerificationCode.js';
 import { AppError } from '../utils/AppError.js';
 
 const MAX_TRIES = 5;
-const RESEND_WAIT_MS = 60_000;
+const RESEND_WAIT_MS = env.CODE_RESEND_WAIT_SECONDS * 1000;
+
+const waits = `${Math.round(env.CODE_RESEND_WAIT_SECONDS / 60)} minutes`;
+export const resendWaitMessage = `Please wait ${waits} before asking for another code.`;
 
 const keyed = (userId, purpose, code) =>
   crypto.createHmac('sha256', env.CODE_HMAC_SECRET).update(`${userId}:${purpose}:${code}`).digest('hex');
@@ -12,7 +15,7 @@ const keyed = (userId, purpose, code) =>
 export async function issueCode(user, purpose) {
   const existing = await VerificationCode.findOne({ userId: user._id, purpose }).select('lastSentAt').lean();
   if (existing && Date.now() - existing.lastSentAt.getTime() < RESEND_WAIT_MS) {
-    throw new AppError(429, 'WAIT_BEFORE_RESEND', 'Please wait a minute before asking for another code.');
+    throw new AppError(429, 'WAIT_BEFORE_RESEND', `Please wait ${waits} before asking for another code.`);
   }
   const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
   await VerificationCode.findOneAndUpdate(
