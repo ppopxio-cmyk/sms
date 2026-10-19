@@ -8,6 +8,7 @@ import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { MAIL_TRANSPORT, verifyMail } from './services/mail.service.js';
 import { isAllowedOrigin } from './utils/origin.js';
+import { isPrivateAddress } from './utils/geo.js';
 import { globalLimiter } from './middleware/rateLimit.js';
 import { csrfGuard } from './middleware/csrf.js';
 import { notFound, errorHandler } from './middleware/error.js';
@@ -17,6 +18,25 @@ export function createApp() {
   const app = express();
   app.disable('x-powered-by');
   if (env.TRUST_PROXY) app.set('trust proxy', env.TRUST_PROXY);
+
+  // Express can only name the nearest hop, and behind the host that is a private address
+  // like 10.192.117.149 - unroutable, unplaceable on a map, and shared by everybody. The
+  // edge in front states the caller's own address in a header of its own, which a caller
+  // cannot forge because the edge overwrites it. Everything that cares about "which
+  // address is this" (rate limits, sign-in alerts) reads that instead.
+  app.use((req, _res, next) => {
+    const edge = String(req.get('cf-connecting-ip') || req.get('true-client-ip') || '')
+      .trim()
+      .replace(/^::ffff:/, '');
+    if (edge && !isPrivateAddress(edge)) {
+      try {
+        Object.defineProperty(req, 'ip', { value: edge, configurable: true, enumerable: true, writable: true });
+      } catch {
+        // Express's own answer stays in place; the address is still improved elsewhere.
+      }
+    }
+    next();
+  });
 
   app.use(helmet());
   // CORS uses the exact same origin test as the CSRF guard, so a request can
@@ -50,18 +70,9 @@ export function createApp() {
   });
   app.get('/api/health', (req, res) => res.json({ ok: true }));
 
-  // Temporary: what the service can see about the connection in front of it, so the real
-  // client address can be picked out of the chain. Headers that could carry secrets are
-  // left out, and nothing but the caller's own address is ever returned.
-  app.get('/api/health/ip', (req, res) => {
-    const headers = {};
-    for (const [name, value] of Object.entries(req.headers)) {
-      const key = name.toLowerCase();
-      if (key === 'cookie' || key === 'authorization') continue;
-      if (key.startsWith('x-') || key.startsWith('cf-') || key === 'forwarded') headers[key] = String(value).slice(0, 200);
-    }
-    res.json({ ip: req.ip, ips: req.ips, trust: env.TRUST_PROXY ?? null, socket: req.socket?.remoteAddress, headers });
-  });
+  // What this service thinks the caller's address is. Handy when a sign-in says "unknown
+  // place": it shows whether the address arrived at all, without echoing anything else.
+  app.get('/api/health/ip', (req, res) => res.json({ ip: req.ip }));
 
   // Which way mail leaves this server, and whether it can authenticate at this moment.
   // That one answer decides whether a code or a link can reach anybody, and reading it
