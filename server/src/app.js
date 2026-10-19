@@ -52,15 +52,25 @@ export function createApp() {
 
   // Which way mail leaves this server, and whether it can authenticate at this moment.
   // That one answer decides whether a code or a link can reach anybody, and reading it
-  // from the running service beats guessing from logs. No secret is ever returned.
+  // from the running service beats guessing from logs. No secret is ever returned: only
+  // the transport, a masked sender, and the names of any Google variables that are absent.
   app.get('/api/health/mail', async (req, res) => {
+    const missing = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN'].filter(
+      (name) => !String(process.env[name] ?? '').trim(),
+    );
+
     try {
       const info = await verifyMail();
       const account = info?.address ? info.address.replace(/^(.).*?(@.*)$/, '$1***$2') : null;
-      res.json({ ok: true, transport: MAIL_TRANSPORT, account });
+      res.json({ ok: true, transport: MAIL_TRANSPORT, account, missingGoogleVars: missing });
     } catch (err) {
       logger.error({ err: err.message }, 'mail health check failed');
-      res.status(503).json({ ok: false, transport: MAIL_TRANSPORT, reason: String(err.message).slice(0, 160) });
+      res.status(503).json({
+        ok: false,
+        transport: MAIL_TRANSPORT,
+        reason: String(err.message).slice(0, 160),
+        missingGoogleVars: missing,
+      });
     }
   });
   app.use('/api', globalLimiter, csrfGuard, routes);
