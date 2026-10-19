@@ -43,6 +43,9 @@ const adminPassword = z.string().min(1, 'Enter your password.').max(128);
 export const emailOnlySchema = z.strictObject({ email });
 // Confirming an email carries a link with the token in it, never a typed code.
 export const verifyEmailSchema = z.strictObject({ token: ticket });
+// The password-reset code is typed together with the address it was sent to, so the
+// reset step keeps its own schema; reusing the link schema rejected every attempt.
+export const verifyResetCodeSchema = z.strictObject({ email, code });
 // Finishing the account: the name and the password are both chosen by the person who
 // opened the link in their own mailbox.
 export const setupAccountSchema = z.strictObject({ ticket, name, password });
