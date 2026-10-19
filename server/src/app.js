@@ -68,7 +68,9 @@ export function createApp() {
     res.set('Cache-Control', 'no-store'); // private data must never sit in a browser or proxy cache
     next();
   });
-  app.get('/api/health', (req, res) => res.json({ ok: true }));
+  app.get('/api/health', (req, res) =>
+    res.json({ ok: true, commit: process.env.RENDER_GIT_COMMIT?.slice(0, 7) || null }),
+  );
 
   // What this service thinks the caller's address is. Handy when a sign-in says "unknown
   // place": it shows whether the address arrived at all, without echoing anything else.
