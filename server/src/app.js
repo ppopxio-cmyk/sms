@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import pinoHttp from 'pino-http';
 import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
+import { MAIL_TRANSPORT, verifyMail } from './services/mail.service.js';
 import { isAllowedOrigin } from './utils/origin.js';
 import { globalLimiter } from './middleware/rateLimit.js';
 import { csrfGuard } from './middleware/csrf.js';
@@ -48,6 +49,20 @@ export function createApp() {
     next();
   });
   app.get('/api/health', (req, res) => res.json({ ok: true }));
+
+  // Which way mail leaves this server, and whether it can authenticate at this moment.
+  // That one answer decides whether a code or a link can reach anybody, and reading it
+  // from the running service beats guessing from logs. No secret is ever returned.
+  app.get('/api/health/mail', async (req, res) => {
+    try {
+      const info = await verifyMail();
+      const account = info?.address ? info.address.replace(/^(.).*?(@.*)$/, '$1***$2') : null;
+      res.json({ ok: true, transport: MAIL_TRANSPORT, account });
+    } catch (err) {
+      logger.error({ err: err.message }, 'mail health check failed');
+      res.status(503).json({ ok: false, transport: MAIL_TRANSPORT, reason: String(err.message).slice(0, 160) });
+    }
+  });
   app.use('/api', globalLimiter, csrfGuard, routes);
 
   app.use(notFound);
