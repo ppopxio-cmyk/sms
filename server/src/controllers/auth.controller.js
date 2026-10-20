@@ -53,10 +53,12 @@ async function startSession(req, res, user, { deviceId, fingerprint }) {
   await User.updateOne({ _id: user._id }, { lastLoginAt: new Date(), failedLogins: 0, $unset: { lockUntil: 1 } });
   // This browser has now signed in, so the next sign-in from it is not "new".
   void rememberDevice({ userId: user._id, key: deviceKey(fingerprint, deviceId), info }).catch(() => {});
-  void sendLoginAlert({ to: user.email, name: user.name, ...info, at: new Date() });
+  // A name the person gave this browser is what the alert should say, not the system label.
+  const detail = { ...info, deviceLabel: session.deviceLabel };
+  void sendLoginAlert({ to: user.email, name: user.name, ...detail, at: new Date() });
   // Open tabs and other devices hear about this at once; the administrator is told when
   // it is somebody else. The browser that just signed in is left out of its own notice.
-  void notifySignIn({ user, sid: session._id, deviceKey: deviceKey(fingerprint, deviceId), info }).catch(() => {});
+  void notifySignIn({ user, sid: session._id, deviceKey: deviceKey(fingerprint, deviceId), info: detail }).catch(() => {});
   audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.login', targetType: 'session', targetId: session._id, meta: { browser: info.browser, os: info.os } });
   return { accessToken: signAccess(user, session._id), user: safeUser(user), session: { id: session._id } };
 }

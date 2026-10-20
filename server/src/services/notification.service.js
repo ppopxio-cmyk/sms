@@ -46,7 +46,7 @@ export async function notifyAdmins(entry) {
 
 const describe = (info) => {
   const system = [info.browser, info.os].filter(Boolean).join(' on ');
-  return [info.deviceName, system].filter(Boolean).join(' · ') || 'an unknown device';
+  return [info.deviceLabel || info.deviceName, system].filter(Boolean).join(' · ') || 'an unknown device';
 };
 
 // An account can confirm its email before its owner has chosen a name, so a notice must

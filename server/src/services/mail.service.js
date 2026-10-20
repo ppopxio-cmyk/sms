@@ -142,8 +142,8 @@ export function sendCodeEmail({ to, name, code, purpose }) {
   });
 }
 
-export function sendLoginAlert({ to, name, ip, browser, os, location, deviceName, at }) {
-  const device = [deviceName, [browser, os].filter(Boolean).join(' on ')].filter(Boolean).join(' · ');
+export function sendLoginAlert({ to, name, ip, browser, os, location, deviceName, deviceLabel, at }) {
+  const device = [deviceLabel || deviceName, [browser, os].filter(Boolean).join(' on ')].filter(Boolean).join(' · ');
   const body =
     para(`Hi ${esc(name)},<br>You just signed in to your account. If this was you, no action is needed.`) +
     detailCard(
