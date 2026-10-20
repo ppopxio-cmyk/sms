@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 const SIZES = { sm: 'sm:max-w-sm', md: 'sm:max-w-lg', lg: 'sm:max-w-2xl' };
@@ -17,7 +18,9 @@ export default function Modal({ open, title, subtitle, onClose, children, footer
 
   if (!open) return null;
 
-  return (
+  // A dialog belongs to the page, not to the card it happens to be written inside. Several
+  // panels use backdrop blur, which would otherwise trap a fixed overlay inside them.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6">
       {dismissible ? (
         <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 cursor-default bg-slate-900/40 backdrop-blur-sm" />
@@ -52,6 +55,7 @@ export default function Modal({ open, title, subtitle, onClose, children, footer
 
         {footer ? <footer className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-5">{footer}</footer> : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
