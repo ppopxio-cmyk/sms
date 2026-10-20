@@ -5,20 +5,36 @@ import { validate } from '../middleware/validate.js';
 import {
   idParamSchema, createUserSchema, updateUserSchema, removeUserSchema, listUsersQuerySchema,
 } from '../validators/auth.schemas.js';
-import { listSessions, terminateSession } from '../controllers/admin.controller.js';
+import {
+  overviewQuerySchema, listSessionsQuerySchema, listAuditQuerySchema,
+  exportUsersQuerySchema, exportSessionsQuerySchema, exportAuditQuerySchema,
+} from '../validators/admin.schemas.js';
+import {
+  getOverview, listSessions, terminateSession, listAuditLogs,
+} from '../controllers/admin.controller.js';
+import {
+  exportUsers, exportSessions, exportAuditLogs,
+} from '../controllers/export.controller.js';
 import {
   listUsers, createUser, updateUser, resendUserCode, signOutUser, removeUser, sendResetLink,
 } from '../controllers/users.controller.js';
+import { exportLimiter } from '../middleware/rateLimit.js';
 
 const r = Router();
 
 r.use(authenticate, requirePasswordChanged);
 
-r.get('/sessions', requirePermission('sessions:view-all'), listSessions);
+r.get('/overview', requirePermission('dashboard:view'), validate(overviewQuerySchema, 'query'), getOverview);
+r.get('/audit-logs/export', exportLimiter, requirePermission('audit:read'), validate(exportAuditQuerySchema, 'query'), exportAuditLogs);
+r.get('/audit-logs', requirePermission('audit:read'), validate(listAuditQuerySchema, 'query'), listAuditLogs);
+
+r.get('/sessions/export', exportLimiter, requirePermission('sessions:view-all'), validate(exportSessionsQuerySchema, 'query'), exportSessions);
+r.get('/sessions', requirePermission('sessions:view-all'), validate(listSessionsQuerySchema, 'query'), listSessions);
 r.delete('/sessions/:id', requirePermission('sessions:terminate'), validate(idParamSchema, 'params'), terminateSession);
 
 // Managing accounts and roles is the administrator's job. The permission list keeps
 // it that way; nobody else can reach any of these routes.
+r.get('/users/export', exportLimiter, requirePermission('users:manage'), validate(exportUsersQuerySchema, 'query'), exportUsers);
 r.get('/users', requirePermission('users:manage'), validate(listUsersQuerySchema, 'query'), listUsers);
 r.post('/users', requirePermission('users:manage'), validate(createUserSchema), createUser);
 // Editing an account is turning it on or off; removing it keeps the record but hides

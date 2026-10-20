@@ -15,3 +15,4 @@ const make = (windowMs, limit) =>
 export const globalLimiter = make(60_000, 300);
 export const authLimiter = make(15 * 60_000, 20); // login, register, reset
 export const codeLimiter = make(15 * 60_000, 15); // code checks and resends
+export const exportLimiter = make(60_000, 8); // file generation is deliberately heavier

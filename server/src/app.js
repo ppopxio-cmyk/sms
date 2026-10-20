@@ -48,6 +48,7 @@ export function createApp() {
         credentials: true,
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
         allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Device-Fingerprint', 'X-Device-Info', 'X-Device-Location', 'CF-Turnstile-Response'],
+        exposedHeaders: ['Content-Disposition', 'X-Export-Rows'],
         maxAge: 600,
       });
     }),

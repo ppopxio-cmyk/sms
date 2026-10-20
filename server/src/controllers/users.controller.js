@@ -39,6 +39,7 @@ const toRow = (u) => ({
   emailVerified: !!u.emailVerified,
   twoStepEnabled: !!u.twoStepEnabled,
   mustChangePassword: !!u.mustChangePassword,
+  locked: !!u.lockUntil && new Date(u.lockUntil).getTime() > Date.now(),
   lastLoginAt: u.lastLoginAt ?? null,
   createdAt: u.createdAt,
 });
@@ -59,21 +60,51 @@ async function ensureAnotherAdminStays(userId) {
 }
 
 export const listUsers = asyncHandler(async (req, res) => {
-  const { search, role, status, page, limit } = req.valid.query;
+  const { search, role, status, page, limit, sort, dir } = req.valid.query;
   const filter = { deletedAt: null };
   if (role) filter.role = role;
   if (status) filter.status = status;
+
+  // Tabs count everybody the current search can see, not just the page on screen. They
+  // deliberately ignore the role and status filters so switching tabs does not make the
+  // other categories look empty.
+  const countFilter = { deletedAt: null };
   if (search) {
     const rx = new RegExp(escapeRegex(search), 'i');
     filter.$or = [{ name: rx }, { email: rx }];
+    countFilter.$or = [{ name: rx }, { email: rx }];
   }
 
-  const [total, users] = await Promise.all([
+  const now = new Date();
+  const [total, users, roleRows, statusRows, locked] = await Promise.all([
     User.countDocuments(filter),
-    User.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    User.find(filter)
+      .sort({ [sort]: dir === 'asc' ? 1 : -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    User.aggregate([{ $match: countFilter }, { $group: { _id: '$role', count: { $sum: 1 } } }]),
+    User.aggregate([{ $match: countFilter }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
+    User.countDocuments({ ...countFilter, lockUntil: { $gt: now } }),
   ]);
 
-  res.json({ users: users.map(toRow), total, page, pages: Math.max(1, Math.ceil(total / limit)) });
+  const byRole = Object.fromEntries(['ADMIN', 'REGISTRAR', 'TEACHER', 'ACCOUNTANT'].map((key) => [key, 0]));
+  const byStatus = { pending: 0, active: 0, disabled: 0 };
+  for (const row of roleRows) if (row._id) byRole[row._id] = row.count;
+  for (const row of statusRows) if (row._id) byStatus[row._id] = row.count;
+
+  res.json({
+    users: users.map(toRow),
+    total,
+    page,
+    pages: Math.max(1, Math.ceil(total / limit)),
+    counts: {
+      all: byRole.ADMIN + byRole.REGISTRAR + byRole.TEACHER + byRole.ACCOUNTANT,
+      byRole,
+      byStatus,
+      locked,
+    },
+  });
 });
 
 export const createUser = asyncHandler(async (req, res) => {

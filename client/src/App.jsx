@@ -19,9 +19,11 @@ import Privacy from './pages/Privacy.jsx';
 import Terms from './pages/Terms.jsx';
 
 const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'));
 const Sessions = lazy(() => import('./pages/Sessions.jsx'));
 const Users = lazy(() => import('./pages/Users.jsx'));
 const AdminSessions = lazy(() => import('./pages/AdminSessions.jsx'));
+const AuditLogs = lazy(() => import('./pages/AuditLogs.jsx'));
 const Notifications = lazy(() => import('./pages/Notifications.jsx'));
 const Me = lazy(() => import('./pages/Me.jsx'));
 const NotFound = lazy(() => import('./pages/NotFound.jsx'));
@@ -79,9 +81,10 @@ export default function App() {
             <Route path="/me/devices" element={<Sessions />} />
 
             <Route element={<RequireRole roles={['ADMIN']} />}>
-              <Route path="/admin" element={<Dashboard />} />
+              <Route path="/admin" element={<AdminDashboard />} />
               <Route path="/admin/users" element={<Users />} />
               <Route path="/admin/sessions" element={<AdminSessions />} />
+              <Route path="/admin/audit" element={<AuditLogs />} />
             </Route>
 
             {OTHER_ROLES.map((role) => (

@@ -115,6 +115,8 @@ export const listUsersQuerySchema = z.strictObject({
   search: z.string().trim().max(100).optional(),
   role: role.optional(),
   status: z.enum(['pending', 'active', 'disabled']).optional(),
+  sort: z.enum(['createdAt', 'lastLoginAt', 'name', 'email', 'role', 'status']).default('createdAt'),
+  dir: z.enum(['asc', 'desc']).default('desc'),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });

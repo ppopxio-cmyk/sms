@@ -13,7 +13,12 @@ function julianDay(y, m, d) {
 }
 
 export function toEthiopian(input = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' })
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
     .format(new Date(input))
     .split('-')
     .map(Number);
@@ -27,10 +32,18 @@ export function toEthiopian(input = new Date()) {
   };
 }
 
+// Downloads use the same calendar as the screens, so a date in an export cannot be
+// mistaken for a different day in the interface.
 export function formatEthiopian(input = new Date(), { time = false } = {}) {
+  if (!input) return '—';
   const { year, month, day } = toEthiopian(input);
   const date = `${ETH_MONTHS[month - 1]} ${day}, ${year}`;
   if (!time) return date;
-  const clock = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(input));
+  const clock = new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(new Date(input));
   return `${date}, ${clock}`;
 }

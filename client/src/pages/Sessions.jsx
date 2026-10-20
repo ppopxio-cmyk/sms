@@ -13,6 +13,7 @@ import CodeInput from '../components/ui/CodeInput';
 import DeviceIcon from '../components/ui/DeviceIcon';
 import Field from '../components/ui/Field';
 import Modal from '../components/ui/Modal';
+import SearchInput from '../components/ui/SearchInput';
 import { Skeleton } from '../components/ui/Skeleton';
 import { EmptyState, ErrorState } from '../components/ui/StatePanel';
 import { useAuth } from '../store/auth';
@@ -27,6 +28,7 @@ export default function Sessions() {
   const [shake, setShake] = useState(0);
   const [naming, setNaming] = useState(null);
   const [label, setLabel] = useState('');
+  const [term, setTerm] = useState('');
 
   const sessions = useQuery({
     queryKey: ['my-sessions'],
@@ -87,6 +89,14 @@ export default function Sessions() {
   };
 
   const rows = sessions.data?.sessions ?? [];
+  const q = term.trim().toLowerCase();
+  const visible = q
+    ? rows.filter((item) =>
+        [deviceTitle(item), deviceSubtitle(item), placeLine(item), item.ip, item.browser, item.os]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(q)),
+      )
+    : rows;
 
   return (
     <div className="space-y-6">
@@ -105,7 +115,7 @@ export default function Sessions() {
         <CardHeader
           icon={Fingerprint}
           title="Active devices"
-          subtitle={sessions.isLoading ? 'Checking where you are signed in…' : `${rows.length} active`}
+          subtitle={sessions.isLoading ? 'Checking where you are signed in…' : `${visible.length} of ${rows.length} active`}
           action={
             <Button variant="secondary" size="sm" onClick={() => sessions.refetch()} loading={sessions.isFetching}>
               Refresh
@@ -113,6 +123,15 @@ export default function Sessions() {
           }
         />
         <CardBody className="space-y-3">
+          <SearchInput
+            id="device-search"
+            value={term}
+            onChange={(event) => setTerm(event.target.value)}
+            placeholder="Search your devices"
+            label="Search your devices"
+            className="max-w-md"
+          />
+
           {sessions.isLoading ? (
             <>
               <Skeleton className="h-20 w-full" />
@@ -123,8 +142,10 @@ export default function Sessions() {
             <ErrorState message={errorMessage(sessions.error)} onRetry={() => sessions.refetch()} />
           ) : rows.length === 0 ? (
             <EmptyState title="No active devices" message="Nothing is signed in with this account right now." />
+          ) : visible.length === 0 ? (
+            <EmptyState title="No devices match" message="Try a shorter word, a browser name, or an IP address." />
           ) : (
-            rows.map((s) => {
+            visible.map((s) => {
               const badge = modelBadge(s);
               const sub = deviceSubtitle(s);
               return (

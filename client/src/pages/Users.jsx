@@ -5,65 +5,143 @@ import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
 import {
-  CircleCheck, Lock, LogOut, MailCheck, Mails, RefreshCw, Search, Trash2, UserPlus, UserRound,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  CircleCheck,
+  Lock,
+  LogOut,
+  Mail,
+  MailCheck,
+  Mails,
+  Pencil,
+  RefreshCw,
+  Trash2,
+  UserCheck,
+  UserPlus,
+  UserRound,
+  UserX,
+  Users as UsersIcon,
 } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
-import { createUserSchema, editUserSchema, removeUserSchema, ROLES, ASSIGNABLE_ROLES, emailField } from '../lib/validation';
+import { createUserSchema, editUserSchema, removeUserSchema, ASSIGNABLE_ROLES, emailField } from '../lib/validation';
 import { useDebounced } from '../lib/useDebounced';
 import { useAuth } from '../store/auth';
 import { formatEthiopian } from '../lib/ethiopianDate';
+import { initials, number, roleLabel } from '../lib/format';
 import Card, { CardBody, CardHeader } from '../components/ui/Card';
 import Badge, { RoleBadge } from '../components/ui/Badge';
 import Button from '../components/ui/Button';
+import ExportMenu from '../components/ui/ExportMenu';
 import Field from '../components/ui/Field';
+import FilterTabs from '../components/ui/FilterTabs';
 import Modal from '../components/ui/Modal';
-import { Skeleton } from '../components/ui/Skeleton';
+import Pagination from '../components/ui/Pagination';
+import RowMenu from '../components/ui/RowMenu';
+import SearchInput from '../components/ui/SearchInput';
+import StatCard from '../components/ui/StatCard';
+import { SkeletonRows } from '../components/ui/Skeleton';
 import { EmptyState, ErrorState } from '../components/ui/StatePanel';
 
 const STATUS = {
-  active: { tone: 'success', label: 'active' },
-  pending: { tone: 'warning', label: 'email not confirmed' },
-  disabled: { tone: 'danger', label: 'turned off' },
+  active: { tone: 'success', label: 'Active' },
+  pending: { tone: 'warning', label: 'Setup pending' },
+  disabled: { tone: 'danger', label: 'Turned off' },
 };
 
-const initials = (value) =>
-  (value || '')
-    .split(/[\s@._-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((p) => p[0])
-    .join('')
-    .toUpperCase() || 'U';
+const ROLE_TABS = [
+  { key: 'ALL', label: 'Everyone', dot: 'bg-slate-400' },
+  { key: 'ADMIN', label: 'Admins', dot: 'bg-indigo-500' },
+  { key: 'REGISTRAR', label: 'Registrars', dot: 'bg-emerald-500' },
+  { key: 'TEACHER', label: 'Teachers', dot: 'bg-sky-500' },
+  { key: 'ACCOUNTANT', label: 'Accountants', dot: 'bg-amber-500' },
+];
 
-// Typing in the search box should not fire a request per keystroke.
+const TEXT_SORTS = new Set(['name', 'email', 'role', 'status']);
+
+function SortHead({ label, column, sort, onSort }) {
+  const active = sort.key === column;
+  const Icon = active ? (sort.dir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+
+  return (
+    <th scope="col" className="px-3 pb-1 text-left">
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        className={`focus-ring inline-flex items-center gap-1.5 rounded-lg px-1 py-1 text-[11px] font-semibold uppercase tracking-wider transition ${
+          active ? 'text-brand-600' : 'text-slate-400 hover:text-slate-600'
+        }`}
+      >
+        {label}
+        <Icon className="h-3 w-3" />
+      </button>
+    </th>
+  );
+}
+
 export default function Users() {
   const queryClient = useQueryClient();
-  const me = useAuth((s) => s.user);
+  const me = useAuth((state) => state.user);
   const location = useLocation();
 
-  // The header search can hand a term straight to this page, so opening somebody from
-  // there lands on the row already filtered.
   const [search, setSearch] = useState(() => location.state?.search ?? '');
-  const [role, setRole] = useState('');
+  const [role, setRole] = useState('ALL');
   const [status, setStatus] = useState('');
+  const [sort, setSort] = useState({ key: 'createdAt', dir: 'desc' });
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const debouncedSearch = useDebounced(search);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [removing, setRemoving] = useState(null);
 
+  useEffect(() => {
+    if (typeof location.state?.search === 'string') {
+      setSearch(location.state.search);
+      setPage(1);
+    }
+  }, [location.state]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, role, status, limit]);
+
+  const params = {
+    search: debouncedSearch || undefined,
+    role: role === 'ALL' ? undefined : role,
+    status: status || undefined,
+    page,
+    limit,
+    sort: sort.key,
+    dir: sort.dir,
+  };
+
+  const exportParams = {
+    search: debouncedSearch || undefined,
+    role: role === 'ALL' ? undefined : role,
+    status: status || undefined,
+    sort: sort.key,
+    dir: sort.dir,
+  };
+
   const users = useQuery({
-    queryKey: ['users', { search: debouncedSearch, role, status }],
-    queryFn: async () =>
-      (
-        await api.get('/admin/users', {
-          params: { search: debouncedSearch || undefined, role: role || undefined, status: status || undefined, limit: 100 },
-        })
-      ).data,
+    queryKey: ['users', params],
+    queryFn: async () => (await api.get('/admin/users', { params })).data,
   });
 
   const rows = users.data?.users ?? [];
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['users'] });
+  const counts = users.data?.counts;
+
+  useEffect(() => {
+    if (users.data && page > users.data.pages) setPage(users.data.pages);
+  }, [page, users.data]);
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['users'] });
+    queryClient.invalidateQueries({ queryKey: ['admin-overview'] });
+  };
+
   const fail = (err, fallback) => toast.error(errorMessage(err, fallback));
 
   const createForm = useForm({
@@ -122,8 +200,6 @@ export default function Users() {
     onError: (err) => fail(err, 'We could not send a new link.'),
   });
 
-  // For somebody whose account is finished but who lost access. No password is ever
-  // handed out: they choose their own from the link.
   const resetLink = useMutation({
     mutationFn: (id) => api.post(`/admin/users/${id}/reset-link`),
     onSuccess: (res) => toast.success(res.data?.message || 'A reset link is on its way.'),
@@ -132,7 +208,11 @@ export default function Users() {
 
   const signOut = useMutation({
     mutationFn: (id) => api.post(`/admin/users/${id}/sign-out`),
-    onSuccess: (res) => toast.success(res.data?.message || 'Every device was signed out.'),
+    onSuccess: (res) => {
+      toast.success(res.data?.message || 'Every device was signed out.');
+      queryClient.invalidateQueries({ queryKey: ['admin-sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-overview'] });
+    },
     onError: (err) => fail(err, 'We could not sign that account out.'),
   });
 
@@ -151,27 +231,118 @@ export default function Users() {
     createForm.reset();
   };
 
+  const toggleSort = (column) => {
+    setSort((current) => {
+      if (current.key === column) return { key: column, dir: current.dir === 'asc' ? 'desc' : 'asc' };
+      return { key: column, dir: TEXT_SORTS.has(column) ? 'asc' : 'desc' };
+    });
+    setPage(1);
+  };
+
+  const chooseSort = (value) => {
+    const [key, dir] = value.split(':');
+    setSort({ key, dir });
+    setPage(1);
+  };
+
+  const actionsFor = (u) => {
+    if (me?.id === u.id) return null;
+    const setup = !u.emailVerified || u.mustChangePassword;
+
+    return [
+      { label: 'Edit account', icon: Pencil, onClick: () => setEditing(u) },
+      {
+        label: setup ? 'Resend setup link' : 'Send reset link',
+        icon: setup ? Mails : MailCheck,
+        onClick: () => (setup ? resend.mutate(u.id) : resetLink.mutate(u.id)),
+      },
+      {
+        label: 'Sign out everywhere',
+        icon: LogOut,
+        onClick: () => signOut.mutate(u.id),
+      },
+      { separator: true },
+      { label: 'Remove account', icon: Trash2, tone: 'danger', onClick: () => setRemoving(u) },
+    ];
+  };
+
+  const roleTabs = ROLE_TABS.map((tab) => ({
+    ...tab,
+    count:
+      tab.key === 'ALL'
+        ? counts?.all
+        : counts?.byRole?.[tab.key],
+  }));
+
+  const subtitle = users.isLoading
+    ? 'Loading accounts…'
+    : `${number(users.data?.total ?? 0)} account${users.data?.total === 1 ? '' : 's'}${role !== 'ALL' ? ` · ${roleLabel(role)}` : ''}`;
+
   return (
     <div className="space-y-6">
       <header className="animate-rise flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900">Users</h1>
+          <p className="text-sm font-medium text-slate-500">{formatEthiopian(new Date())}</p>
+          <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">Users &amp; access</h1>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
-            Add an account with an email address and a role. The person opens the link we email them, confirms the address, and
-            chooses their own full name and password. Nobody but them ever knows that password.
+            Every account, the role it holds, and whether it can sign in. New people set their own name and password from the
+            link sent to their inbox.
           </p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <UserPlus className="h-4 w-4" />
-          Add user
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <ExportMenu
+            basePath="/admin/users/export"
+            params={exportParams}
+            filenamePrefix="accounts"
+            disabled={users.isLoading || (users.data?.total ?? 0) === 0}
+          />
+          <Button onClick={() => setCreateOpen(true)}>
+            <UserPlus className="h-4 w-4" />
+            Add user
+          </Button>
+        </div>
       </header>
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          icon={UsersIcon}
+          tone="indigo"
+          label="All accounts"
+          value={number(counts?.all ?? 0)}
+          hint="Administrators, registrars, teachers and accountants"
+          loading={users.isLoading}
+        />
+        <StatCard
+          icon={UserCheck}
+          tone="emerald"
+          label="Active"
+          value={number(counts?.byStatus?.active ?? 0)}
+          hint="Finished setup and able to sign in"
+          loading={users.isLoading}
+        />
+        <StatCard
+          icon={Mail}
+          tone="amber"
+          label="Awaiting setup"
+          value={number(counts?.byStatus?.pending ?? 0)}
+          hint="Invitation sent, password not chosen yet"
+          loading={users.isLoading}
+        />
+        <StatCard
+          icon={UserX}
+          tone="rose"
+          label="Turned off"
+          value={number(counts?.byStatus?.disabled ?? 0)}
+          hint={counts?.locked ? `${number(counts.locked)} currently locked out` : 'No account is locked out'}
+          loading={users.isLoading}
+        />
+      </section>
 
       <Card>
         <CardHeader
           icon={UserRound}
           title="Accounts"
-          subtitle={users.isLoading ? 'Loading accounts…' : `${users.data?.total ?? 0} account${users.data?.total === 1 ? '' : 's'}`}
+          subtitle={subtitle}
           action={
             <Button variant="secondary" size="sm" onClick={() => users.refetch()} loading={users.isFetching}>
               <RefreshCw className="h-3.5 w-3.5" />
@@ -181,141 +352,204 @@ export default function Users() {
         />
 
         <CardBody className="space-y-4">
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search a name or an email"
-                aria-label="Search users"
-                className="focus-ring h-11 w-full rounded-xl border border-slate-200 bg-white/80 pl-10 pr-4 text-sm text-slate-800 placeholder:text-slate-400"
-              />
-            </div>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              aria-label="Filter by role"
-              className="focus-ring h-11 rounded-xl border border-slate-200 bg-white/80 px-3 text-sm text-slate-700"
-            >
-              <option value="">Every role</option>
-              {ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r.toLowerCase()}
-                </option>
-              ))}
-            </select>
+          <FilterTabs
+            tabs={roleTabs}
+            value={role}
+            onChange={(value) => {
+              setRole(value);
+              setPage(1);
+            }}
+            label="Filter accounts by role"
+          />
+
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <SearchInput
+              id="user-search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search a name or an email"
+              label="Search users"
+              loading={users.isFetching && Boolean(debouncedSearch)}
+              className="flex-1"
+            />
+
             <select
               value={status}
-              onChange={(e) => setStatus(e.target.value)}
+              onChange={(event) => setStatus(event.target.value)}
               aria-label="Filter by status"
-              className="focus-ring h-11 rounded-xl border border-slate-200 bg-white/80 px-3 text-sm text-slate-700"
+              className="focus-ring h-11 rounded-xl border border-slate-200 bg-white/85 px-3 text-sm text-slate-700"
             >
               <option value="">Every status</option>
-              <option value="active">active</option>
-              <option value="pending">email not confirmed</option>
-              <option value="disabled">turned off</option>
+              <option value="active">Active ({number(counts?.byStatus?.active ?? 0)})</option>
+              <option value="pending">Setup pending ({number(counts?.byStatus?.pending ?? 0)})</option>
+              <option value="disabled">Turned off ({number(counts?.byStatus?.disabled ?? 0)})</option>
+            </select>
+
+            <select
+              value={`${sort.key}:${sort.dir}`}
+              onChange={(event) => chooseSort(event.target.value)}
+              aria-label="Sort accounts"
+              className="focus-ring h-11 rounded-xl border border-slate-200 bg-white/85 px-3 text-sm text-slate-700"
+            >
+              <option value="createdAt:desc">Newest first</option>
+              <option value="createdAt:asc">Oldest first</option>
+              <option value="name:asc">Name A–Z</option>
+              <option value="name:desc">Name Z–A</option>
+              <option value="lastLoginAt:desc">Recently signed in</option>
+              <option value="lastLoginAt:asc">Longest since sign-in</option>
             </select>
           </div>
 
           {users.isLoading ? (
-            <>
-              <Skeleton className="h-24 w-full" />
-              <Skeleton className="h-24 w-full" />
-              <Skeleton className="h-24 w-full" />
-            </>
+            <SkeletonRows rows={7} />
           ) : users.isError ? (
             <ErrorState message={errorMessage(users.error)} onRetry={() => users.refetch()} />
           ) : rows.length === 0 ? (
             <EmptyState
+              icon={UsersIcon}
               title="No accounts match"
-              message={search || role || status ? 'Try a different search or filter.' : 'Add the first account to get started.'}
+              message={
+                search || role !== 'ALL' || status
+                  ? 'Try a different search, role or status.'
+                  : 'Add the first account to get started.'
+              }
             />
           ) : (
-            <div className="space-y-3">
-              {rows.map((u) => {
-                const tone = STATUS[u.status] ?? STATUS.pending;
-                const isSelf = me?.id === u.id;
-                const label = u.name || u.email;
-                return (
-                  <div key={u.id} className="flex flex-col gap-4 rounded-2xl border border-slate-100 bg-white/70 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="flex min-w-0 gap-3.5">
-                      <span className="brand-gradient flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-bold text-white">
-                        {initials(label)}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-800">
-                          <span className={u.name ? '' : 'text-slate-500'}>{label}</span>
-                          <RoleBadge role={u.role} />
-                          <Badge tone={tone.tone}>{tone.label}</Badge>
-                          {u.twoStepEnabled ? <Badge tone="brand">2-step on</Badge> : null}
-                          {u.mustChangePassword ? <Badge tone="warning">waiting to set up</Badge> : null}
+            <>
+              <div className="hidden overflow-x-auto pb-1 lg:block">
+                <table className="w-full min-w-[900px] border-separate border-spacing-y-2 text-left">
+                  <thead>
+                    <tr>
+                      <SortHead label="Person" column="name" sort={sort} onSort={toggleSort} />
+                      <th scope="col" className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Role</th>
+                      <th scope="col" className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Status</th>
+                      <th scope="col" className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Security</th>
+                      <SortHead label="Added" column="createdAt" sort={sort} onSort={toggleSort} />
+                      <SortHead label="Last sign-in" column="lastLoginAt" sort={sort} onSort={toggleSort} />
+                      <th scope="col" className="px-3 pb-1 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-400">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((u, index) => {
+                      const tone = STATUS[u.status] ?? STATUS.pending;
+                      const isSelf = me?.id === u.id;
+                      const label = u.name || u.email;
+
+                      return (
+                        <tr key={u.id} className="group animate-rise" style={{ animationDelay: `${Math.min(index, 8) * 35}ms` }}>
+                          <td className="rounded-l-2xl border-y border-l border-slate-100 bg-white/75 px-4 py-3.5 transition group-hover:bg-white">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <span className="brand-gradient flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[11px] font-bold text-white">
+                                {initials(label)}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-slate-800">
+                                  <span className={u.name ? '' : 'text-slate-500'}>{u.name || 'Awaiting setup'}</span>
+                                  {isSelf ? <Badge tone="brand">You</Badge> : null}
+                                </p>
+                                <p className="truncate text-xs text-slate-500">{u.email}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="border-y border-slate-100 bg-white/75 px-4 py-3.5 transition group-hover:bg-white">
+                            <RoleBadge role={u.role} />
+                          </td>
+                          <td className="border-y border-slate-100 bg-white/75 px-4 py-3.5 transition group-hover:bg-white">
+                            <div className="flex flex-wrap gap-1.5">
+                              <Badge tone={tone.tone}>{tone.label}</Badge>
+                              {u.locked ? <Badge tone="danger">Locked</Badge> : null}
+                            </div>
+                          </td>
+                          <td className="border-y border-slate-100 bg-white/75 px-4 py-3.5 transition group-hover:bg-white">
+                            <div className="flex flex-wrap gap-1.5">
+                              {u.twoStepEnabled ? <Badge tone="success">2-step on</Badge> : <Badge tone="neutral">Password only</Badge>}
+                              {u.mustChangePassword ? <Badge tone="warning">No password</Badge> : null}
+                            </div>
+                          </td>
+                          <td className="whitespace-nowrap border-y border-slate-100 bg-white/75 px-4 py-3.5 text-xs text-slate-500 transition group-hover:bg-white">
+                            {formatEthiopian(u.createdAt)}
+                          </td>
+                          <td className="whitespace-nowrap border-y border-slate-100 bg-white/75 px-4 py-3.5 text-xs text-slate-500 transition group-hover:bg-white">
+                            {u.lastLoginAt ? formatEthiopian(u.lastLoginAt, { time: true }) : 'Never'}
+                          </td>
+                          <td className="rounded-r-2xl border-y border-r border-slate-100 bg-white/75 px-4 py-3.5 transition group-hover:bg-white">
+                            <div className="flex justify-end">
+                              {isSelf ? (
+                                <Badge tone="neutral">Your account</Badge>
+                              ) : (
+                                <RowMenu items={actionsFor(u)} label={`Actions for ${label}`} />
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="space-y-3 lg:hidden">
+                {rows.map((u, index) => {
+                  const tone = STATUS[u.status] ?? STATUS.pending;
+                  const isSelf = me?.id === u.id;
+                  const label = u.name || u.email;
+
+                  return (
+                    <div
+                      key={u.id}
+                      className="animate-rise rounded-2xl border border-slate-100 bg-white/80 p-4"
+                      style={{ animationDelay: `${Math.min(index, 8) * 35}ms` }}
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="brand-gradient flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xs font-bold text-white">
+                          {initials(label)}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="flex flex-wrap items-center gap-1.5 text-sm font-semibold text-slate-800">
+                            {u.name || 'Awaiting setup'}
+                            {isSelf ? <Badge tone="brand">You</Badge> : null}
+                          </p>
+                          <p className="truncate text-xs text-slate-500">{u.email}</p>
+                        </div>
+                        {isSelf ? <Badge tone="neutral">Your account</Badge> : <RowMenu items={actionsFor(u)} label={`Actions for ${label}`} />}
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        <RoleBadge role={u.role} />
+                        <Badge tone={tone.tone}>{tone.label}</Badge>
+                        {u.locked ? <Badge tone="danger">Locked</Badge> : null}
+                        {u.twoStepEnabled ? <Badge tone="success">2-step on</Badge> : null}
+                        {u.mustChangePassword ? <Badge tone="warning">No password</Badge> : null}
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 text-[11px] text-slate-400">
+                        <p>
+                          Added <span className="font-medium text-slate-600">{formatEthiopian(u.createdAt)}</span>
                         </p>
-                        <p className="mt-0.5 truncate text-xs text-slate-500">{u.email}</p>
-                        <p className="mt-0.5 text-xs text-slate-400">
-                          Added {formatEthiopian(u.createdAt)}
-                          {u.lastLoginAt ? ` · last signed in ${formatEthiopian(u.lastLoginAt, { time: true })}` : ' · never signed in'}
+                        <p className="text-right">
+                          Last in{' '}
+                          <span className="font-medium text-slate-600">
+                            {u.lastLoginAt ? formatEthiopian(u.lastLoginAt) : 'Never'}
+                          </span>
                         </p>
                       </div>
                     </div>
+                  );
+                })}
+              </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      {isSelf ? (
-                        <span className="rounded-xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
-                          This is your account
-                        </span>
-                      ) : (
-                        <>
-                          <Button variant="secondary" size="sm" onClick={() => setEditing(u)}>
-                            Edit
-                          </Button>
-                          {u.emailVerified && !u.mustChangePassword ? (
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => resetLink.mutate(u.id)}
-                              loading={resetLink.isPending && resetLink.variables === u.id}
-                            >
-                              <MailCheck className="h-3.5 w-3.5" />
-                              Send reset link
-                            </Button>
-                          ) : (
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => resend.mutate(u.id)}
-                              loading={resend.isPending && resend.variables === u.id}
-                            >
-                              <Mails className="h-3.5 w-3.5" />
-                              Resend link
-                            </Button>
-                          )}
-                          <Button variant="danger" size="sm" onClick={() => setRemoving(u)}>
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Remove
-                          </Button>
-                        </>
-                      )}
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => signOut.mutate(u.id)}
-                        loading={signOut.isPending && signOut.variables === u.id}
-                      >
-                        <LogOut className="h-3.5 w-3.5" />
-                        Sign out
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-
-              {(users.data?.total ?? 0) > rows.length ? (
-                <p className="pt-1 text-center text-xs text-slate-400">
-                  Showing the first {rows.length} of {users.data.total}. Narrow the search to see the rest.
-                </p>
-              ) : null}
-            </div>
+              <Pagination
+                page={users.data?.page ?? page}
+                pages={users.data?.pages ?? 1}
+                total={users.data?.total ?? 0}
+                limit={limit}
+                onPage={setPage}
+                onLimit={(value) => {
+                  setLimit(value);
+                  setPage(1);
+                }}
+              />
+            </>
           )}
         </CardBody>
       </Card>
@@ -357,9 +591,9 @@ export default function Users() {
               className="focus-ring h-11 w-full rounded-xl border border-slate-200 bg-white/80 px-3 text-sm text-slate-800"
               {...createForm.register('role')}
             >
-              {ASSIGNABLE_ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r.toLowerCase()}
+              {ASSIGNABLE_ROLES.map((roleValue) => (
+                <option key={roleValue} value={roleValue}>
+                  {roleLabel(roleValue)}
                 </option>
               ))}
             </select>
@@ -409,8 +643,8 @@ export default function Users() {
               className="focus-ring h-11 w-full rounded-xl border border-slate-200 bg-white/80 px-3 text-sm text-slate-800"
               {...editForm.register('status')}
             >
-              <option value="active">active</option>
-              <option value="disabled">turned off</option>
+              <option value="active">Active</option>
+              <option value="disabled">Turned off</option>
             </select>
             <p className="mt-1.5 text-xs text-slate-400">
               Turning an account off signs it out on every device at once. No email is sent.

@@ -36,6 +36,14 @@ export function formatEthiopian(input = new Date(), { time = false } = {}) {
   return `${date}, ${clock}`;
 }
 
+// Chart axes need a smaller label than a sentence. The month is abbreviated, the year is
+// carried by the range already on screen, and the day is enough to read the trend.
+export function formatEthiopianShort(input = new Date()) {
+  if (!input) return '—';
+  const { month, day } = toEthiopian(input);
+  return `${ETH_MONTHS[month - 1].slice(0, 3)} ${day}`;
+}
+
 export function timeAgo(input) {
   if (!input) return '—';
   const diff = Date.now() - new Date(input).getTime();

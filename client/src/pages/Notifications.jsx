@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Bell, CheckCheck, CircleCheck, KeyRound, LogIn, MailCheck, ShieldCheck, Trash2 } from 'lucide-react';
+import { Bell, CheckCheck, CircleCheck, KeyRound, LogIn, MailCheck, Search, ShieldCheck, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../lib/api';
 import { useNotifications, useUnread } from '../lib/notifications';
@@ -9,6 +9,7 @@ import Card, { CardBody, CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import PushToggle from '../components/ui/PushToggle';
+import SearchInput from '../components/ui/SearchInput';
 import { Skeleton } from '../components/ui/Skeleton';
 import { EmptyState, ErrorState } from '../components/ui/StatePanel';
 
@@ -28,11 +29,19 @@ const KEY = 'notifications';
 export default function Notifications() {
   const queryClient = useQueryClient();
   const [onlyUnread, setOnlyUnread] = useState(false);
+  const [term, setTerm] = useState('');
 
   const list = useNotifications({ unread: onlyUnread, limit: 100 });
   const unread = useUnread();
   const rows = list.data?.notifications ?? [];
   const count = unread.data?.unread ?? 0;
+
+  const q = term.trim().toLowerCase();
+  const visible = q
+    ? rows.filter((item) =>
+        [item.title, item.body, item.type].filter(Boolean).some((value) => String(value).toLowerCase().includes(q)),
+      )
+    : rows;
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: [KEY] });
   const fail = (err, fallback) => toast.error(errorMessage(err, fallback));
@@ -125,6 +134,15 @@ export default function Notifications() {
         />
 
         <CardBody className="space-y-3">
+          <SearchInput
+            id="notification-search"
+            value={term}
+            onChange={(event) => setTerm(event.target.value)}
+            placeholder="Search your notifications"
+            label="Search notifications"
+            className="max-w-md"
+          />
+
           {list.isLoading ? (
             <>
               <Skeleton className="h-20 w-full" />
@@ -143,8 +161,10 @@ export default function Notifications() {
                   : 'When something happens on your account, or the school sends a notice, it will appear here.'
               }
             />
+          ) : visible.length === 0 ? (
+            <EmptyState icon={Search} title="No notices match" message="Try a shorter word or a different search." />
           ) : (
-            rows.map((item) => {
+            visible.map((item) => {
               const Icon = iconFor(item.type);
               return (
                 <div

@@ -1,18 +1,20 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, LogOut, ShieldCheck, Users, X } from 'lucide-react';
+import { LayoutDashboard, LogOut, ScrollText, ShieldCheck, Users, X } from 'lucide-react';
 import Brand from '../ui/Brand';
 import { RoleBadge } from '../ui/Badge';
-import { PERSONAL_ITEMS } from '../../lib/menu';
-import { homeFor } from '../../lib/roles';
 import { formatEthiopian } from '../../lib/ethiopianDate';
 
 // The first entry is the role's own front door, so it is the same page for everybody but
-// under a different address. Everything that belongs to the person rather than the job
-// (notices, profile, devices, signing out) lives further down the same column.
-const navItems = (role) => [
-  { to: homeFor(role), label: 'Dashboard', icon: LayoutDashboard, end: true },
+// under a different address. Personal pages (notices, profile, devices, signing out) live
+// in the avatar menu, so they are not repeated here.
+const navItems = () => [
+  { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true, roles: ['ADMIN'] },
   { to: '/admin/users', label: 'Users', icon: Users, roles: ['ADMIN'] },
-  { to: '/admin/sessions', label: 'All sessions', icon: ShieldCheck, roles: ['ADMIN'] },
+  { to: '/admin/sessions', label: 'Sessions', icon: ShieldCheck, roles: ['ADMIN'] },
+  { to: '/admin/audit', label: 'Audit log', icon: ScrollText, roles: ['ADMIN'] },
+  { to: '/registrar', label: 'Dashboard', icon: LayoutDashboard, end: true, roles: ['REGISTRAR'] },
+  { to: '/teacher', label: 'Dashboard', icon: LayoutDashboard, end: true, roles: ['TEACHER'] },
+  { to: '/accountant', label: 'Dashboard', icon: LayoutDashboard, end: true, roles: ['ACCOUNTANT'] },
 ];
 
 const itemClass = ({ isActive }) =>
@@ -26,7 +28,7 @@ const iconClass = ({ isActive }) =>
   `h-4 w-4 shrink-0 transition ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-brand-500'}`;
 
 function NavItems({ role, onNavigate }) {
-  return navItems(role)
+  return navItems()
     .filter((item) => !item.roles || item.roles.includes(role))
     .map((item) => (
       <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={itemClass}>
@@ -64,20 +66,6 @@ export default function Sidebar({ role, user, onNavigate, onClose, onSignOut }) 
         <p className="px-3.5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Menu</p>
         <NavItems role={role} onNavigate={onNavigate} />
       </nav>
-
-      <div className="flex flex-col gap-1.5">
-        <p className="px-3.5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">You</p>
-        {PERSONAL_ITEMS.map((item) => (
-          <NavLink key={item.to} to={item.to} onClick={onNavigate} className={itemClass}>
-            {({ isActive }) => (
-              <>
-                <item.icon className={iconClass({ isActive })} />
-                {item.label}
-              </>
-            )}
-          </NavLink>
-        ))}
-      </div>
 
       <div className="mt-auto rounded-3xl border border-white/70 bg-white/70 p-3 shadow-sm">
         <div className="flex items-center gap-3">
