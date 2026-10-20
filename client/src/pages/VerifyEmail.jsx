@@ -120,12 +120,13 @@ export default function VerifyEmail() {
       toast.success('A new link is on its way.');
     } catch (err) {
       setMessage(errorMessage(err));
+    } finally {
+      setSending(false);
+      // The request spends the token whether it succeeds or fails.
       if (turnstileEnabled) {
         setSendToken('');
         setSendKey((n) => n + 1);
       }
-    } finally {
-      setSending(false);
     }
   };
 

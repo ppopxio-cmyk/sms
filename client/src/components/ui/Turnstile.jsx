@@ -6,7 +6,9 @@ import { useEffect, useRef } from 'react';
 const SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || '0x4AAAAAAFcg5Rv9MAzE-SwF';
 const SRC = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
 
-export const turnstileEnabled = Boolean(SITE_KEY);
+// The API skips Turnstile outside production, so the development build must not make the
+// sign-in button wait for a widget that the server will never read.
+export const turnstileEnabled = Boolean(SITE_KEY) && !import.meta.env.DEV;
 
 let loading = null;
 
@@ -38,6 +40,7 @@ export default function Turnstile({ onToken, theme = 'light', className = '' }) 
   }, [onToken]);
 
   useEffect(() => {
+    if (!turnstileEnabled) return undefined;
     let gone = false;
 
     loadScript()
@@ -66,6 +69,6 @@ export default function Turnstile({ onToken, theme = 'light', className = '' }) 
     };
   }, [theme]);
 
-  if (!SITE_KEY) return null;
+  if (!turnstileEnabled) return null;
   return <div ref={host} className={className} />;
 }

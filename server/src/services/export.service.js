@@ -18,23 +18,23 @@ import {
   VerticalAlign,
   WidthType,
 } from 'docx';
-import { formatEthiopian } from '../utils/ethiopianDate.js';
+import { formatEthiopianAmharic } from '../utils/ethiopianDate.js';
 
 export const EXPORT_LIMIT = 5000;
 
 export const EXPORT_FORMATS = {
   xlsx: {
-    label: 'Excel workbook',
+    label: 'የኤክሴል የሥራ ወረቀት',
     extension: 'xlsx',
     contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   },
   docx: {
-    label: 'Word document',
+    label: 'የወርድ ሰነድ',
     extension: 'docx',
     contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   },
   pdf: {
-    label: 'PDF document',
+    label: 'የPDF ሰነድ',
     extension: 'pdf',
     contentType: 'application/pdf',
   },
@@ -69,10 +69,10 @@ export function safeCell(value) {
 const cellText = (row, column) => cleanText(row?.[column.key] ?? '');
 
 const sheetName = (title) =>
-  String(title || 'Export')
+  String(title || 'ሪፖርት')
     .replace(/[\\/:*?\[\]]/g, ' ')
     .trim()
-    .slice(0, 31) || 'Export';
+    .slice(0, 31) || 'ሪፖርት';
 
 const addisDay = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -124,29 +124,33 @@ async function buildXlsx({ title, subtitle, summary, note, columns, rows }) {
   };
 
   addMerged(title, {
-    font: { name: 'Segoe UI', size: 16, bold: true, color: { argb: 'FFFFFFFF' } },
+    font: { name: 'Ebrima', size: 16, bold: true, color: { argb: 'FFFFFFFF' } },
     fill: 'FF312E81',
     alignment: { horizontal: 'left' },
   }, 30);
 
-  addMerged(subtitle || 'Exported from the school management system', {
-    font: { name: 'Segoe UI', size: 10, color: { argb: 'FFCBD5E1' } },
+  addMerged(subtitle || 'ከትምህርት ቤቱ አስተዳደር ስርዓት የተወጣ', {
+    font: { name: 'Ebrima', size: 10, color: { argb: 'FFCBD5E1' } },
     fill: 'FF312E81',
   }, 20);
 
-  addMerged(`Generated ${formatEthiopian(new Date(), { time: true })} (Ethiopian calendar)`, {
-    font: { name: 'Segoe UI', size: 9, color: { argb: 'FF64748B' } },
-  }, 18);
+  addMerged(
+    `የተዘጋጀበት፡ ${formatEthiopianAmharic(new Date(), { time: true })} (የኢትዮጵያ ዘመን አቆጣጠር)`,
+    {
+      font: { name: 'Ebrima', size: 9, color: { argb: 'FF64748B' } },
+    },
+    18,
+  );
 
   if (summary?.length) {
     addMerged(summary.map((item) => `${item.label}: ${item.value}`).join('   ·   '), {
-      font: { name: 'Segoe UI', size: 9, bold: true, color: { argb: 'FF334155' } },
+      font: { name: 'Ebrima', size: 9, bold: true, color: { argb: 'FF334155' } },
     }, 20);
   }
 
   if (note) {
     addMerged(note, {
-      font: { name: 'Segoe UI', size: 9, italic: true, color: { argb: 'FFB45309' } },
+      font: { name: 'Ebrima', size: 9, italic: true, color: { argb: 'FFB45309' } },
     }, 20);
   }
 
@@ -157,7 +161,7 @@ async function buildXlsx({ title, subtitle, summary, note, columns, rows }) {
   columns.forEach((column, index) => {
     const cell = header.getCell(index + 1);
     cell.value = safeCell(column.header);
-    cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.font = { name: 'Ebrima', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${BRAND}` } };
     cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: false };
     cell.border = {
@@ -174,7 +178,7 @@ async function buildXlsx({ title, subtitle, summary, note, columns, rows }) {
     columns.forEach((column, index) => {
       const cell = dataRow.getCell(index + 1);
       cell.value = safeCell(row?.[column.key]);
-      cell.font = { name: 'Segoe UI', size: 9, color: { argb: `FF${INK}` } };
+      cell.font = { name: 'Ebrima', size: 9, color: { argb: `FF${INK}` } };
       cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: false };
       cell.border = {
         top: { style: 'hair', color: { argb: `FF${LINE}` } },
@@ -206,8 +210,8 @@ async function buildXlsx({ title, subtitle, summary, note, columns, rows }) {
   }
 
   if (!rows.length) {
-    worksheet.addRow(['No matching records.']).font = {
-      name: 'Segoe UI',
+    worksheet.addRow(['ከማጣሪያው ጋር የሚመሳሰል መረጃ አልተገኘም።']).font = {
+      name: 'Ebrima',
       size: 10,
       italic: true,
       color: { argb: `FF${MUTED}` },
@@ -235,7 +239,7 @@ function docxCell(text, { header = false, alternate = false } = {}) {
             bold: header,
             color: header ? 'FFFFFF' : INK,
             size: header ? 17 : 16,
-            font: 'Segoe UI',
+            font: 'Ebrima',
           }),
         ],
       }),
@@ -259,20 +263,27 @@ async function buildDocx({ title, subtitle, summary, note, columns, rows }) {
 
   const children = [
     new Paragraph({
-      children: [new TextRun({ text: title, bold: true, size: 34, color: '312E81', font: 'Segoe UI' })],
+      children: [new TextRun({ text: title, bold: true, size: 34, color: '312E81', font: 'Ebrima' })],
       spacing: { after: 80 },
     }),
     new Paragraph({
-      children: [new TextRun({ text: subtitle || 'Exported from the school management system', size: 19, color: MUTED, font: 'Segoe UI' })],
+      children: [
+        new TextRun({
+          text: subtitle || 'ከትምህርት ቤቱ አስተዳደር ስርዓት የተወጣ',
+          size: 19,
+          color: MUTED,
+          font: 'Ebrima',
+        }),
+      ],
       spacing: { after: 60 },
     }),
     new Paragraph({
       children: [
         new TextRun({
-          text: `Generated ${formatEthiopian(new Date(), { time: true })} (Ethiopian calendar)`,
+          text: `የተዘጋጀበት፡ ${formatEthiopianAmharic(new Date(), { time: true })} (የኢትዮጵያ ዘመን አቆጣጠር)`,
           size: 17,
           color: MUTED,
-          font: 'Segoe UI',
+          font: 'Ebrima',
         }),
       ],
       spacing: { after: 120 },
@@ -288,7 +299,7 @@ async function buildDocx({ title, subtitle, summary, note, columns, rows }) {
             size: 17,
             bold: true,
             color: '334155',
-            font: 'Segoe UI',
+            font: 'Ebrima',
           }),
         ],
         spacing: { after: 80 },
@@ -299,7 +310,7 @@ async function buildDocx({ title, subtitle, summary, note, columns, rows }) {
   if (note) {
     children.push(
       new Paragraph({
-        children: [new TextRun({ text: note, italics: true, size: 17, color: 'B45309', font: 'Segoe UI' })],
+        children: [new TextRun({ text: note, italics: true, size: 17, color: 'B45309', font: 'Ebrima' })],
         spacing: { after: 120 },
       }),
     );
@@ -323,7 +334,14 @@ async function buildDocx({ title, subtitle, summary, note, columns, rows }) {
   } else {
     children.push(
       new Paragraph({
-        children: [new TextRun({ text: 'No matching records.', italics: true, color: MUTED, font: 'Segoe UI' })],
+        children: [
+          new TextRun({
+            text: 'ከማጣሪያው ጋር የሚመሳሰል መረጃ አልተገኘም።',
+            italics: true,
+            color: MUTED,
+            font: 'Ebrima',
+          }),
+        ],
       }),
     );
   }
@@ -335,7 +353,7 @@ async function buildDocx({ title, subtitle, summary, note, columns, rows }) {
     styles: {
       default: {
         document: {
-          run: { font: 'Segoe UI', size: 18, color: INK },
+          run: { font: 'Ebrima', size: 18, color: INK },
         },
       },
     },
@@ -368,7 +386,7 @@ async function buildPdf({ title, subtitle, summary, note, columns, rows }) {
     info: {
       Title: title,
       Author: 'SMS',
-      Subject: subtitle || 'School management system export',
+      Subject: subtitle || 'የትምህርት ቤት አስተዳደር ስርዓት ማውጣት',
       Creator: 'SMS',
     },
   });
@@ -400,7 +418,7 @@ async function buildPdf({ title, subtitle, summary, note, columns, rows }) {
 
   const pageHeader = (continued = false) => {
     document.font(bold()).fontSize(16).fillColor(`#${'312E81'}`).text(
-      continued ? `${title} (continued)` : title,
+      continued ? `${title} (ቀጣይ)` : title,
       margin,
       y,
       { width: tableWidth },
@@ -413,7 +431,7 @@ async function buildPdf({ title, subtitle, summary, note, columns, rows }) {
         y = document.y + 2;
       }
       document.font(body()).fontSize(8).fillColor(`#${MUTED}`).text(
-        `Generated ${formatEthiopian(new Date(), { time: true })} (Ethiopian calendar)`,
+        `የተዘጋጀበት፡ ${formatEthiopianAmharic(new Date(), { time: true })} (የኢትዮጵያ ዘመን አቆጣጠር)`,
         margin,
         y,
         { width: tableWidth },
@@ -460,7 +478,7 @@ async function buildPdf({ title, subtitle, summary, note, columns, rows }) {
 
   const drawTable = () => {
     if (!rows.length) {
-      document.font(body()).fontSize(10).fillColor(`#${MUTED}`).text('No matching records.', margin, y, {
+      document.font(body()).fontSize(10).fillColor(`#${MUTED}`).text('ከማጣሪያው ጋር የሚመሳሰል መረጃ አልተገኘም።', margin, y, {
         width: tableWidth,
       });
       y = document.y;

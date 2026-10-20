@@ -126,12 +126,15 @@ export default function Login() {
         verifyTimer.start();
       }
       if (code === 'ACCOUNT_LOCKED') setLocked(true);
-      // A token is spent by the attempt, so the widget is replaced for the next try.
+      setServerError(errorMessage(err, 'We could not sign you in.'));
+    } finally {
+      // Cloudflare spends a token as soon as the server checks it, even when the password
+      // step succeeds and a sign-in code follows. Always replace the widget so going back
+      // to the password step cannot submit a token that has already been used.
       if (turnstileEnabled) {
         setCaptcha('');
         setCaptchaKey((n) => n + 1);
       }
-      setServerError(errorMessage(err, 'We could not sign you in.'));
     }
   };
 

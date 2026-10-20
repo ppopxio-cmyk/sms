@@ -91,8 +91,10 @@ export default function ForgotPassword() {
       setStep('code');
       toast.success('If that email has an account, a code is on its way.');
     } catch (err) {
-      if (turnstileEnabled) freshEmailCheck();
       setError(errorMessage(err));
+    } finally {
+      // The request spends the token whether it succeeds or fails.
+      if (turnstileEnabled) freshEmailCheck();
     }
   };
 
@@ -125,8 +127,10 @@ export default function ForgotPassword() {
       timer.start();
       toast.success('We sent a new code.');
     } catch (err) {
-      if (turnstileEnabled) freshCodeCheck();
       setError(errorMessage(err));
+    } finally {
+      // The resend widget stays on screen, so replace the spent token before the next try.
+      if (turnstileEnabled) freshCodeCheck();
     }
   };
 

@@ -5,6 +5,11 @@ export const ETH_MONTHS = [
   'Miazia', 'Ginbot', 'Sene', 'Hamle', 'Nehase', 'Pagume',
 ];
 
+export const ETH_MONTHS_AM = [
+  'መስከረም', 'ጥቅምት', 'ኅዳር', 'ታኅሣሥ', 'ጥር', 'የካቲት', 'መጋቢት',
+  'ሚያዝያ', 'ግንቦት', 'ሰኔ', 'ሐምሌ', 'ነሐሴ', 'ጳጉሜ',
+];
+
 function julianDay(y, m, d) {
   const a = Math.floor((14 - m) / 12);
   const yy = y + 4800 - a;
@@ -46,4 +51,20 @@ export function formatEthiopian(input = new Date(), { time = false } = {}) {
     hour12: true,
   }).format(new Date(input));
   return `${date}, ${clock}`;
+}
+
+// The screens and mail are English, but the school's downloads are read in Amharic.
+// Keep this separate from formatEthiopian so the two audiences do not change each other.
+export function formatEthiopianAmharic(input = new Date(), { time = false } = {}) {
+  if (!input) return '—';
+  const { year, month, day } = toEthiopian(input);
+  const date = `${day} ${ETH_MONTHS_AM[month - 1]} ${year}`;
+  if (!time) return date;
+  const clock = new Intl.DateTimeFormat('en-GB', {
+    timeZone: TZ,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(input));
+  return `${date}፣ ${clock}`;
 }
