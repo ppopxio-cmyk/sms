@@ -12,6 +12,7 @@ import {
   auditCategory,
   auditCategoryExpression,
 } from '../services/auditCategory.service.js';
+import { after, atOrAfter } from '../utils/mongo.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ONLINE_MS = 2 * 60 * 1000;
@@ -159,7 +160,7 @@ export const terminateSession = asyncHandler(async (req, res) => {
   const session = await Session.findOne({
     _id: req.valid.params.id,
     status: 'active',
-    expiresAt: { $gt: now },
+    expiresAt: after(now),
   });
   if (!session) throw new AppError(404, 'NOT_FOUND', 'That session was not found or has already ended.');
 
@@ -184,6 +185,7 @@ export const getOverview = asyncHandler(async (req, res) => {
   const firstDay = dayKey(new Date(now.getTime() - (days - 1) * DAY_MS));
   const since = new Date(`${firstDay}T00:00:00+03:00`);
   const onlineSince = new Date(now.getTime() - ONLINE_MS);
+  const liveQuery = { status: 'active', expiresAt: after(now) };
   const live = { status: 'active', expiresAt: { $gt: now } };
 
   const [
@@ -208,20 +210,20 @@ export const getOverview = asyncHandler(async (req, res) => {
       { $match: { deletedAt: null } },
       { $group: { _id: { role: '$role', status: '$status' }, count: { $sum: 1 } } },
     ]),
-    User.countDocuments({ deletedAt: null, lockUntil: { $gt: now } }),
+    User.countDocuments({ deletedAt: null, lockUntil: after(now) }),
     User.countDocuments({ deletedAt: null, emailVerified: true }),
-    User.countDocuments({ deletedAt: null, createdAt: { $gte: since } }),
-    Session.countDocuments(live),
-    Session.countDocuments({ ...live, lastSeenAt: { $gte: onlineSince } }),
-    Session.distinct('userId', live),
-    Session.countDocuments({ status: 'revoked', revokedAt: { $gte: since } }),
-    Session.countDocuments({ createdAt: { $gte: since } }),
+    User.countDocuments({ deletedAt: null, createdAt: atOrAfter(since) }),
+    Session.countDocuments(liveQuery),
+    Session.countDocuments({ ...liveQuery, lastSeenAt: atOrAfter(onlineSince) }),
+    Session.distinct('userId', liveQuery),
+    Session.countDocuments({ status: 'revoked', revokedAt: atOrAfter(since) }),
+    Session.countDocuments({ createdAt: atOrAfter(since) }),
     Session.aggregate([
       { $match: live },
       { $group: { _id: { $ifNull: ['$deviceType', 'unknown'] }, count: { $sum: 1 } } },
       { $sort: { count: -1 } },
     ]),
-    AuditLog.countDocuments({ createdAt: { $gte: since } }),
+    AuditLog.countDocuments({ createdAt: atOrAfter(since) }),
     AuditLog.aggregate([
       { $match: { createdAt: { $gte: since } } },
       {
@@ -246,8 +248,8 @@ export const getOverview = asyncHandler(async (req, res) => {
       .limit(8)
       .populate('actorId', 'name email role')
       .lean(),
-    AuditLog.countDocuments({ action: 'auth.login', status: 'success', createdAt: { $gte: since } }),
-    AuditLog.countDocuments({ action: 'auth.login_failed', status: 'fail', createdAt: { $gte: since } }),
+    AuditLog.countDocuments({ action: 'auth.login', status: 'success', createdAt: atOrAfter(since) }),
+    AuditLog.countDocuments({ action: 'auth.login_failed', status: 'fail', createdAt: atOrAfter(since) }),
   ]);
 
   const roles = ROLES.map((role) => ({ role, total: 0, active: 0, pending: 0, disabled: 0 }));

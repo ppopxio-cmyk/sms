@@ -26,6 +26,10 @@ const AdminSessions = lazy(() => import('./pages/AdminSessions.jsx'));
 const AuditLogs = lazy(() => import('./pages/AuditLogs.jsx'));
 const Notifications = lazy(() => import('./pages/Notifications.jsx'));
 const Me = lazy(() => import('./pages/Me.jsx'));
+const AdminAnnouncements = lazy(() => import('./pages/AdminAnnouncements.jsx'));
+const AdminSettings = lazy(() => import('./pages/AdminSettings.jsx'));
+const AdminExportCenter = lazy(() => import('./pages/AdminExportCenter.jsx'));
+const AdminAccount = lazy(() => import('./pages/AdminAccount.jsx'));
 const NotFound = lazy(() => import('./pages/NotFound.jsx'));
 
 // The roles whose own area exists so far. ADMIN has the real screens; the rest land on
@@ -84,7 +88,18 @@ export default function App() {
               <Route path="/admin" element={<AdminDashboard />} />
               <Route path="/admin/users" element={<Users />} />
               <Route path="/admin/sessions" element={<AdminSessions />} />
-              <Route path="/admin/audit" element={<AuditLogs />} />
+              <Route path="/admin/audit-logs" element={<AuditLogs />} />
+              <Route path="/admin/audit" element={<Navigate to="/admin/audit-logs" replace />} />
+              <Route path="/admin/announcements" element={<AdminAnnouncements />} />
+              <Route path="/admin/notifications" element={<Notifications />} />
+              <Route path="/admin/export" element={<AdminExportCenter />} />
+              <Route path="/admin/exports" element={<Navigate to="/admin/export" replace />} />
+              <Route path="/admin/settings" element={<AdminSettings />} />
+              <Route path="/admin/system-settings" element={<Navigate to="/admin/settings" replace />} />
+              <Route path="/admin/account" element={<AdminAccount />} />
+              <Route path="/admin/my-account" element={<Navigate to="/admin/account" replace />} />
+              <Route path="/admin/devices" element={<Sessions />} />
+              <Route path="/admin/my-devices" element={<Navigate to="/admin/devices" replace />} />
             </Route>
 
             {OTHER_ROLES.map((role) => (

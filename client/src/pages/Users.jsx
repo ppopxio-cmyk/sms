@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
@@ -9,6 +9,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   CircleCheck,
+  Clock3,
   Lock,
   LogOut,
   Mail,
@@ -26,6 +27,7 @@ import {
 import { api, errorMessage } from '../lib/api';
 import { createUserSchema, editUserSchema, removeUserSchema, ASSIGNABLE_ROLES, emailField } from '../lib/validation';
 import { useDebounced } from '../lib/useDebounced';
+import { useNow } from '../lib/useNow';
 import { useAuth } from '../store/auth';
 import { formatEthiopian } from '../lib/ethiopianDate';
 import { initials, number, roleLabel } from '../lib/format';
@@ -35,6 +37,7 @@ import Button from '../components/ui/Button';
 import ExportMenu from '../components/ui/ExportMenu';
 import Field from '../components/ui/Field';
 import FilterTabs from '../components/ui/FilterTabs';
+import LiveStamp from '../components/ui/LiveStamp';
 import Modal from '../components/ui/Modal';
 import Pagination from '../components/ui/Pagination';
 import RowMenu from '../components/ui/RowMenu';
@@ -83,6 +86,7 @@ export default function Users() {
   const queryClient = useQueryClient();
   const me = useAuth((state) => state.user);
   const location = useLocation();
+  const now = useNow(1000);
 
   const [search, setSearch] = useState(() => location.state?.search ?? '');
   const [role, setRole] = useState('ALL');
@@ -128,6 +132,8 @@ export default function Users() {
   const users = useQuery({
     queryKey: ['users', params],
     queryFn: async () => (await api.get('/admin/users', { params })).data,
+    refetchInterval: 45_000,
+    placeholderData: keepPreviousData,
   });
 
   const rows = users.data?.users ?? [];
@@ -282,7 +288,13 @@ export default function Users() {
     <div className="space-y-6">
       <header className="animate-rise flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm font-medium text-slate-500">{formatEthiopian(new Date())}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="flex items-center gap-2 text-sm font-medium text-slate-500">
+              <Clock3 className="h-4 w-4 text-brand-500" />
+              {formatEthiopian(now, { time: true })}
+            </p>
+            <LiveStamp updatedAt={users.dataUpdatedAt} label="Users live" />
+          </div>
           <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">Users &amp; access</h1>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
             Every account, the role it holds, and whether it can sign in. New people set their own name and password from the

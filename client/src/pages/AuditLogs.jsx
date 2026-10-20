@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import {
   Activity,
   CircleAlert,
@@ -7,21 +7,25 @@ import {
   Download,
   Eye,
   LogIn,
+  Megaphone,
   RefreshCw,
   ScrollText,
   Settings2,
   ShieldCheck,
   UserRound,
+  Wrench,
 } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
 import { formatEthiopian, timeAgo } from '../lib/ethiopianDate';
 import { humanizeAction, number } from '../lib/format';
 import { useDebounced } from '../lib/useDebounced';
+import { useNow } from '../lib/useNow';
 import Card, { CardBody, CardHeader } from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import ExportMenu from '../components/ui/ExportMenu';
 import FilterTabs from '../components/ui/FilterTabs';
+import LiveStamp from '../components/ui/LiveStamp';
 import Modal from '../components/ui/Modal';
 import Pagination from '../components/ui/Pagination';
 import SearchInput from '../components/ui/SearchInput';
@@ -47,6 +51,24 @@ const CATEGORY = {
     icon: Settings2,
     chip: 'bg-violet-50 text-violet-600 ring-violet-100',
     dot: 'bg-violet-500',
+  },
+  settings: {
+    label: 'Settings',
+    icon: Settings2,
+    chip: 'bg-teal-50 text-teal-600 ring-teal-100',
+    dot: 'bg-teal-500',
+  },
+  announcements: {
+    label: 'Announcements',
+    icon: Megaphone,
+    chip: 'bg-fuchsia-50 text-fuchsia-600 ring-fuchsia-100',
+    dot: 'bg-fuchsia-500',
+  },
+  maintenance: {
+    label: 'Maintenance',
+    icon: Wrench,
+    chip: 'bg-amber-50 text-amber-700 ring-amber-100',
+    dot: 'bg-amber-500',
   },
   account: {
     label: 'Accounts',
@@ -80,6 +102,7 @@ export default function AuditLogs() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
   const [selected, setSelected] = useState(null);
+  const now = useNow(1000);
   const debouncedSearch = useDebounced(search);
 
   useEffect(() => {
@@ -105,7 +128,8 @@ export default function AuditLogs() {
   const list = useQuery({
     queryKey: ['audit-logs', params],
     queryFn: async () => (await api.get('/admin/audit-logs', { params })).data,
-    refetchInterval: 60_000,
+    refetchInterval: 30_000,
+    placeholderData: keepPreviousData,
   });
 
   const rows = list.data?.logs ?? [];
@@ -121,6 +145,9 @@ export default function AuditLogs() {
     { key: 'signin', label: 'Sign-ins', count: counts?.categories?.signin, dot: 'bg-sky-500' },
     { key: 'security', label: 'Security', count: counts?.categories?.security, dot: 'bg-rose-500' },
     { key: 'admin', label: 'Admin', count: counts?.categories?.admin, dot: 'bg-violet-500' },
+    { key: 'settings', label: 'Settings', count: counts?.categories?.settings, dot: 'bg-teal-500' },
+    { key: 'announcements', label: 'Announcements', count: counts?.categories?.announcements, dot: 'bg-fuchsia-500' },
+    { key: 'maintenance', label: 'Maintenance', count: counts?.categories?.maintenance, dot: 'bg-amber-500' },
     { key: 'account', label: 'Accounts', count: counts?.categories?.account, dot: 'bg-emerald-500' },
     { key: 'export', label: 'Exports', count: counts?.categories?.export, dot: 'bg-amber-500' },
     { key: 'other', label: 'Other', count: counts?.categories?.other, dot: 'bg-slate-400' },
@@ -133,10 +160,13 @@ export default function AuditLogs() {
     <div className="space-y-6">
       <header className="animate-rise flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="flex items-center gap-2 text-sm font-medium text-slate-500">
-            <Clock3 className="h-4 w-4 text-brand-500" />
-            {formatEthiopian(new Date(), { time: true })}
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="flex items-center gap-2 text-sm font-medium text-slate-500">
+              <Clock3 className="h-4 w-4 text-brand-500" />
+              {formatEthiopian(now, { time: true })}
+            </p>
+            <LiveStamp updatedAt={list.dataUpdatedAt} label="Audit live" />
+          </div>
           <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">Audit log</h1>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
             An append-only record of sign-ins, security events, account changes and exports. Entries cannot be edited or deleted

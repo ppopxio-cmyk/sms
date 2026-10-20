@@ -13,6 +13,8 @@ import { isPrivateAddress } from './utils/geo.js';
 import { globalLimiter } from './middleware/rateLimit.js';
 import { csrfGuard } from './middleware/csrf.js';
 import { notFound, errorHandler } from './middleware/error.js';
+import { maintenanceGuard } from './middleware/maintenance.js';
+import { getSettings, maintenanceState, publicSettings } from './services/settings.service.js';
 import routes from './routes/index.js';
 
 export function createApp() {
@@ -72,6 +74,24 @@ export function createApp() {
     res.json({ ok: true, commit: process.env.RENDER_GIT_COMMIT?.slice(0, 7) || null }),
   );
 
+  // Public and deliberately small. The sign-in screen and the shell use this to say
+  // that the portal is closed without asking a visitor to sign in first.
+  app.get('/api/status', async (req, res) => {
+    try {
+      const settings = await getSettings();
+      const safe = publicSettings(settings);
+      res.json({
+        ok: true,
+        name: safe.institution?.name || 'College portal',
+        shortName: safe.institution?.shortName || 'SMS',
+        maintenance: maintenanceState(settings),
+        generatedAt: new Date(),
+      });
+    } catch {
+      res.status(503).json({ ok: false, maintenance: { enabled: false }, message: 'Status is temporarily unavailable.' });
+    }
+  });
+
   // What this service thinks the caller's address and place are, and which header it
   // believed. Handy when a sign-in says the wrong country: it shows where the answer came
   // from without echoing anything else.
@@ -117,7 +137,7 @@ export function createApp() {
       });
     }
   });
-  app.use('/api', globalLimiter, csrfGuard, routes);
+  app.use('/api', globalLimiter, csrfGuard, maintenanceGuard, routes);
 
   app.use(notFound);
   app.use(errorHandler);

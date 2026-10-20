@@ -1,12 +1,14 @@
 import { User } from '../models/User.js';
 import { Session } from '../models/Session.js';
 import { AuditLog } from '../models/AuditLog.js';
+import { Announcement } from '../models/Announcement.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { escapeRegex } from '../utils/text.js';
 import { formatEthiopianAmharic } from '../utils/ethiopianDate.js';
 import { audit } from '../services/audit.service.js';
 import { auditCategory, auditCategoryFilter } from '../services/auditCategory.service.js';
 import { buildExport, EXPORT_LIMIT } from '../services/export.service.js';
+import { after, atOrAfter, oneOf } from '../utils/mongo.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ONLINE_MS = 2 * 60 * 1000;
@@ -35,6 +37,9 @@ const CATEGORY_LABEL = {
   signin: 'መግቢያ',
   security: 'ደህንነት',
   admin: 'አስተዳደር',
+  settings: 'ቅንብሮች',
+  announcements: 'ማስታወቂያዎች',
+  maintenance: 'ጥገና',
   account: 'መለያ',
   export: 'ማውጣት',
   other: 'ሌላ',
@@ -67,16 +72,29 @@ const ACTION_LABEL = {
   'admin.user_signed_out': 'ተጠቃሚው ከሁሉም መሣሪያ ወጥቷል',
   'admin.user_removed': 'ተጠቃሚ ተወግዷል',
   'admin.session_terminated': 'ክፍለ ጊዜ ተጠናቋል',
+  'admin.settings_updated': 'ቅንብሮች ተቀይረዋል',
+  'admin.settings_email_test': 'የኢሜይል ሙከራ',
+  'admin.maintenance_enabled': 'ጥገና ተጀምሯል',
+  'admin.maintenance_disabled': 'ጥገና ተጠናቋል',
+  'admin.announcement_created': 'ማስታወቂያ ተፈጥሯል',
+  'admin.announcement_updated': 'ማስታወቂያ ተቀይሯል',
+  'admin.announcement_published': 'ማስታወቂያ ታውቋል',
+  'admin.announcement_archived': 'ማስታወቂያ ተመዝግቧል',
+  'admin.announcement_duplicated': 'ማስታወቂያ ተቀድቷል',
   'user.push_subscribed': 'ማሳወቂያ ተከፍቷል',
   'user.push_unsubscribed': 'ማሳወቂያ ተዘግቷል',
   'export.users': 'የተጠቃሚዎች ማውጣት',
   'export.sessions': 'የክፍለ ጊዜዎች ማውጣት',
   'export.audit_logs': 'የኦዲት መዝገብ ማውጣት',
+  'export.announcements': 'የማስታወቂያ ማውጣት',
+  'export.system_analytics': 'የስርዓት ትንተና ማውጣት',
 };
 
 const TARGET_TYPE_LABEL = {
   user: 'ተጠቃሚ',
   session: 'ክፍለ ጊዜ',
+  settings: 'ቅንብሮች',
+  announcement: 'ማስታወቂያ',
   export: 'ማውጣት',
   notification: 'ማሳወቂያ',
 };
@@ -354,7 +372,7 @@ export const exportAuditLogs = auditedExport('export.audit_logs', 'audit_logs', 
   const since = range === 'all' ? null : new Date(now.getTime() - Number(range) * DAY_MS);
 
   const criteria = { ...auditCategoryFilter(category) };
-  if (since) criteria.createdAt = { $gte: since };
+  if (since) criteria.createdAt = atOrAfter(since);
 
   if (search) {
     const rx = new RegExp(escapeRegex(search), 'i');
@@ -368,7 +386,7 @@ export const exportAuditLogs = auditedExport('export.audit_logs', 'audit_logs', 
       { targetType: rx },
       { targetId: rx },
       { ip: rx },
-      ...(actors.length ? [{ actorId: { $in: actors.map((actor) => actor._id) } }] : []),
+      ...(actors.length ? [{ actorId: oneOf(actors.map((actor) => actor._id)) }] : []),
     ];
   }
 
@@ -451,6 +469,207 @@ export const exportAuditLogs = auditedExport('export.audit_logs', 'audit_logs', 
       filters: { search, category, status, range },
       truncated,
     },
+    result: file,
+  });
+});
+
+const AUDIENCE_LABEL = { all: 'All users', role: 'Specific role', user: 'Single user' };
+const PRIORITY_LABEL = { normal: 'Normal', high: 'High', critical: 'Critical' };
+const ANNOUNCEMENT_STATUS_LABEL = {
+  draft: 'Draft',
+  scheduled: 'Scheduled',
+  published: 'Published',
+  expired: 'Expired',
+  archived: 'Archived',
+};
+const TYPE_LABEL = {
+  general: 'General',
+  academic: 'Academic',
+  exam: 'Exam',
+  event: 'Event',
+  administrative: 'Administrative',
+  emergency: 'Emergency',
+  holiday: 'Holiday',
+  finance: 'Finance',
+};
+
+export const exportAnnouncements = auditedExport('export.announcements', 'announcements', async (req, res) => {
+  const { search, status, type, priority, format } = req.valid.query;
+  const filter = {};
+  if (status !== 'all') filter.status = status;
+  if (type !== 'all') filter.type = type;
+  if (priority !== 'all') filter.priority = priority;
+  if (search) {
+    const rx = new RegExp(escapeRegex(search), 'i');
+    filter.$or = [{ title: rx }, { body: rx }];
+  }
+
+  const [rows, total] = await Promise.all([
+    Announcement.find(filter)
+      .sort({ pinned: -1, createdAt: -1 })
+      .limit(EXPORT_LIMIT + 1)
+      .populate('audienceUser', 'name email role')
+      .lean(),
+    Announcement.countDocuments(filter),
+  ]);
+
+  const truncated = rows.length > EXPORT_LIMIT;
+  const selected = rows.slice(0, EXPORT_LIMIT);
+  const records = selected.map((row) => ({
+    title: row.title,
+    type: TYPE_LABEL[row.type] || row.type,
+    priority: PRIORITY_LABEL[row.priority] || row.priority,
+    status: ANNOUNCEMENT_STATUS_LABEL[row.status] || row.status,
+    audience:
+      row.audience === 'role'
+        ? `${AUDIENCE_LABEL.role}: ${ROLE_LABEL[row.audienceRole] || row.audienceRole || ''}`
+        : row.audience === 'user'
+          ? `${AUDIENCE_LABEL.user}: ${row.audienceUser?.email || row.audienceUser?.name || ''}`
+          : AUDIENCE_LABEL.all,
+    recipients: row.recipientCount || 0,
+    delivered: row.deliveredCount || 0,
+    read: row.readCount || 0,
+    readRate: row.recipientCount ? `${Math.round((row.readCount / row.recipientCount) * 100)}%` : '0%',
+    email: row.sendEmail ? `${row.emailSentCount || 0} sent / ${row.emailFailedCount || 0} failed` : 'Not requested',
+    published: formatEthiopianAmharic(row.publishedAt, { time: true }),
+    expires: row.expiresAt ? formatEthiopianAmharic(row.expiresAt, { time: true }) : '',
+    created: formatEthiopianAmharic(row.createdAt),
+  }));
+
+  const subtitle =
+    filterLine(
+      search ? `Search "${search}"` : null,
+      status !== 'all' ? `Status: ${ANNOUNCEMENT_STATUS_LABEL[status] || status}` : null,
+      type !== 'all' ? `Type: ${TYPE_LABEL[type] || type}` : null,
+      priority !== 'all' ? `Priority: ${PRIORITY_LABEL[priority] || priority}` : null,
+    ) || 'All announcements';
+
+  const file = await buildExport({
+    format,
+    filenamePrefix: 'announcements',
+    title: 'Announcement register',
+    subtitle,
+    summary: [
+      { label: 'Matching announcements', value: total.toLocaleString('en-US') },
+      { label: 'Rows in this file', value: records.length.toLocaleString('en-US') },
+    ],
+    note: truncationNote('announcements', total, records.length),
+    columns: [
+      { key: 'title', header: 'Title', width: 30 },
+      { key: 'type', header: 'Type', width: 16 },
+      { key: 'priority', header: 'Priority', width: 12 },
+      { key: 'status', header: 'Status', width: 13 },
+      { key: 'audience', header: 'Audience', width: 26 },
+      { key: 'recipients', header: 'Recipients', width: 12 },
+      { key: 'delivered', header: 'Delivered', width: 12 },
+      { key: 'read', header: 'Read', width: 10 },
+      { key: 'readRate', header: 'Read rate', width: 11 },
+      { key: 'email', header: 'Email delivery', width: 20 },
+      { key: 'published', header: 'Published', width: 23 },
+      { key: 'expires', header: 'Expires', width: 23 },
+      { key: 'created', header: 'Created', width: 20 },
+    ],
+    rows: records,
+  });
+
+  await deliver(req, res, {
+    action: 'export.announcements',
+    meta: { resource: 'announcements', filters: { search, status, type, priority }, truncated },
+    result: file,
+  });
+});
+
+export const exportAnalytics = auditedExport('export.system_analytics', 'system_analytics', async (req, res) => {
+  const { days, format } = req.valid.query;
+  const now = new Date();
+  const since = new Date(now.getTime() - (days - 1) * DAY_MS);
+  const onlineSince = new Date(now.getTime() - ONLINE_MS);
+
+  const [users, locked, verified, newUsers, roleRows, statusRows, activeSessions, onlineSessions, terminatedSessions, newSessions, auditTotal, auditFailures, categoryRows, announcementRows] =
+    await Promise.all([
+      User.countDocuments({ deletedAt: null }),
+      User.countDocuments({ deletedAt: null, lockUntil: after(now) }),
+      User.countDocuments({ deletedAt: null, emailVerified: true }),
+      User.countDocuments({ deletedAt: null, createdAt: atOrAfter(since) }),
+      User.aggregate([{ $match: { deletedAt: null } }, { $group: { _id: '$role', count: { $sum: 1 } } }]),
+      User.aggregate([{ $match: { deletedAt: null } }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
+      Session.countDocuments({ status: 'active', expiresAt: after(now) }),
+      Session.countDocuments({ status: 'active', expiresAt: after(now), lastSeenAt: atOrAfter(onlineSince) }),
+      Session.countDocuments({ status: 'revoked', revokedAt: atOrAfter(since) }),
+      Session.countDocuments({ createdAt: atOrAfter(since) }),
+      AuditLog.countDocuments({ createdAt: atOrAfter(since) }),
+      AuditLog.countDocuments({ createdAt: atOrAfter(since), status: 'fail' }),
+      AuditLog.aggregate([
+        { $match: { createdAt: { $gte: since } } },
+        { $group: { _id: '$action', count: { $sum: 1 } } },
+      ]),
+      Announcement.aggregate([{ $group: { _id: '$status', count: { $sum: 1 }, recipients: { $sum: '$recipientCount' }, reads: { $sum: '$readCount' } } }]),
+    ]);
+
+  const roles = Object.fromEntries(roleRows.map((row) => [row._id, row.count]));
+  const statuses = Object.fromEntries(statusRows.map((row) => [row._id, row.count]));
+  const categories = { signin: 0, security: 0, admin: 0, settings: 0, announcements: 0, maintenance: 0, account: 0, export: 0, other: 0 };
+  for (const row of categoryRows) categories[auditCategory(row._id)] += row.count;
+  const announcements = Object.fromEntries(
+    announcementRows.map((row) => [row._id, { count: row.count, recipients: row.recipients, reads: row.reads }]),
+  );
+
+  const metrics = [
+    ['Accounts', 'Total accounts', users],
+    ['Accounts', 'Active accounts', statuses.active || 0],
+    ['Accounts', 'Awaiting setup', statuses.pending || 0],
+    ['Accounts', 'Turned off', statuses.disabled || 0],
+    ['Accounts', 'Locked out now', locked],
+    ['Accounts', 'Email verified', verified],
+    ['Accounts', `New in the last ${days} days`, newUsers],
+    ['Accounts', 'Administrators', roles.ADMIN || 0],
+    ['Accounts', 'Registrars', roles.REGISTRAR || 0],
+    ['Accounts', 'Teachers', roles.TEACHER || 0],
+    ['Accounts', 'Accountants', roles.ACCOUNTANT || 0],
+    ['Sessions', 'Active sessions now', activeSessions],
+    ['Sessions', 'Online in the last 2 minutes', onlineSessions],
+    ['Sessions', 'Sessions ended in this range', terminatedSessions],
+    ['Sessions', 'Sessions started in this range', newSessions],
+    ['Audit', `Audited actions in the last ${days} days`, auditTotal],
+    ['Audit', 'Failed actions', auditFailures],
+    ['Audit', 'Sign-in events', categories.signin],
+    ['Audit', 'Security events', categories.security],
+    ['Audit', 'Administration events', categories.admin],
+    ['Audit', 'Settings changes', categories.settings],
+    ['Audit', 'Announcement changes', categories.announcements],
+    ['Audit', 'Maintenance changes', categories.maintenance],
+    ['Audit', 'Exports', categories.export],
+    ['Announcements', 'Drafts', announcements.draft?.count || 0],
+    ['Announcements', 'Scheduled', announcements.scheduled?.count || 0],
+    ['Announcements', 'Published', announcements.published?.count || 0],
+    ['Announcements', 'Expired', announcements.expired?.count || 0],
+    ['Announcements', 'Archived', announcements.archived?.count || 0],
+    ['Announcements', 'People reached', Object.values(announcements).reduce((sum, row) => sum + (row.recipients || 0), 0)],
+    ['Announcements', 'Read receipts', Object.values(announcements).reduce((sum, row) => sum + (row.reads || 0), 0)],
+  ];
+
+  const rows = metrics.map(([section, metric, value]) => ({ section, metric, value: Number(value) || 0 }));
+
+  const file = await buildExport({
+    format,
+    filenamePrefix: 'system-analytics',
+    title: 'System analytics',
+    subtitle: `Rolling ${days}-day window, generated from live accounts, sessions, announcements and audit records.`,
+    summary: [
+      { label: 'Window', value: `${days} days` },
+      { label: 'Metrics', value: rows.length.toLocaleString('en-US') },
+    ],
+    columns: [
+      { key: 'section', header: 'Area', width: 20 },
+      { key: 'metric', header: 'Metric', width: 48 },
+      { key: 'value', header: 'Value', width: 16 },
+    ],
+    rows,
+  });
+
+  await deliver(req, res, {
+    action: 'export.system_analytics',
+    meta: { resource: 'system_analytics', filters: { days }, truncated: false },
     result: file,
   });
 });

@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Menu } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Menu, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
+import { api } from '../../lib/api';
 import { useAuth } from '../../store/auth';
 import { useNotificationStream } from '../../lib/notifications';
 import Badge from '../ui/Badge';
@@ -9,6 +11,7 @@ import NotificationBell from './NotificationBell';
 import ProfileMenu from './ProfileMenu';
 import GlobalSearch from './GlobalSearch';
 import Sidebar from './Sidebar';
+import CommandPalette from './CommandPalette';
 
 // The app has one fixed column on a wide screen and a drawer on a phone. The header keeps
 // the three things that are always wanted within reach: search, notices and the account.
@@ -21,6 +24,16 @@ export default function AppShell() {
   // One live connection for the whole app: notices float in as they happen, on every page
   // and for every role. The service worker is registered once in main.jsx.
   useNotificationStream(true);
+
+  const status = useQuery({
+    queryKey: ['system-status'],
+    queryFn: async () => (await api.get('/status')).data,
+    refetchInterval: 60_000,
+    retry: 0,
+    staleTime: 30_000,
+  });
+  const maintenance = status.data?.maintenance;
+  const isAdmin = user?.role === 'ADMIN';
 
   const signOut = async () => {
     setOpen(false);
@@ -53,11 +66,33 @@ export default function AppShell() {
             <GlobalSearch />
 
             <div className="ml-auto flex items-center gap-2">
+              {isAdmin ? <CommandPalette /> : null}
               <NotificationBell />
               <ProfileMenu />
             </div>
           </div>
         </header>
+
+        {maintenance?.enabled ? (
+          <div className="border-b border-amber-200/80 bg-amber-50/90">
+            <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-2.5 text-xs text-amber-900 sm:px-6">
+              <Wrench className="h-4 w-4 shrink-0 text-amber-600" />
+              <p className="min-w-0 flex-1">
+                <span className="font-semibold">Maintenance mode is on.</span> {maintenance.message}
+                {maintenance.until ? ` It is planned to end ${new Date(maintenance.until).toLocaleString()}.` : ''}
+              </p>
+              {isAdmin ? (
+                <NavLink
+                  to="/admin/settings"
+                  state={{ tab: 'maintenance' }}
+                  className="focus-ring rounded-lg bg-white/80 px-2.5 py-1 font-semibold text-amber-800 ring-1 ring-amber-200 hover:bg-white"
+                >
+                  Open settings
+                </NavLink>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
           <Outlet />

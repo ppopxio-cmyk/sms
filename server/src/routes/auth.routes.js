@@ -5,12 +5,13 @@ import { authenticate, requirePasswordChanged } from '../middleware/authenticate
 import {
   emailOnlySchema, verifyEmailSchema, loginSchema, loginVerifySchema, ticketSchema,
   setupAccountSchema, changePasswordSchema, sessionConfirmSchema, sessionNameSchema, idParamSchema, twoStepSchema,
-  deletePasswordSchema, deleteAccountSchema,
+  deletePasswordSchema, deleteAccountSchema, profileSchema, preferencesSchema,
 } from '../validators/auth.schemas.js';
 import {
   verifyEmail, setupAccount, resendVerification, login, loginVerify, loginResend,
   refresh, logout, me, heartbeat, changePassword, listMySessions, renameMySession,
   requestSessionCode, terminateMySession, setTwoStep, requestDeleteCode, deleteAccount,
+  updateProfile, updatePreferences, myActivity,
 } from '../controllers/auth.controller.js';
 import { turnstile } from '../middleware/turnstile.js';
 
@@ -30,6 +31,9 @@ r.post('/refresh', refresh);
 r.post('/logout', logout);
 
 r.get('/me', authenticate, me);
+r.patch('/profile', authenticate, requirePasswordChanged, validate(profileSchema), updateProfile);
+r.patch('/preferences', authenticate, requirePasswordChanged, validate(preferencesSchema), updatePreferences);
+r.get('/activity', authenticate, requirePasswordChanged, myActivity);
 r.post('/change-password', authLimiter, authenticate, validate(changePasswordSchema), changePassword);
 r.post('/two-step', authLimiter, authenticate, requirePasswordChanged, validate(twoStepSchema), setTwoStep);
 r.post('/delete-account/code', authLimiter, authenticate, requirePasswordChanged, validate(deletePasswordSchema), requestDeleteCode);

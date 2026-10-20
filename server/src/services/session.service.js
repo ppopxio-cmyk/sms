@@ -6,6 +6,8 @@ import { AppError } from '../utils/AppError.js';
 import { deviceKey } from '../utils/device.js';
 import { newRefreshToken, sha256 } from './token.service.js';
 import { audit } from './audit.service.js';
+import { securityPolicy } from './securityPolicy.service.js';
+import { atOrAfter } from '../utils/mongo.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const CACHE_MS = 30_000;
@@ -28,8 +30,24 @@ export async function isSessionActive(sid, userId) {
     return true;
   }
   if (!mongoose.isValidObjectId(key)) return false;
-  const s = await Session.findById(key).select('userId status expiresAt').lean();
-  const ok = !!s && s.status === 'active' && s.expiresAt.getTime() > now && String(s.userId) === String(userId);
+  const [s, policy] = await Promise.all([
+    Session.findById(key).select('userId status expiresAt absoluteExpiresAt lastSeenAt').lean(),
+    securityPolicy(),
+  ]);
+  const idleMs = policy.idleMinutes * 60_000;
+  const lastSeen = s?.lastSeenAt?.getTime?.() ?? 0;
+  const idle = Boolean(lastSeen && now - lastSeen > idleMs);
+  const timedOut = Boolean(
+    s && (s.expiresAt?.getTime?.() <= now || s.absoluteExpiresAt?.getTime?.() <= now),
+  );
+  const ok = !!s && s.status === 'active' && !timedOut && !idle && String(s.userId) === String(userId);
+
+  // An idle browser is ended explicitly, so the administrator's session list shows a
+  // real reason instead of a row that merely looks old.
+  if (idle && s?.status === 'active' && String(s.userId) === String(userId)) {
+    await revokeSession(s._id, { reason: 'idle_timeout' });
+  }
+
   if (ok) cache.set(key, { userId: String(userId), until: now + CACHE_MS, touched: now });
   else cache.delete(key);
   return ok;
@@ -38,6 +56,13 @@ export async function isSessionActive(sid, userId) {
 export async function createSession({ user, deviceId, fingerprint, info }) {
   const now = Date.now();
   const key = deviceKey(fingerprint, deviceId);
+  const policy = await securityPolicy();
+
+  // A single-session policy means the new sign-in replaces every older browser before
+  // the device limit is counted, so switching the rule on can never strand somebody at
+  // "too many devices" on their next login.
+  if (policy.singleSession) await deleteAllForUser(user._id);
+
   const live = (await Session.find({ userId: user._id, status: 'active' }).select('deviceId fingerprint expiresAt').lean()).filter(
     (s) => s.expiresAt.getTime() > now,
   );
@@ -60,6 +85,7 @@ export async function createSession({ user, deviceId, fingerprint, info }) {
   // A name the person gave this browser last time belongs on the new row too, otherwise
   // signing in again would forget it.
   const known = await KnownDevice.findOne({ userId: user._id, key }).select('deviceLabel').lean();
+  const absoluteExpiresAt = new Date(now + policy.absoluteDays * DAY);
   const session = await Session.create({
     userId: user._id,
     deviceId,
@@ -67,8 +93,9 @@ export async function createSession({ user, deviceId, fingerprint, info }) {
     refreshHash: sha256(refresh),
     ...info,
     deviceLabel: known?.deviceLabel,
-    expiresAt: new Date(now + env.REFRESH_TTL_DAYS * DAY),
-    absoluteExpiresAt: new Date(now + env.REFRESH_ABSOLUTE_DAYS * DAY),
+    // The normal refresh window can never outlive the administrator's absolute limit.
+    expiresAt: new Date(Math.min(now + env.REFRESH_TTL_DAYS * DAY, absoluteExpiresAt.getTime())),
+    absoluteExpiresAt,
   });
   return { session, refresh };
 }
@@ -119,13 +146,27 @@ export async function rotateSession(rawToken) {
   const hash = sha256(rawToken);
   const next = newRefreshToken();
   const now = new Date();
+  const policy = await securityPolicy();
+  const staleBefore = new Date(now.getTime() - policy.idleMinutes * 60_000);
 
-  // One atomic step: only one request can win with a given token.
+  // One atomic step: only one request can win with a given token. The idle cutoff is
+  // part of the filter, so a refresh token from a browser that has been closed for too
+  // long cannot quietly start a new session.
   const session = await Session.findOneAndUpdate(
-    { refreshHash: hash, status: 'active' },
+    { refreshHash: hash, status: 'active', lastSeenAt: atOrAfter(staleBefore) },
     { $set: { prevRefreshHash: hash, refreshHash: sha256(next), rotatedAt: now, lastSeenAt: now } },
     { returnDocument: 'after' },
   );
+
+  if (!session) {
+    const stale = await Session.findOne({ refreshHash: hash, status: 'active' })
+      .select('_id lastSeenAt')
+      .lean();
+    if (stale && (!stale.lastSeenAt || stale.lastSeenAt < staleBefore)) {
+      await revokeSession(stale._id, { reason: 'idle_timeout' });
+      throw new AppError(401, 'SESSION_EXPIRED', 'Your session ended after a period of inactivity. Please sign in again.');
+    }
+  }
 
   if (session) {
     if (session.expiresAt <= now || session.absoluteExpiresAt <= now) {

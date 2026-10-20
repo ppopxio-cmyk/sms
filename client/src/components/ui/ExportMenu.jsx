@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { ChevronDown, Download, File, FileSpreadsheet, FileText } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
@@ -27,6 +28,8 @@ const FORMATS = [
     tone: 'bg-rose-50 text-rose-600',
   },
 ];
+
+const MENU_WIDTH = 288;
 
 function filenameFrom(response, fallback) {
   const header = response.headers?.['content-disposition'] || '';
@@ -78,25 +81,55 @@ export default function ExportMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState('');
+  const [position, setPosition] = useState(null);
   const root = useRef(null);
+  const button = useRef(null);
+  const menu = useRef(null);
+
+  const place = () => {
+    const rect = button.current?.getBoundingClientRect();
+    if (!rect) return;
+    const left = Math.min(Math.max(8, rect.right - MENU_WIDTH), window.innerWidth - MENU_WIDTH - 8);
+    const openUp = window.innerHeight - rect.bottom < 330 && rect.top > 330;
+    setPosition(
+      openUp
+        ? { left, bottom: window.innerHeight - rect.top + 8, maxHeight: rect.top - 16 }
+        : { left, top: rect.bottom + 8, maxHeight: window.innerHeight - rect.bottom - 16 },
+    );
+  };
 
   useEffect(() => {
     if (!open) return undefined;
 
     const onPointerDown = (event) => {
-      if (!root.current?.contains(event.target)) setOpen(false);
+      if (root.current?.contains(event.target) || menu.current?.contains(event.target)) return;
+      setOpen(false);
     };
     const onKeyDown = (event) => {
       if (event.key === 'Escape') setOpen(false);
     };
+    const close = () => setOpen(false);
 
-    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
     return () => {
-      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
     };
   }, [open]);
+
+  const toggle = () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    place();
+    setOpen(true);
+  };
 
   const download = async (format) => {
     setOpen(false);
@@ -121,50 +154,63 @@ export default function ExportMenu({
 
   return (
     <div ref={root} className={`relative ${className}`}>
-      <Button
-        variant="secondary"
-        onClick={() => setOpen((value) => !value)}
-        disabled={disabled || Boolean(loading)}
-        loading={Boolean(loading)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-      >
-        {loading ? null : <Download className="h-4 w-4" />}
-        {label}
-        {loading ? null : <ChevronDown className={`h-4 w-4 transition ${open ? 'rotate-180' : ''}`} />}
-      </Button>
-
-      {open ? (
-        <div
-          role="menu"
-          aria-label="Export formats"
-          className="absolute right-0 z-40 mt-2 w-72 overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10"
+      <span ref={button} className="inline-flex">
+        <Button
+          variant="secondary"
+          onClick={toggle}
+          disabled={disabled || Boolean(loading)}
+          loading={Boolean(loading)}
+          aria-haspopup="menu"
+          aria-expanded={open}
         >
-          <p className="px-3 pb-1.5 pt-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-            Download this view
-          </p>
-          {FORMATS.map(({ key, label: formatLabel, hint, icon: Icon, tone }) => (
-            <button
-              key={key}
-              type="button"
-              role="menuitem"
-              onClick={() => download(key)}
-              className="focus-ring flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-slate-50"
+          {loading ? null : <Download className="h-4 w-4" />}
+          {label}
+          {loading ? null : <ChevronDown className={`h-4 w-4 transition ${open ? 'rotate-180' : ''}`} />}
+        </Button>
+      </span>
+
+      {open && position
+        ? createPortal(
+            <div
+              ref={menu}
+              role="menu"
+              aria-label="Export formats"
+              style={{
+                left: position.left,
+                top: position.top,
+                bottom: position.bottom,
+                width: MENU_WIDTH,
+                maxHeight: position.maxHeight,
+              }}
+              className="animate-rise fixed z-[80] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-2xl shadow-slate-900/15 thin-scroll"
             >
-              <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${tone}`}>
-                <Icon className="h-4 w-4" />
-              </span>
-              <span className="min-w-0">
-                <span className="block text-sm font-semibold text-slate-800">{formatLabel}</span>
-                <span className="block text-xs text-slate-500">{hint}</span>
-              </span>
-            </button>
-          ))}
-          <p className="border-t border-slate-100 px-3 pb-1 pt-2 text-[11px] leading-relaxed text-slate-400">
-            The download follows the filters on this screen. Every export is recorded in the audit log.
-          </p>
-        </div>
-      ) : null}
+              <p className="px-3 pb-1.5 pt-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Download this view
+              </p>
+              {FORMATS.map(({ key, label: formatLabel, hint, icon: Icon, tone }) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => download(key)}
+                  className="focus-ring flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-slate-50"
+                >
+                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${tone}`}>
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-slate-800">{formatLabel}</span>
+                    <span className="block text-xs text-slate-500">{hint}</span>
+                  </span>
+                </button>
+              ))}
+              <p className="border-t border-slate-100 px-3 pb-1 pt-2 text-[11px] leading-relaxed text-slate-400">
+                The download follows the filters on this screen. Every export is recorded in the audit log.
+              </p>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

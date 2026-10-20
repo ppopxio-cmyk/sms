@@ -39,10 +39,12 @@ import { useAuth } from '../store/auth';
 import { api } from '../lib/api';
 import { formatEthiopian, formatEthiopianShort, timeAgo } from '../lib/ethiopianDate';
 import { humanizeAction, number, roleLabel } from '../lib/format';
+import { useNow } from '../lib/useNow';
 import { useReducedMotion } from '../lib/useReducedMotion';
 import Card, { CardBody, CardHeader } from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
+import LiveStamp from '../components/ui/LiveStamp';
 import StatCard from '../components/ui/StatCard';
 import { Skeleton, SkeletonChart, SkeletonStats } from '../components/ui/Skeleton';
 import { EmptyState, ErrorState } from '../components/ui/StatePanel';
@@ -243,7 +245,7 @@ const QUICK_ACTIONS = [
     glow: 'from-sky-500/10',
   },
   {
-    to: '/admin/audit',
+    to: '/admin/audit-logs',
     label: 'Audit trail',
     note: 'Read every action, attempt and change',
     icon: ScrollText,
@@ -256,11 +258,12 @@ export default function AdminDashboard() {
   const user = useAuth((state) => state.user);
   const [days, setDays] = useState(14);
   const reduceMotion = useReducedMotion();
+  const now = useNow(1000);
 
   const overview = useQuery({
     queryKey: ['admin-overview', days],
     queryFn: async () => (await api.get('/admin/overview', { params: { days } })).data,
-    refetchInterval: 60_000,
+    refetchInterval: 30_000,
   });
 
   const data = overview.data;
@@ -290,10 +293,13 @@ export default function AdminDashboard() {
     <div className="space-y-6">
       <header className="animate-rise flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="flex items-center gap-2 text-sm font-medium text-slate-500">
-            <Clock3 className="h-4 w-4 text-brand-500" />
-            {formatEthiopian(new Date(), { time: true })}
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="flex items-center gap-2 text-sm font-medium text-slate-500">
+              <Clock3 className="h-4 w-4 text-brand-500" />
+              {formatEthiopian(now, { time: true })}
+            </p>
+            <LiveStamp updatedAt={overview.dataUpdatedAt} label="Live" />
+          </div>
           <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
             Good to see you, <span className="text-brand-gradient">{firstName}</span>
           </h1>
@@ -615,7 +621,7 @@ export default function AdminDashboard() {
 
           <p className="flex items-center justify-center gap-2 pt-1 text-center text-[11px] text-slate-400">
             <CircleCheck className="h-3.5 w-3.5 text-emerald-500" />
-            All figures come from live accounts, sessions and audit records. Counts refresh every minute.
+            All figures come from live accounts, sessions and audit records. Counts refresh every 30 seconds.
           </p>
         </>
       ) : null}

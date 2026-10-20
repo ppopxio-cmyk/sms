@@ -10,11 +10,23 @@ import {
   exportUsersQuerySchema, exportSessionsQuerySchema, exportAuditQuerySchema,
 } from '../validators/admin.schemas.js';
 import {
+  updateSettingsSchema, maintenanceSchema, testEmailSchema,
+  createAnnouncementSchema, updateAnnouncementSchema, listAnnouncementsQuerySchema,
+  audiencePreviewSchema, exportAnnouncementsQuerySchema, exportAnalyticsQuerySchema,
+} from '../validators/admin-extra.schemas.js';
+import {
   getOverview, listSessions, terminateSession, listAuditLogs,
 } from '../controllers/admin.controller.js';
 import {
-  exportUsers, exportSessions, exportAuditLogs,
+  exportUsers, exportSessions, exportAuditLogs, exportAnnouncements, exportAnalytics,
 } from '../controllers/export.controller.js';
+import {
+  readSettings, updateSettings, updateMaintenance, testMail,
+} from '../controllers/settings.controller.js';
+import {
+  listAnnouncements, getAnnouncement, previewAudience, createAnnouncement,
+  updateAnnouncement, publish, archive, duplicate,
+} from '../controllers/announcements.controller.js';
 import {
   listUsers, createUser, updateUser, resendUserCode, signOutUser, removeUser, sendResetLink,
 } from '../controllers/users.controller.js';
@@ -68,5 +80,50 @@ r.delete(
   validate(removeUserSchema),
   removeUser,
 );
+
+// ---- Announcements ------------------------------------------------------------
+// Export and audience preview must stay above `/:id`, or Express reads "export" as
+// an announcement id.
+r.get(
+  '/announcements/export',
+  exportLimiter,
+  requirePermission('announcements:manage'),
+  validate(exportAnnouncementsQuerySchema, 'query'),
+  exportAnnouncements,
+);
+r.get(
+  '/announcements/audience',
+  requirePermission('announcements:manage'),
+  validate(audiencePreviewSchema, 'query'),
+  previewAudience,
+);
+r.get('/announcements', requirePermission('announcements:manage'), validate(listAnnouncementsQuerySchema, 'query'), listAnnouncements);
+r.post('/announcements', requirePermission('announcements:manage'), validate(createAnnouncementSchema), createAnnouncement);
+r.get('/announcements/:id', requirePermission('announcements:manage'), validate(idParamSchema, 'params'), getAnnouncement);
+r.patch(
+  '/announcements/:id',
+  requirePermission('announcements:manage'),
+  validate(idParamSchema, 'params'),
+  validate(updateAnnouncementSchema),
+  updateAnnouncement,
+);
+r.post('/announcements/:id/publish', requirePermission('announcements:manage'), validate(idParamSchema, 'params'), publish);
+r.post('/announcements/:id/archive', requirePermission('announcements:manage'), validate(idParamSchema, 'params'), archive);
+r.post('/announcements/:id/duplicate', requirePermission('announcements:manage'), validate(idParamSchema, 'params'), duplicate);
+
+// ---- Export Center ------------------------------------------------------------
+r.get(
+  '/exports/analytics',
+  exportLimiter,
+  requirePermission('exports:manage'),
+  validate(exportAnalyticsQuerySchema, 'query'),
+  exportAnalytics,
+);
+
+// ---- Settings & maintenance --------------------------------------------------
+r.get('/settings', requirePermission('settings:manage'), readSettings);
+r.patch('/settings', requirePermission('settings:manage'), validate(updateSettingsSchema), updateSettings);
+r.post('/settings/maintenance', requirePermission('settings:manage'), validate(maintenanceSchema), updateMaintenance);
+r.post('/settings/test-email', requirePermission('settings:manage'), validate(testEmailSchema), testMail);
 
 export default r;

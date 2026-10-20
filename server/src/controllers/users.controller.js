@@ -11,6 +11,7 @@ import { removeAllForUser } from '../services/push.service.js';
 import { deliverVerifyLink, deliverResetLink } from '../services/linkDelivery.js';
 import { sendAccountCreated } from '../services/mail.service.js';
 import { audit } from '../services/audit.service.js';
+import { after } from '../utils/mongo.js';
 
 const ONLY_ONE_ADMIN = 'The system has a single administrator account, and it already exists. Pick another role.';
 
@@ -85,7 +86,7 @@ export const listUsers = asyncHandler(async (req, res) => {
       .lean(),
     User.aggregate([{ $match: countFilter }, { $group: { _id: '$role', count: { $sum: 1 } } }]),
     User.aggregate([{ $match: countFilter }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
-    User.countDocuments({ ...countFilter, lockUntil: { $gt: now } }),
+    User.countDocuments({ ...countFilter, lockUntil: after(now) }),
   ]);
 
   const byRole = Object.fromEntries(['ADMIN', 'REGISTRAR', 'TEACHER', 'ACCOUNTANT'].map((key) => [key, 0]));

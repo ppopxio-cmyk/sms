@@ -57,6 +57,19 @@ export const changePasswordSchema = z.strictObject({
   currentPassword: z.string().min(1, 'Enter your current password.').max(128),
   newPassword: password,
 });
+export const profileSchema = z.strictObject({ name });
+export const preferencesSchema = z
+  .strictObject({
+    emailSecurity: z.boolean().optional(),
+    emailAnnouncements: z.boolean().optional(),
+    inAppNotifications: z.boolean().optional(),
+    language: z.enum(['en', 'am']).optional(),
+    calendar: z.enum(['ethiopian', 'gregorian']).optional(),
+    timeFormat: z.enum(['24h', '12h']).optional(),
+    compactTables: z.boolean().optional(),
+    reducedMotion: z.boolean().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, 'Choose at least one preference.');
 export const twoStepSchema = z.strictObject({ enabled: z.boolean(), currentPassword: z.string().min(1, 'Enter your password.').max(128) });
 export const deletePasswordSchema = z.strictObject({ password: z.string().min(1, 'Enter your password.').max(128) });
 export const deleteAccountSchema = z.strictObject({

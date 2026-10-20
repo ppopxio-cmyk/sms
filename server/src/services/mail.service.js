@@ -219,3 +219,43 @@ export function sendResetLinkEmail({ to, name, url, minutes }) {
     text: `Choose a new password with this link within ${minutes} minutes: ${url}`,
   });
 }
+
+// Announcements are plain text on purpose. The author types a notice, not a web page,
+// so every character is escaped and line breaks are preserved without allowing HTML.
+export function sendAnnouncementEmail({ to, name, title, body, priority = 'normal', type = 'general', publishedAt = new Date() }) {
+  const safeBody = esc(body).replace(/\r?\n/g, '<br>');
+  const tone = priority === 'critical' ? '#be123c' : priority === 'high' ? '#b45309' : '#4338ca';
+  const htmlBody =
+    para(`Hi ${hi(name)},<br>${safeBody}`) +
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:16px 0 0;background:#f8fafc;border:1px solid #e8eef5;border-radius:16px;padding:6px 18px;">
+      <tr><td style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:9px 16px 9px 0;font-size:13px;color:#64748b;white-space:nowrap;">Published</td><td style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:9px 0;font-size:13px;font-weight:600;color:#0f172a;">${esc(formatEthiopian(publishedAt, { time: true }))}</td></tr>
+      <tr><td style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:9px 16px 9px 0;font-size:13px;color:#64748b;white-space:nowrap;">Category</td><td style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:9px 0;font-size:13px;font-weight:600;color:#0f172a;">${esc(type)}</td></tr>
+    </table>`;
+
+  return deliver({
+    to,
+    subject: title,
+    html: layout({
+      preheader: body.slice(0, 140),
+      title,
+      accent: priority === 'critical' ? 'Critical announcement' : priority === 'high' ? 'Important announcement' : 'College announcement',
+      body: htmlBody,
+    }),
+    text: `${title}\n\n${body}\n\nPublished ${formatEthiopian(publishedAt, { time: true })}.`,
+  });
+}
+
+// Settings can prove the mail path works without ever returning a secret. The test
+// message goes only to the signed-in administrator's own address.
+export function sendTestEmail({ to, name, transport }) {
+  const body =
+    para(`Hi ${hi(name)},<br>This is a test from the college portal. If you can read it, the configured mail transport is working.`) +
+    detailCard(row('Transport', transport) + row('Sent', formatEthiopian(new Date(), { time: true }))) +
+    note('No password, app password, refresh token or other credential is included in this message.');
+  return deliver({
+    to,
+    subject: 'Test email from the college portal',
+    html: layout({ preheader: 'Mail delivery is working', title: 'Mail delivery is working', accent: 'Email settings', body }),
+    text: `This is a test from the college portal. Transport: ${transport}.`,
+  });
+}

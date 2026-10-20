@@ -21,6 +21,10 @@ export function useNotifications({ unread = false, limit = 30 } = {}) {
   return useQuery({
     queryKey: [LIST_KEY, 'list', { unread, limit }],
     queryFn: async () => (await api.get('/notifications', { params: { unread: unread ? '1' : '0', limit } })).data,
+    // The live stream updates this immediately. This slower fallback keeps the page
+    // fresh when a browser blocks the stream or the server restarts.
+    refetchInterval: 60_000,
+    placeholderData: (previous) => previous,
   });
 }
 

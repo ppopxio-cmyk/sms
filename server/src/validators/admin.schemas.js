@@ -19,7 +19,7 @@ export const listSessionsQuerySchema = z.strictObject({
 
 export const listAuditQuerySchema = z.strictObject({
   search: z.string().trim().max(100).optional(),
-  category: z.enum(['all', 'signin', 'security', 'admin', 'account', 'export', 'other']).default('all'),
+  category: z.enum(['all', 'signin', 'security', 'admin', 'settings', 'announcements', 'maintenance', 'account', 'export', 'other']).default('all'),
   status: z.enum(['all', 'success', 'fail']).default('all'),
   range: z.enum(['1', '7', '30', 'all']).default('7'),
   page: z.coerce.number().int().min(1).default(1),
@@ -48,7 +48,7 @@ export const exportSessionsQuerySchema = z.strictObject({
 
 export const exportAuditQuerySchema = z.strictObject({
   search: z.string().trim().max(100).optional(),
-  category: z.enum(['all', 'signin', 'security', 'admin', 'account', 'export', 'other']).default('all'),
+  category: z.enum(['all', 'signin', 'security', 'admin', 'settings', 'announcements', 'maintenance', 'account', 'export', 'other']).default('all'),
   status: z.enum(['all', 'success', 'fail']).default('all'),
   range: z.enum(['1', '7', '30', 'all']).default('7'),
   format: exportFormat,

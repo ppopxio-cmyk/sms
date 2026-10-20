@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Clock3,
@@ -15,12 +15,14 @@ import { deviceSubtitle, deviceTitle, placeLine } from '../lib/deviceName';
 import { formatEthiopian, timeAgo } from '../lib/ethiopianDate';
 import { number, roleLabel } from '../lib/format';
 import { useDebounced } from '../lib/useDebounced';
+import { useNow } from '../lib/useNow';
 import Card, { CardBody, CardHeader } from '../components/ui/Card';
 import Badge, { RoleBadge } from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import DeviceIcon from '../components/ui/DeviceIcon';
 import ExportMenu from '../components/ui/ExportMenu';
 import FilterTabs from '../components/ui/FilterTabs';
+import LiveStamp from '../components/ui/LiveStamp';
 import Modal from '../components/ui/Modal';
 import Pagination from '../components/ui/Pagination';
 import SearchInput from '../components/ui/SearchInput';
@@ -45,6 +47,7 @@ export default function AdminSessions() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [ending, setEnding] = useState(null);
+  const now = useNow(1000);
   const debouncedSearch = useDebounced(search);
 
   useEffect(() => {
@@ -68,7 +71,8 @@ export default function AdminSessions() {
   const list = useQuery({
     queryKey: ['admin-sessions', params],
     queryFn: async () => (await api.get('/admin/sessions', { params })).data,
-    refetchInterval: 60_000,
+    refetchInterval: 30_000,
+    placeholderData: keepPreviousData,
   });
 
   const terminate = useMutation({
@@ -110,10 +114,13 @@ export default function AdminSessions() {
     <div className="space-y-6">
       <header className="animate-rise flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="flex items-center gap-2 text-sm font-medium text-slate-500">
-            <Clock3 className="h-4 w-4 text-brand-500" />
-            {formatEthiopian(new Date(), { time: true })}
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="flex items-center gap-2 text-sm font-medium text-slate-500">
+              <Clock3 className="h-4 w-4 text-brand-500" />
+              {formatEthiopian(now, { time: true })}
+            </p>
+            <LiveStamp updatedAt={list.dataUpdatedAt} label="Sessions live" />
+          </div>
           <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">Sessions</h1>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
             Every browser signed in across the school, including the ones that were ended. End a live session to sign that person

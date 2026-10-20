@@ -21,6 +21,17 @@ const userSchema = new mongoose.Schema(
     mustChangePassword: { type: Boolean, default: false },
     // Soft delete: the account stops working but the audit trail keeps its history.
     deletedAt: { type: Date, default: null },
+    // Personal display choices. They never change what the account is allowed to do.
+    preferences: {
+      emailSecurity: { type: Boolean, default: true },
+      emailAnnouncements: { type: Boolean, default: true },
+      inAppNotifications: { type: Boolean, default: true },
+      language: { type: String, enum: ['en', 'am'], default: 'en' },
+      calendar: { type: String, enum: ['ethiopian', 'gregorian'], default: 'ethiopian' },
+      timeFormat: { type: String, enum: ['24h', '12h'], default: '24h' },
+      compactTables: { type: Boolean, default: false },
+      reducedMotion: { type: Boolean, default: false },
+    },
   },
   { timestamps: true },
 );

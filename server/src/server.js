@@ -4,15 +4,18 @@ import { connectDB, disconnectDB } from './config/db.js';
 import { createApp } from './app.js';
 import { logger } from './utils/logger.js';
 import { flushAudit } from './services/audit.service.js';
+import { startAnnouncementScheduler } from './services/announcement.service.js';
 
 await connectDB();
 await Promise.all(Object.values(mongoose.models).map((m) => m.init())); // make sure indexes exist
 
+const stopScheduler = startAnnouncementScheduler();
 const app = createApp();
 const server = app.listen(env.PORT, () => logger.info(`API ready on http://localhost:${env.PORT}`));
 
 const stop = (signal) => {
   logger.info(`${signal} received, shutting down`);
+  stopScheduler();
   server.close(async () => {
     await flushAudit();
     await disconnectDB();

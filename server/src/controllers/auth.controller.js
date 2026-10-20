@@ -2,6 +2,7 @@ import argon2 from 'argon2';
 import { User } from '../models/User.js';
 import { Session } from '../models/Session.js';
 import { KnownDevice } from '../models/KnownDevice.js';
+import { AuditLog } from '../models/AuditLog.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ensureDeviceId, describeRequest, deviceFingerprint, deviceKey } from '../utils/device.js';
@@ -26,15 +27,30 @@ import { removeForDevice, removeAllForUser } from '../services/push.service.js';
 import { notifySignIn, notifyEmailVerified, notifyPasswordChanged } from '../services/notification.service.js';
 import { sendLoginAlert, sendPasswordChanged } from '../services/mail.service.js';
 import { audit } from '../services/audit.service.js';
+import { auditCategory } from '../services/auditCategory.service.js';
+import { getSettings } from '../services/settings.service.js';
+import {
+  enforcePasswordPolicy,
+  securityPolicy,
+  wantsSecurityEmail,
+} from '../services/securityPolicy.service.js';
 
 // Used when the email does not exist, so a wrong email takes as long as a wrong password.
 const DUMMY_HASH = await argon2.hash('not-a-real-password');
-// Three wrong passwords lock the account for fifteen minutes. The message matches the
-// wording on the sign-in screen.
-const LOCK_AFTER = 3;
-const LOCK_MS = 15 * 60_000;
-
+// The fallback lockout is three wrong passwords for fifteen minutes; the live values
+// come from System Settings, so an administrator can tighten or relax the policy.
 const LINK_INVALID = 'That link has expired or has already been used. Ask for a new one.';
+
+const DEFAULT_PREFERENCES = {
+  emailSecurity: true,
+  emailAnnouncements: true,
+  inAppNotifications: true,
+  language: 'en',
+  calendar: 'ethiopian',
+  timeFormat: '24h',
+  compactTables: false,
+  reducedMotion: false,
+};
 
 export const safeUser = (u) => ({
   id: u._id,
@@ -44,6 +60,9 @@ export const safeUser = (u) => ({
   emailVerified: u.emailVerified,
   twoStepEnabled: u.twoStepEnabled,
   mustChangePassword: !!u.mustChangePassword,
+  preferences: { ...DEFAULT_PREFERENCES, ...(u.preferences?.toObject ? u.preferences.toObject() : u.preferences ?? {}) },
+  createdAt: u.createdAt ?? null,
+  lastLoginAt: u.lastLoginAt ?? null,
 });
 
 async function startSession(req, res, user, { deviceId, fingerprint }) {
@@ -55,7 +74,10 @@ async function startSession(req, res, user, { deviceId, fingerprint }) {
   void rememberDevice({ userId: user._id, key: deviceKey(fingerprint, deviceId), info }).catch(() => {});
   // A name the person gave this browser is what the alert should say, not the system label.
   const detail = { ...info, deviceLabel: session.deviceLabel };
-  void sendLoginAlert({ to: user.email, name: user.name, ...detail, at: new Date() });
+  const settings = await getSettings().catch(() => null);
+  if (wantsSecurityEmail(user, settings)) {
+    void sendLoginAlert({ to: user.email, name: user.name, ...detail, at: new Date() });
+  }
   // Open tabs and other devices hear about this at once; the administrator is told when
   // it is somebody else. The browser that just signed in is left out of its own notice.
   void notifySignIn({ user, sid: session._id, deviceKey: deviceKey(fingerprint, deviceId), info: detail }).catch(() => {});
@@ -117,6 +139,7 @@ export const setupAccount = asyncHandler(async (req, res) => {
     throw new AppError(400, 'ALREADY_SET_UP', 'This account is already set up. Please sign in.');
   }
 
+  await enforcePasswordPolicy(req.body.password);
   user.name = req.body.name;
   user.passwordHash = await argon2.hash(req.body.password);
   user.passwordChangedAt = new Date();
@@ -144,10 +167,15 @@ export const resendVerification = asyncHandler(async (req, res) => {
 
 export const login = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
+  const policy = await securityPolicy();
   const user = await User.findOne({ email }).select('+passwordHash');
 
   if (user?.lockUntil && user.lockUntil > new Date()) {
-    throw new AppError(429, 'ACCOUNT_LOCKED', 'Too many wrong attempts. Try again in about 15 minutes, or reset your password.');
+    throw new AppError(
+      429,
+      'ACCOUNT_LOCKED',
+      `Too many wrong attempts. Try again in about ${policy.lockoutMinutes} minutes, or reset your password.`,
+    );
   }
 
   // An account that was never finished has no password to compare, so it must not fall
@@ -166,8 +194,12 @@ export const login = asyncHandler(async (req, res) => {
   if (!user || !passwordOk) {
     if (user) {
       const updated = await User.findOneAndUpdate({ _id: user._id }, { $inc: { failedLogins: 1 } }, { returnDocument: 'after' });
-      if (updated.failedLogins >= LOCK_AFTER) {
-        await User.updateOne({ _id: user._id }, { failedLogins: 0, lockUntil: new Date(Date.now() + LOCK_MS) });
+      if (updated.failedLogins >= policy.lockoutAttempts) {
+        await User.updateOne({
+          _id: user._id,
+          failedLogins: 0,
+          lockUntil: new Date(Date.now() + policy.lockoutMinutes * 60_000),
+        });
       }
     }
     audit({ req, actorId: user?._id, action: 'auth.login_failed', status: 'fail', meta: { email } });
@@ -189,13 +221,13 @@ export const login = asyncHandler(async (req, res) => {
   const fingerprint = deviceFingerprint(req);
   const fresh = await isNewDevice(user._id, deviceKey(fingerprint, deviceId));
 
-  // A code is asked for when the account turned 2-step on, or when this browser has
-  // never signed in before.
-  if (user.twoStepEnabled || fresh) {
+  // A code is asked for when the account turned 2-step on, when the administrator
+  // requires it for everybody, or when this browser has never signed in before.
+  if (policy.requireTwoStep || user.twoStepEnabled || fresh) {
     await sendCode(user, 'login_2fa');
     return res.json({
       requires2fa: true,
-      reason: user.twoStepEnabled ? 'twoStep' : 'newDevice',
+      reason: policy.requireTwoStep || user.twoStepEnabled ? 'twoStep' : 'newDevice',
       ticket: signTicket(user._id, 'login-2fa', '5m'),
     });
   }
@@ -264,6 +296,67 @@ export const me = asyncHandler(async (req, res) => {
   res.json({ user: safeUser(user) });
 });
 
+// The name is the person's own, even though an administrator creates the account.
+// The email stays fixed because it is the address every security message goes to.
+export const updateProfile = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.id);
+  if (!user || user.deletedAt) throw new AppError(401, 'SESSION_ENDED', 'Please sign in again.');
+
+  user.name = req.body.name;
+  await user.save();
+  audit({ req, action: 'auth.profile_updated', targetType: 'user', targetId: user._id });
+  res.json({ user: safeUser(user), message: 'Your name was saved.' });
+});
+
+const PREFERENCE_FIELDS = {
+  emailSecurity: 'boolean',
+  emailAnnouncements: 'boolean',
+  inAppNotifications: 'boolean',
+  language: 'string',
+  calendar: 'string',
+  timeFormat: 'string',
+  compactTables: 'boolean',
+  reducedMotion: 'boolean',
+};
+
+export const updatePreferences = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.id);
+  if (!user || user.deletedAt) throw new AppError(401, 'SESSION_ENDED', 'Please sign in again.');
+
+  const changed = [];
+  for (const [field, type] of Object.entries(PREFERENCE_FIELDS)) {
+    if (!Object.prototype.hasOwnProperty.call(req.body, field)) continue;
+    if (typeof req.body[field] !== type) continue;
+    user.preferences[field] = req.body[field];
+    changed.push(field);
+  }
+  if (!changed.length) throw new AppError(400, 'NO_CHANGES', 'Choose at least one preference to save.');
+  await user.save();
+  audit({ req, action: 'auth.preferences_updated', targetType: 'user', targetId: user._id, meta: { changed } });
+  res.json({ user: safeUser(user), message: 'Your preferences were saved.' });
+});
+
+export const myActivity = asyncHandler(async (req, res) => {
+  const rows = await AuditLog.find({ actorId: req.user.id })
+    .sort({ createdAt: -1, _id: -1 })
+    .limit(40)
+    .select('action status targetType targetId ip createdAt')
+    .lean();
+
+  res.json({
+    activity: rows.map((row) => ({
+      id: row._id,
+      action: row.action,
+      category: auditCategory(row.action),
+      status: row.status,
+      targetType: row.targetType,
+      targetId: row.targetId,
+      ip: row.ip,
+      createdAt: row.createdAt,
+    })),
+  });
+});
+
 export const changePassword = asyncHandler(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   const user = await User.findById(req.user.id).select('+passwordHash');
@@ -280,6 +373,7 @@ export const changePassword = asyncHandler(async (req, res) => {
   if (await argon2.verify(user.passwordHash, newPassword)) {
     throw new AppError(400, 'SAME_PASSWORD', 'Pick a password that is different from your current one.');
   }
+  await enforcePasswordPolicy(newPassword);
 
   user.passwordHash = await argon2.hash(newPassword);
   user.passwordChangedAt = new Date();
@@ -291,7 +385,10 @@ export const changePassword = asyncHandler(async (req, res) => {
 
   // Every other device is signed out; the browser making the change stays in.
   const ended = await deleteAllForUserExcept(user._id, req.user.sid);
-  void sendPasswordChanged({ to: user.email, name: user.name });
+  const settings = await getSettings().catch(() => null);
+  if (wantsSecurityEmail(user, settings)) {
+    void sendPasswordChanged({ to: user.email, name: user.name });
+  }
   void notifyPasswordChanged({ user }).catch(() => {});
   audit({ req, action: 'auth.password_changed', targetType: 'user', targetId: user._id, meta: { otherSessionsEnded: ended } });
   res.json({ message: 'Password changed.', user: safeUser(user) });

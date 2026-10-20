@@ -7,6 +7,7 @@ import { publicKey, pushReady, saveSubscription, removeSubscription } from '../s
 import { toPayload } from '../services/notification.service.js';
 import { deviceFingerprint, deviceKey, ensureDeviceId } from '../utils/device.js';
 import { audit } from '../services/audit.service.js';
+import { markAnnouncementRead, markAnnouncementReadMany } from '../services/announcement.service.js';
 
 const unreadFor = (userId) => Notification.countDocuments({ userId, readAt: null });
 
@@ -38,15 +39,38 @@ export const unreadCount = asyncHandler(async (req, res) => {
 
 export const markRead = asyncHandler(async (req, res) => {
   const { id } = req.valid.params;
-  const done = await Notification.updateOne({ _id: id, userId: req.user.id, readAt: null }, { readAt: new Date() });
-  if (!done.matchedCount && !(await Notification.exists({ _id: id, userId: req.user.id }))) {
-    throw new AppError(404, 'NOT_FOUND', 'That notification was not found.');
+  const notice = await Notification.findOneAndUpdate(
+    { _id: id, userId: req.user.id },
+    { $set: { readAt: new Date() } },
+    { new: true },
+  ).lean();
+
+  if (!notice) throw new AppError(404, 'NOT_FOUND', 'That notification was not found.');
+
+  // The announcement screen shows a real read percentage, so opening the notice also
+  // stamps the person's receipt on the announcement itself.
+  if (notice.type === 'announcement' && notice.meta?.announcementId) {
+    await markAnnouncementRead(notice.meta.announcementId, req.user.id).catch(() => {});
   }
   res.json({ unread: await unreadFor(req.user.id) });
 });
 
 export const markAllRead = asyncHandler(async (req, res) => {
-  await Notification.updateMany({ userId: req.user.id, readAt: null }, { readAt: new Date() });
+  const pending = await Notification.find({ userId: req.user.id, readAt: null, type: 'announcement' })
+    .select('meta')
+    .lean();
+  const announcementIds = [
+    ...new Set(
+      pending
+        .map((notice) => notice.meta?.announcementId)
+        .filter(Boolean),
+    ),
+  ];
+
+  await Notification.updateMany({ userId: req.user.id, readAt: null }, { $set: { readAt: new Date() } });
+  if (announcementIds.length) {
+    await markAnnouncementReadMany(announcementIds, req.user.id).catch(() => {});
+  }
   res.json({ unread: 0 });
 });
 
