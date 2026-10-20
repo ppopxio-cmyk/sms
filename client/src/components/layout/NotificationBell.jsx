@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowRight, Bell, BellRing, CheckCheck, KeyRound, LogIn, MailCheck, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../../lib/api';
+import { useAuth } from '../../store/auth';
 import { useNotifications, useUnread } from '../../lib/notifications';
 import { timeAgo } from '../../lib/ethiopianDate';
 
@@ -21,9 +22,11 @@ const iconFor = (type) => ICONS[type] ?? Bell;
 export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const queryClient = useQueryClient();
+  const status = useAuth((s) => s.status);
+  const ready = status === 'ready';
 
-  const unread = useUnread();
-  const latest = useNotifications({ limit: 5 });
+  const unread = useUnread({ enabled: ready });
+  const latest = useNotifications({ limit: 5, enabled: ready });
   const rows = latest.data?.notifications ?? [];
   const count = unread.data?.unread ?? 0;
 

@@ -28,7 +28,7 @@ import { notifySignIn, notifyEmailVerified, notifyPasswordChanged } from '../ser
 import { sendLoginAlert, sendPasswordChanged } from '../services/mail.service.js';
 import { audit } from '../services/audit.service.js';
 import { auditCategory } from '../services/auditCategory.service.js';
-import { getSettings } from '../services/settings.service.js';
+import { getMaintenanceState, getSettings } from '../services/settings.service.js';
 import {
   enforcePasswordPolicy,
   securityPolicy,
@@ -51,6 +51,24 @@ const DEFAULT_PREFERENCES = {
   compactTables: false,
   reducedMotion: false,
 };
+
+// The public status endpoint tells the browser the same thing, but a stale tab could
+// still submit the form after an administrator closes the portal. This check sits after
+// the password is verified so a wrong password cannot reveal an account's role.
+async function ensureSignInAllowed(user) {
+  const state = await getMaintenanceState();
+  if (state.enabled && user.role !== 'ADMIN') {
+    throw new AppError(503, 'MAINTENANCE', state.message, {
+      maintenance: {
+        enabled: true,
+        message: state.message,
+        until: state.until,
+        allowAdminRecovery: state.allowAdminRecovery,
+      },
+    });
+  }
+  return state;
+}
 
 export const safeUser = (u) => ({
   id: u._id,
@@ -217,6 +235,13 @@ export const login = asyncHandler(async (req, res) => {
     throw new AppError(403, 'EMAIL_NOT_VERIFIED', 'Please confirm your email first. We sent a link to your inbox.', { email: user.email });
   }
 
+  try {
+    await ensureSignInAllowed(user);
+  } catch (err) {
+    audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.login_blocked_maintenance', status: 'fail' });
+    throw err;
+  }
+
   const deviceId = ensureDeviceId(req, res);
   const fingerprint = deviceFingerprint(req);
   const fresh = await isNewDevice(user._id, deviceKey(fingerprint, deviceId));
@@ -241,6 +266,7 @@ export const loginVerify = asyncHandler(async (req, res) => {
   if (!user || user.status === 'disabled' || user.deletedAt) {
     throw new AppError(401, 'TICKET_INVALID', 'That step has expired. Please start again.');
   }
+  await ensureSignInAllowed(user);
   await checkCode(user._id, 'login_2fa', req.body.code);
   res.json(await startSession(req, res, user, { deviceId: ensureDeviceId(req, res), fingerprint: deviceFingerprint(req) }));
 });
@@ -248,7 +274,10 @@ export const loginVerify = asyncHandler(async (req, res) => {
 export const loginResend = asyncHandler(async (req, res) => {
   const payload = readTicket(req.body.ticket, 'login-2fa');
   const user = await User.findById(payload.sub);
-  if (user && user.status !== 'disabled' && !user.deletedAt) await sendCode(user, 'login_2fa');
+  if (user && user.status !== 'disabled' && !user.deletedAt) {
+    await ensureSignInAllowed(user);
+    await sendCode(user, 'login_2fa');
+  }
   res.json({ message: 'We sent a new code.' });
 });
 
@@ -263,6 +292,19 @@ export const refresh = asyncHandler(async (req, res) => {
       await revokeSession(session._id, { reason: 'account_unavailable' });
       forgetUser(session.userId);
       throw new AppError(401, 'NO_SESSION', 'Please sign in.');
+    }
+    const maintenance = await getMaintenanceState();
+    if (maintenance.enabled && user.role !== 'ADMIN') {
+      await revokeSession(session._id, { reason: 'maintenance_mode' });
+      res.clearCookie(REFRESH_COOKIE, clearRefreshOptions);
+      throw new AppError(503, 'MAINTENANCE', maintenance.message, {
+        maintenance: {
+          enabled: true,
+          message: maintenance.message,
+          until: maintenance.until,
+          allowAdminRecovery: maintenance.allowAdminRecovery,
+        },
+      });
     }
     if (next) res.cookie(REFRESH_COOKIE, next, refreshCookieOptions(session.expiresAt.getTime() - Date.now()));
     res.json({ accessToken: signAccess(user, session._id), user: safeUser(user) });

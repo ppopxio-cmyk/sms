@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
+  BarChart3,
   Bell,
   ChevronRight,
   Command,
   Download,
-  Fingerprint,
   Keyboard,
   LayoutDashboard,
   Megaphone,
@@ -14,13 +14,13 @@ import {
   Search,
   Settings2,
   ShieldCheck,
-  UserRound,
   Users,
   X,
 } from 'lucide-react';
 
 const PAGES = [
   { to: '/admin', label: 'Dashboard', hint: 'Overview, charts and recent activity', icon: LayoutDashboard, keys: 'G then D' },
+  { to: '/admin/analytics', label: 'Analytics', hint: 'Sign-in health, activity rhythm and reach', icon: BarChart3, keys: 'G then I' },
   { to: '/admin/sessions', label: 'Sessions', hint: 'Live devices and sign-in sessions', icon: ShieldCheck, keys: 'G then S' },
   { to: '/admin/audit-logs', label: 'Audit logs', hint: 'Every action, attempt and change', icon: ScrollText, keys: 'G then A' },
   { to: '/admin/users', label: 'Users', hint: 'Accounts, roles and access', icon: Users, keys: 'G then U' },
@@ -28,12 +28,11 @@ const PAGES = [
   { to: '/admin/notifications', label: 'Notifications', hint: 'Your security and college notices', icon: Bell, keys: 'G then O' },
   { to: '/admin/export', label: 'Export Center', hint: 'PDF, Word and Excel reports', icon: Download, keys: 'G then E' },
   { to: '/admin/settings', label: 'System settings', hint: 'Maintenance, institution, security and mail', icon: Settings2, keys: 'G then T' },
-  { to: '/admin/account', label: 'My account', hint: 'Profile, password, security and activity', icon: UserRound, keys: 'G then M' },
-  { to: '/admin/devices', label: 'My devices', hint: 'Sign out other browsers', icon: Fingerprint, keys: 'G then V' },
 ];
 
 const SEQUENCE = {
   d: '/admin',
+  i: '/admin/analytics',
   s: '/admin/sessions',
   a: '/admin/audit-logs',
   u: '/admin/users',
@@ -41,8 +40,6 @@ const SEQUENCE = {
   o: '/admin/notifications',
   e: '/admin/export',
   t: '/admin/settings',
-  m: '/admin/account',
-  v: '/admin/devices',
 };
 
 function isTyping(target) {

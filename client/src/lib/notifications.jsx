@@ -7,17 +7,19 @@ import NoticeToast from '../components/layout/NoticeToast';
 
 const LIST_KEY = 'notifications';
 
-export function useUnread() {
+export function useUnread({ enabled = true } = {}) {
   return useQuery({
     queryKey: [LIST_KEY, 'unread'],
     queryFn: async () => (await api.get('/notifications/unread')).data,
     // A safety net: if the live stream cannot be opened at all, the count is still
     // never more than a minute out of date.
     refetchInterval: 60_000,
+    retry: false,
+    enabled,
   });
 }
 
-export function useNotifications({ unread = false, limit = 30 } = {}) {
+export function useNotifications({ unread = false, limit = 30, enabled = true } = {}) {
   return useQuery({
     queryKey: [LIST_KEY, 'list', { unread, limit }],
     queryFn: async () => (await api.get('/notifications', { params: { unread: unread ? '1' : '0', limit } })).data,
@@ -25,6 +27,8 @@ export function useNotifications({ unread = false, limit = 30 } = {}) {
     // fresh when a browser blocks the stream or the server restarts.
     refetchInterval: 60_000,
     placeholderData: (previous) => previous,
+    retry: false,
+    enabled,
   });
 }
 

@@ -17,9 +17,11 @@ import ForgotPassword from './pages/ForgotPassword.jsx';
 // not signed in, so they sit outside both the guest and the protected groups.
 import Privacy from './pages/Privacy.jsx';
 import Terms from './pages/Terms.jsx';
+import Maintenance from './pages/Maintenance.jsx';
 
 const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'));
+const AdminAnalytics = lazy(() => import('./pages/AdminAnalytics.jsx'));
 const Sessions = lazy(() => import('./pages/Sessions.jsx'));
 const Users = lazy(() => import('./pages/Users.jsx'));
 const AdminSessions = lazy(() => import('./pages/AdminSessions.jsx'));
@@ -76,6 +78,7 @@ export default function App() {
 
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/terms" element={<Terms />} />
+        <Route path="/maintenance" element={<Maintenance />} />
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>
@@ -86,6 +89,7 @@ export default function App() {
 
             <Route element={<RequireRole roles={['ADMIN']} />}>
               <Route path="/admin" element={<AdminDashboard />} />
+              <Route path="/admin/analytics" element={<AdminAnalytics />} />
               <Route path="/admin/users" element={<Users />} />
               <Route path="/admin/sessions" element={<AdminSessions />} />
               <Route path="/admin/audit-logs" element={<AuditLogs />} />

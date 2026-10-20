@@ -1,15 +1,14 @@
 import { NavLink } from 'react-router-dom';
 import {
+  BarChart3,
   Bell,
   Download,
-  Fingerprint,
   LayoutDashboard,
   LogOut,
   Megaphone,
   ScrollText,
   Settings2,
   ShieldCheck,
-  UserRound,
   Users,
   X,
 } from 'lucide-react';
@@ -24,6 +23,7 @@ const navItems = () => [
   // The admin workspace is ordered the way it is used: watch the college, then people,
   // then communication, then the levers that change the platform.
   { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true, roles: ['ADMIN'] },
+  { to: '/admin/analytics', label: 'Analytics', icon: BarChart3, roles: ['ADMIN'] },
   { to: '/admin/sessions', label: 'Sessions', icon: ShieldCheck, roles: ['ADMIN'] },
   { to: '/admin/audit-logs', label: 'Audit Logs', icon: ScrollText, roles: ['ADMIN'] },
   { to: '/admin/users', label: 'Users', icon: Users, roles: ['ADMIN'] },
@@ -31,8 +31,6 @@ const navItems = () => [
   { to: '/admin/notifications', label: 'Notifications', icon: Bell, roles: ['ADMIN'] },
   { to: '/admin/export', label: 'Export Center', icon: Download, roles: ['ADMIN'] },
   { to: '/admin/settings', label: 'System Settings', icon: Settings2, roles: ['ADMIN'] },
-  { to: '/admin/account', label: 'My Account', icon: UserRound, roles: ['ADMIN'] },
-  { to: '/admin/devices', label: 'My Devices', icon: Fingerprint, roles: ['ADMIN'] },
   { to: '/registrar', label: 'Dashboard', icon: LayoutDashboard, end: true, roles: ['REGISTRAR'] },
   { to: '/teacher', label: 'Dashboard', icon: LayoutDashboard, end: true, roles: ['TEACHER'] },
   { to: '/accountant', label: 'Dashboard', icon: LayoutDashboard, end: true, roles: ['ACCOUNTANT'] },

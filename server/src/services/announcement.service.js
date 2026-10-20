@@ -98,13 +98,21 @@ async function fanoutOnce(announcementId) {
     notices = await Notification.insertMany(docs, { ordered: false });
   }
 
-  // Live tabs get the notice immediately; a device with no open tab gets a push.
+  // Live tabs get the notice immediately. Push also goes to every subscribed browser,
+  // not only when no tab happens to be open: the same person may have a phone with the
+  // portal closed while a desktop tab is connected. The shared tag lets the service
+  // worker replace the live copy on the device that is already open.
   notices.forEach((notice, index) => {
     const user = users[index];
-    const live = stream.sendToUser(user._id, 'notification', notificationPayload(notice));
-    if (live === 0) {
-      void push.sendToUser(user._id, { kind: 'notification', ...notificationPayload(notice) }).catch(() => {});
-    }
+    stream.sendToUser(user._id, 'notification', notificationPayload(notice));
+    void push
+      .sendToUser(user._id, {
+        kind: 'notification',
+        ...notificationPayload(notice),
+        tag: `sms-${notice._id}`,
+        url: '/notifications',
+      })
+      .catch(() => {});
   });
 
   announcement.recipients = users.map((user) => ({ user: user._id, deliveredAt: now }));

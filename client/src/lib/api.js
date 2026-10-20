@@ -110,12 +110,47 @@ export async function bootstrapSessionIfSignedIn() {
 
 const SESSION_DEAD = new Set(['SESSION_ENDED', 'NO_SESSION', 'TICKET_INVALID']);
 
+// The shell listens for this while the portal is closed. It signs the current person out
+// and sends them to the public maintenance screen. Admin requests never produce it unless
+// their refresh cookie has also expired, in which case signing in again is the right move.
+function announceMaintenance(payload) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('sms:maintenance', { detail: payload ?? null }));
+}
+
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const { config, response } = error;
     const status = response?.status;
     const code = response?.data?.code;
+
+    // Maintenance returns 503 rather than 401. An Admin whose 15-minute access token has
+    // expired must still be able to recover, so try one silent refresh and replay. If the
+    // refresh cookie belongs to another role, that refresh is refused and the shell is
+    // told to show the maintenance page.
+    if (status === 503 && code === 'MAINTENANCE' && config) {
+      const url = String(config.url || '');
+      if (!config._maintenanceRetried && !url.includes('/auth/login') && !url.includes('/auth/refresh')) {
+        config._maintenanceRetried = true;
+        try {
+          const data = await refreshSession();
+          setAccessToken(data.accessToken);
+          onSessionRefreshed?.(data);
+          config.headers.Authorization = `Bearer ${data.accessToken}`;
+          return api(config);
+        } catch {
+          setAccessToken(null);
+          onSessionLost?.();
+        }
+      } else if (!url.includes('/auth/login')) {
+        setAccessToken(null);
+        onSessionLost?.();
+      }
+
+      announceMaintenance(response?.data?.maintenance ?? response?.data?.data?.maintenance);
+      throw error;
+    }
 
     if (status !== 401 || !config) throw error;
     if (String(config.url || '').includes('/auth/refresh')) throw error;

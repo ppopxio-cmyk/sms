@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Lock, Mail, MapPin } from 'lucide-react';
 import AuthLayout from '../components/layout/AuthLayout';
@@ -23,6 +24,20 @@ export default function Login() {
   const setSession = useAuth((s) => s.setSession);
   const navigate = useNavigate();
   const location = useLocation();
+  const [params] = useSearchParams();
+  const adminEntry = params.get('admin') === '1';
+
+  // The public status endpoint is deliberately tiny. It lets a closed portal send people
+  // to the maintenance note before they spend time typing a password. `/login?admin=1`
+  // is the recovery door for an administrator.
+  const system = useQuery({
+    queryKey: ['system-status'],
+    queryFn: async () => (await api.get('/status')).data,
+    staleTime: 30_000,
+    refetchOnMount: 'always',
+    retry: 0,
+  });
+  const maintenance = system.data?.maintenance;
 
   const [step, setStep] = useState('password');
   const [ticket, setTicket] = useState(null);
@@ -118,6 +133,10 @@ export default function Login() {
       finish(data, `Welcome back, ${data.user.name.split(' ')[0]}.`);
     } catch (err) {
       const code = err?.response?.data?.code;
+      if (code === 'MAINTENANCE') {
+        navigate('/maintenance', { replace: true });
+        return;
+      }
       if (code === 'EMAIL_NOT_VERIFIED' || code === 'ACCOUNT_NOT_SET_UP') {
         const target = err.response.data?.data?.email || getValues('email');
         setUnverified(target);
@@ -146,6 +165,10 @@ export default function Login() {
       loginTimer.clear();
       finish(data, 'Signed in.');
     } catch (err) {
+      if (err?.response?.data?.code === 'MAINTENANCE') {
+        navigate('/maintenance', { replace: true });
+        return;
+      }
       setServerError(errorMessage(err));
       if (err?.response?.data?.code === 'CODE_WRONG') {
         setCode('');
@@ -163,9 +186,17 @@ export default function Login() {
       loginTimer.start();
       toast.success('We sent a new code.');
     } catch (err) {
+      if (err?.response?.data?.code === 'MAINTENANCE') {
+        navigate('/maintenance', { replace: true });
+        return;
+      }
       setServerError(errorMessage(err));
     }
   };
+
+  if (maintenance?.enabled && !adminEntry) {
+    return <Navigate to="/maintenance" replace />;
+  }
 
   if (step === 'code') {
     return (
@@ -219,6 +250,12 @@ export default function Login() {
       />
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+        {maintenance?.enabled && adminEntry ? (
+          <Alert tone="warning" title="Maintenance mode is on">
+            Only administrators can sign in while the portal is closed.
+          </Alert>
+        ) : null}
+
         {serverError ? <Alert tone="danger">{serverError}</Alert> : null}
 
         {unverified ? (

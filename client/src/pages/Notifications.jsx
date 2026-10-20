@@ -10,7 +10,6 @@ import {
   MailCheck,
   Megaphone,
   Search,
-  Server,
   ShieldAlert,
   ShieldCheck,
   Trash2,
@@ -90,8 +89,8 @@ export default function Notifications() {
 
   // One list powers every tab. A person has a small number of notices, and this keeps
   // switching tabs instant and avoids four separate round trips.
-  const list = useNotifications({ unread: false, limit: 100 });
-  const unread = useUnread();
+  const list = useNotifications({ unread: false, limit: 100, enabled: Boolean(user) });
+  const unread = useUnread({ enabled: Boolean(user) });
   const rows = list.data?.notifications ?? [];
   const count = unread.data?.unread ?? 0;
 

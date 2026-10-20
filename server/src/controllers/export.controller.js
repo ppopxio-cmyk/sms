@@ -4,7 +4,7 @@ import { AuditLog } from '../models/AuditLog.js';
 import { Announcement } from '../models/Announcement.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { escapeRegex } from '../utils/text.js';
-import { formatEthiopianAmharic } from '../utils/ethiopianDate.js';
+import { formatEthiopian } from '../utils/ethiopianDate.js';
 import { audit } from '../services/audit.service.js';
 import { auditCategory, auditCategoryFilter } from '../services/auditCategory.service.js';
 import { buildExport, EXPORT_LIMIT } from '../services/export.service.js';
@@ -14,89 +14,90 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const ONLINE_MS = 2 * 60 * 1000;
 
 const ROLE_LABEL = {
-  ADMIN: 'አስተዳዳሪ',
-  REGISTRAR: 'መዝጋቢ',
-  TEACHER: 'መምህር',
-  ACCOUNTANT: 'ሒሳብ ባለሙያ',
+  ADMIN: 'Administrator',
+  REGISTRAR: 'Registrar',
+  TEACHER: 'Teacher',
+  ACCOUNTANT: 'Accountant',
 };
 
 const USER_STATUS_LABEL = {
-  pending: 'በመጠባበቅ ላይ',
-  active: 'ንቁ',
-  disabled: 'ተሰናክሏል',
+  pending: 'Awaiting setup',
+  active: 'Active',
+  disabled: 'Disabled',
 };
 
 const SESSION_STATE_LABEL = {
-  online: 'መስመር ላይ',
-  away: 'ርቆ',
-  expired: 'ጊዜው አልፏል',
-  terminated: 'ተጠናቋል',
+  online: 'Online',
+  away: 'Away',
+  expired: 'Expired',
+  terminated: 'Terminated',
 };
 
 const CATEGORY_LABEL = {
-  signin: 'መግቢያ',
-  security: 'ደህንነት',
-  admin: 'አስተዳደር',
-  settings: 'ቅንብሮች',
-  announcements: 'ማስታወቂያዎች',
-  maintenance: 'ጥገና',
-  account: 'መለያ',
-  export: 'ማውጣት',
-  other: 'ሌላ',
+  signin: 'Sign-in',
+  security: 'Security',
+  admin: 'Administration',
+  settings: 'Settings',
+  announcements: 'Announcements',
+  maintenance: 'Maintenance',
+  account: 'Account',
+  export: 'Export',
+  other: 'Other',
 };
 
 const ACTION_LABEL = {
-  'auth.login': 'መግቢያ',
-  'auth.login_failed': 'ያልተሳካ መግቢያ',
-  'auth.login_not_set_up': 'መለያ ያልተዘጋጀ መግቢያ',
-  'auth.logout': 'መውጣት',
-  'auth.email_verified': 'ኢሜይል ተረጋግጧል',
-  'auth.account_setup': 'መለያ ተዘጋጅቷል',
-  'auth.password_change_failed': 'የይለፍ ቃል ለውጥ አልተሳካም',
-  'auth.password_changed': 'የይለፍ ቃል ተቀይሯል',
-  'auth.password_reset_requested': 'የይለፍ ቃል መቀየር ተጠይቋል',
-  'auth.password_reset_done': 'የይለፍ ቃል ተቀይሯል',
-  'auth.account_delete_failed': 'መለያ ማጥፋት አልተሳካም',
-  'auth.account_delete_code_sent': 'የመለያ ማጥፊያ ኮድ ተልኳል',
-  'auth.account_deleted': 'መለያ ጠፍቷል',
-  'auth.device_named': 'መሣሪያ ተሰይሟል',
-  'auth.session_signout_code_sent': 'የመውጫ ኮድ ተልኳል',
-  'auth.session_signed_out': 'ከመሣሪያ ወጥቷል',
-  'auth.refresh_reuse': 'የተደገመ የመግቢያ ሙከራ',
-  'admin.confirm_failed': 'የአስተዳዳሪ ማረጋገጫ አልተሳካም',
-  'admin.user_created': 'ተጠቃሚ ተፈጥሯል',
-  'admin.user_disabled': 'ተጠቃሚ ተሰናክሏል',
-  'admin.user_enabled': 'ተጠቃሚ ነቅቷል',
-  'admin.user_verify_link_resent': 'የማረጋገጫ አገናኝ እንደገና ተልኳል',
-  'admin.user_reset_link_sent': 'የይለፍ ቃል ማስተካከያ አገናኝ ተልኳል',
-  'admin.user_signed_out': 'ተጠቃሚው ከሁሉም መሣሪያ ወጥቷል',
-  'admin.user_removed': 'ተጠቃሚ ተወግዷል',
-  'admin.session_terminated': 'ክፍለ ጊዜ ተጠናቋል',
-  'admin.settings_updated': 'ቅንብሮች ተቀይረዋል',
-  'admin.settings_email_test': 'የኢሜይል ሙከራ',
-  'admin.maintenance_enabled': 'ጥገና ተጀምሯል',
-  'admin.maintenance_disabled': 'ጥገና ተጠናቋል',
-  'admin.announcement_created': 'ማስታወቂያ ተፈጥሯል',
-  'admin.announcement_updated': 'ማስታወቂያ ተቀይሯል',
-  'admin.announcement_published': 'ማስታወቂያ ታውቋል',
-  'admin.announcement_archived': 'ማስታወቂያ ተመዝግቧል',
-  'admin.announcement_duplicated': 'ማስታወቂያ ተቀድቷል',
-  'user.push_subscribed': 'ማሳወቂያ ተከፍቷል',
-  'user.push_unsubscribed': 'ማሳወቂያ ተዘግቷል',
-  'export.users': 'የተጠቃሚዎች ማውጣት',
-  'export.sessions': 'የክፍለ ጊዜዎች ማውጣት',
-  'export.audit_logs': 'የኦዲት መዝገብ ማውጣት',
-  'export.announcements': 'የማስታወቂያ ማውጣት',
-  'export.system_analytics': 'የስርዓት ትንተና ማውጣት',
+  'auth.login': 'Signed in',
+  'auth.login_failed': 'Failed sign-in',
+  'auth.login_not_set_up': 'Sign-in before setup',
+  'auth.login_blocked_maintenance': 'Sign-in blocked by maintenance',
+  'auth.logout': 'Signed out',
+  'auth.email_verified': 'Email verified',
+  'auth.account_setup': 'Account set up',
+  'auth.password_change_failed': 'Password change failed',
+  'auth.password_changed': 'Password changed',
+  'auth.password_reset_requested': 'Password reset requested',
+  'auth.password_reset_done': 'Password reset completed',
+  'auth.account_delete_failed': 'Account deletion failed',
+  'auth.account_delete_code_sent': 'Account deletion code sent',
+  'auth.account_deleted': 'Account deleted',
+  'auth.device_named': 'Device named',
+  'auth.session_signout_code_sent': 'Sign-out code sent',
+  'auth.session_signed_out': 'Device signed out',
+  'auth.refresh_reuse': 'Reused sign-in token',
+  'admin.confirm_failed': 'Admin confirmation failed',
+  'admin.user_created': 'User created',
+  'admin.user_disabled': 'User disabled',
+  'admin.user_enabled': 'User enabled',
+  'admin.user_verify_link_resent': 'Verification link resent',
+  'admin.user_reset_link_sent': 'Password reset link sent',
+  'admin.user_signed_out': 'User signed out everywhere',
+  'admin.user_removed': 'User removed',
+  'admin.session_terminated': 'Session terminated',
+  'admin.settings_updated': 'Settings updated',
+  'admin.settings_email_test': 'Test email sent',
+  'admin.maintenance_enabled': 'Maintenance mode enabled',
+  'admin.maintenance_disabled': 'Maintenance mode disabled',
+  'admin.announcement_created': 'Announcement created',
+  'admin.announcement_updated': 'Announcement updated',
+  'admin.announcement_published': 'Announcement published',
+  'admin.announcement_archived': 'Announcement archived',
+  'admin.announcement_duplicated': 'Announcement duplicated',
+  'user.push_subscribed': 'Browser notifications enabled',
+  'user.push_unsubscribed': 'Browser notifications disabled',
+  'export.users': 'Users exported',
+  'export.sessions': 'Sessions exported',
+  'export.audit_logs': 'Audit log exported',
+  'export.announcements': 'Announcements exported',
+  'export.system_analytics': 'System analytics exported',
 };
 
 const TARGET_TYPE_LABEL = {
-  user: 'ተጠቃሚ',
-  session: 'ክፍለ ጊዜ',
-  settings: 'ቅንብሮች',
-  announcement: 'ማስታወቂያ',
-  export: 'ማውጣት',
-  notification: 'ማሳወቂያ',
+  user: 'User',
+  session: 'Session',
+  settings: 'Settings',
+  announcement: 'Announcement',
+  export: 'Export',
+  notification: 'Notification',
 };
 
 const actionLabel = (action) => ACTION_LABEL[action] || action;
@@ -155,7 +156,7 @@ const filterLine = (...parts) => parts.filter(Boolean).join('   ·   ');
 
 const truncationNote = (label, total, shown) =>
   total > shown
-    ? `ከ${total.toLocaleString('en-US')} ከሚመሳሰሉ ${label} ውስጥ የመጀመሪያዎቹ ${shown.toLocaleString('en-US')} ብቻ ተካተዋል። ቀሪውን ለማውጣት ማጣሪያውን ያጥብቁ።`
+    ? `Only the first ${shown.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} matching ${label} are included. Narrow the filters to export the rest.`
     : null;
 
 function deviceLabel(session) {
@@ -163,7 +164,7 @@ function deviceLabel(session) {
     session.deviceLabel ||
     session.deviceName ||
     [session.browser, session.os].filter(Boolean).join(' · ') ||
-    'ያልታወቀ መሣሪያ'
+    'Unknown device'
   );
 }
 
@@ -228,46 +229,46 @@ export const exportUsers = auditedExport('export.users', 'users', async (req, re
   const now = new Date();
 
   const rows = selected.map((user) => ({
-    name: user.name || 'ማዋቀሪያ በመጠባበቅ ላይ',
+    name: user.name || 'Awaiting setup',
     email: user.email || '',
     role: ROLE_LABEL[user.role] || user.role,
     status: USER_STATUS_LABEL[user.status] || user.status,
-    verified: user.emailVerified ? 'አዎ' : 'አይ',
-    twoStep: user.twoStepEnabled ? 'በርቷል' : 'ጠፍቷል',
-    locked: user.lockUntil && new Date(user.lockUntil).getTime() > now.getTime() ? 'አዎ' : 'አይ',
-    lastLogin: formatEthiopianAmharic(user.lastLoginAt, { time: true }),
-    created: formatEthiopianAmharic(user.createdAt),
+    verified: user.emailVerified ? 'Yes' : 'No',
+    twoStep: user.twoStepEnabled ? 'On' : 'Off',
+    locked: user.lockUntil && new Date(user.lockUntil).getTime() > now.getTime() ? 'Yes' : 'No',
+    lastLogin: formatEthiopian(user.lastLoginAt, { time: true }),
+    created: formatEthiopian(user.createdAt),
   }));
 
   const subtitle =
     filterLine(
-      search ? `ፍለጋ፡ "${search}"` : null,
-      role ? `ሚና፡ ${ROLE_LABEL[role] || role}` : null,
-      status ? `ሁኔታ፡ ${USER_STATUS_LABEL[status] || status}` : null,
-    ) || 'ሁሉም መለያዎች';
+      search ? `Search: "${search}"` : null,
+      role ? `Role: ${ROLE_LABEL[role] || role}` : null,
+      status ? `Status: ${USER_STATUS_LABEL[status] || status}` : null,
+    ) || 'All accounts';
 
-  const note = truncationNote('መለያዎች', total, rows.length);
+  const note = truncationNote('accounts', total, rows.length);
 
   const file = await buildExport({
     format,
     filenamePrefix: 'accounts',
-    title: 'የተጠቃሚ መለያዎች',
+    title: 'User accounts',
     subtitle,
     summary: [
-      { label: 'የሚመሳሰሉ መለያዎች', value: total.toLocaleString('en-US') },
-      { label: 'በፋይሉ ውስጥ ያሉ ረድፎች', value: rows.length.toLocaleString('en-US') },
+      { label: 'Matching accounts', value: total.toLocaleString('en-US') },
+      { label: 'Rows in this file', value: rows.length.toLocaleString('en-US') },
     ],
     note,
     columns: [
-      { key: 'name', header: 'ስም', width: 26 },
-      { key: 'email', header: 'ኢሜይል', width: 30 },
-      { key: 'role', header: 'ሚና', width: 16 },
-      { key: 'status', header: 'ሁኔታ', width: 14 },
-      { key: 'verified', header: 'ኢሜይል ተረጋግጧል', width: 18 },
-      { key: 'twoStep', header: 'ሁለት ደረጃ', width: 14 },
-      { key: 'locked', header: 'ተቆልፏል', width: 12 },
-      { key: 'lastLogin', header: 'የመጨረሻ መግቢያ', width: 23 },
-      { key: 'created', header: 'የተጨመረበት', width: 18 },
+      { key: 'name', header: 'Name', width: 26 },
+      { key: 'email', header: 'Email', width: 30 },
+      { key: 'role', header: 'Role', width: 16 },
+      { key: 'status', header: 'Status', width: 14 },
+      { key: 'verified', header: 'Email verified', width: 18 },
+      { key: 'twoStep', header: 'Two-step', width: 14 },
+      { key: 'locked', header: 'Locked', width: 12 },
+      { key: 'lastLogin', header: 'Last sign-in', width: 23 },
+      { key: 'created', header: 'Created', width: 18 },
     ],
     rows,
   });
@@ -307,54 +308,54 @@ export const exportSessions = auditedExport('export.sessions', 'sessions', async
   }
 
   const records = selected.map((session) => ({
-    name: session.user?.name || 'ማዋቀሪያ በመጠባበቅ ላይ',
+    name: session.user?.name || 'Awaiting setup',
     email: session.user?.email || '',
     role: ROLE_LABEL[session.user?.role] || session.user?.role || '',
     state: SESSION_STATE_LABEL[session.state] || session.state,
     device: deviceLabel(session),
     ip: session.ip || '—',
-    place: session.location || 'ያልታወቀ',
-    lastActive: formatEthiopianAmharic(session.lastSeenAt, { time: true }),
-    started: formatEthiopianAmharic(session.createdAt),
-    ended: session.revokedAt ? formatEthiopianAmharic(session.revokedAt, { time: true }) : '',
+    place: session.location || 'Unknown',
+    lastActive: formatEthiopian(session.lastSeenAt, { time: true }),
+    started: formatEthiopian(session.createdAt),
+    ended: session.revokedAt ? formatEthiopian(session.revokedAt, { time: true }) : '',
   }));
 
   const subtitle =
     filterLine(
-      search ? `ፍለጋ፡ "${search}"` : null,
-      role ? `ሚና፡ ${ROLE_LABEL[role] || role}` : null,
-      status !== 'all' ? `ሁኔታ፡ ${SESSION_STATE_LABEL[status] || status}` : null,
-    ) || 'ሁሉም ክፍለ ጊዜዎች';
+      search ? `Search: "${search}"` : null,
+      role ? `Role: ${ROLE_LABEL[role] || role}` : null,
+      status !== 'all' ? `Status: ${SESSION_STATE_LABEL[status] || status}` : null,
+    ) || 'All sessions';
 
-  const note = truncationNote('ክፍለ ጊዜዎች', total, records.length);
+  const note = truncationNote('sessions', total, records.length);
 
   const file = await buildExport({
     format,
     filenamePrefix: 'sessions',
-    title: 'የመግቢያ ክፍለ ጊዜዎች',
+    title: 'Sign-in sessions',
     subtitle,
     summary: [
-      { label: 'የሚመሳሰሉ ክፍለ ጊዜዎች', value: total.toLocaleString('en-US') },
-      { label: 'በፋይሉ ውስጥ ያሉ ረድፎች', value: records.length.toLocaleString('en-US') },
-      { label: 'መስመር ላይ', value: stateCounts.online.toLocaleString('en-US') },
-      { label: 'ርቀው', value: stateCounts.away.toLocaleString('en-US') },
+      { label: 'Matching sessions', value: total.toLocaleString('en-US') },
+      { label: 'Rows in this file', value: records.length.toLocaleString('en-US') },
+      { label: 'Online', value: stateCounts.online.toLocaleString('en-US') },
+      { label: 'Away', value: stateCounts.away.toLocaleString('en-US') },
       {
-        label: 'የተጠናቀቁ ወይም ጊዜያቸው ያለፈ',
+        label: 'Ended or expired',
         value: (stateCounts.expired + stateCounts.terminated).toLocaleString('en-US'),
       },
     ],
     note,
     columns: [
-      { key: 'name', header: 'ሰው', width: 22 },
-      { key: 'email', header: 'ኢሜይል', width: 27 },
-      { key: 'role', header: 'ሚና', width: 14 },
-      { key: 'state', header: 'ሁኔታ', width: 12 },
-      { key: 'device', header: 'መሣሪያ', width: 24 },
-      { key: 'ip', header: 'IP አድራሻ', width: 17 },
-      { key: 'place', header: 'ቦታ', width: 20 },
-      { key: 'lastActive', header: 'የመጨረሻ እንቅስቃሴ', width: 22 },
-      { key: 'started', header: 'የጀመረበት', width: 19 },
-      { key: 'ended', header: 'የተጠናቀቀበት', width: 22 },
+      { key: 'name', header: 'Person', width: 22 },
+      { key: 'email', header: 'Email', width: 27 },
+      { key: 'role', header: 'Role', width: 14 },
+      { key: 'state', header: 'Status', width: 12 },
+      { key: 'device', header: 'Device', width: 24 },
+      { key: 'ip', header: 'IP address', width: 17 },
+      { key: 'place', header: 'Location', width: 20 },
+      { key: 'lastActive', header: 'Last active', width: 22 },
+      { key: 'started', header: 'Started', width: 19 },
+      { key: 'ended', header: 'Ended', width: 22 },
     ],
     rows: records,
   });
@@ -407,12 +408,12 @@ export const exportAuditLogs = auditedExport('export.audit_logs', 'audit_logs', 
   const selected = logs.slice(0, EXPORT_LIMIT);
 
   const rows = selected.map((entry) => ({
-    time: formatEthiopianAmharic(entry.createdAt, { time: true }),
-    category: CATEGORY_LABEL[auditCategory(entry.action)] || 'ሌላ',
+    time: formatEthiopian(entry.createdAt, { time: true }),
+    category: CATEGORY_LABEL[auditCategory(entry.action)] || 'Other',
     action: actionLabel(entry.action),
-    actor: entry.actorId?.name || entry.actorId?.email || 'ሲስተም',
+    actor: entry.actorId?.name || entry.actorId?.email || 'System',
     role: ROLE_LABEL[entry.actorId?.role || entry.actorRole] || entry.actorRole || '',
-    outcome: entry.status === 'fail' ? 'አልተሳካም' : 'ተሳክቷል',
+    outcome: entry.status === 'fail' ? 'Failed' : 'Succeeded',
     target: [
       entry.targetType ? TARGET_TYPE_LABEL[entry.targetType] || entry.targetType : '',
       entry.targetId,
@@ -424,40 +425,40 @@ export const exportAuditLogs = auditedExport('export.audit_logs', 'audit_logs', 
 
   const rangeLabel =
     range === 'all'
-      ? 'ሁሉም የተመዘገበ ታሪክ'
+      ? 'All recorded history'
       : range === '1'
-        ? 'ባለፈው 1 ቀን'
-        : `ባለፉት ${range} ቀናት`;
+        ? 'The last 1 day'
+        : `The last ${range} days`;
   const subtitle =
     filterLine(
-      search ? `ፍለጋ፡ "${search}"` : null,
-      category !== 'all' ? `ዘርፍ፡ ${CATEGORY_LABEL[category] || category}` : null,
-      status !== 'all' ? `ውጤት፡ ${status === 'fail' ? 'አልተሳካም' : 'ተሳክቷል'}` : null,
+      search ? `Search: "${search}"` : null,
+      category !== 'all' ? `Category: ${CATEGORY_LABEL[category] || category}` : null,
+      status !== 'all' ? `Outcome: ${status === 'fail' ? 'Failed' : 'Succeeded'}` : null,
       rangeLabel,
     ) || rangeLabel;
 
-  const note = truncationNote('ክስተቶች', total, rows.length);
+  const note = truncationNote('events', total, rows.length);
 
   const file = await buildExport({
     format,
     filenamePrefix: 'audit-log',
-    title: 'የኦዲት መዝገብ',
+    title: 'Audit log',
     subtitle,
     summary: [
-      { label: 'የሚመሳሰሉ ክስተቶች', value: total.toLocaleString('en-US') },
-      { label: 'ያልተሳኩ ክስተቶች', value: failures.toLocaleString('en-US') },
-      { label: 'በፋይሉ ውስጥ ያሉ ረድፎች', value: rows.length.toLocaleString('en-US') },
+      { label: 'Matching events', value: total.toLocaleString('en-US') },
+      { label: 'Failed events', value: failures.toLocaleString('en-US') },
+      { label: 'Rows in this file', value: rows.length.toLocaleString('en-US') },
     ],
     note,
     columns: [
-      { key: 'time', header: 'ጊዜ', width: 23 },
-      { key: 'category', header: 'ዘርፍ', width: 12 },
-      { key: 'action', header: 'ተግባር', width: 24 },
-      { key: 'actor', header: 'ተጠቃሚ', width: 23 },
-      { key: 'role', header: 'ሚና', width: 14 },
-      { key: 'outcome', header: 'ውጤት', width: 10 },
-      { key: 'target', header: 'ዒላማ', width: 22 },
-      { key: 'ip', header: 'IP አድራሻ', width: 17 },
+      { key: 'time', header: 'Time', width: 23 },
+      { key: 'category', header: 'Category', width: 12 },
+      { key: 'action', header: 'Action', width: 24 },
+      { key: 'actor', header: 'Actor', width: 23 },
+      { key: 'role', header: 'Role', width: 14 },
+      { key: 'outcome', header: 'Outcome', width: 10 },
+      { key: 'target', header: 'Target', width: 22 },
+      { key: 'ip', header: 'IP address', width: 17 },
     ],
     rows,
   });
@@ -531,9 +532,9 @@ export const exportAnnouncements = auditedExport('export.announcements', 'announ
     read: row.readCount || 0,
     readRate: row.recipientCount ? `${Math.round((row.readCount / row.recipientCount) * 100)}%` : '0%',
     email: row.sendEmail ? `${row.emailSentCount || 0} sent / ${row.emailFailedCount || 0} failed` : 'Not requested',
-    published: formatEthiopianAmharic(row.publishedAt, { time: true }),
-    expires: row.expiresAt ? formatEthiopianAmharic(row.expiresAt, { time: true }) : '',
-    created: formatEthiopianAmharic(row.createdAt),
+    published: formatEthiopian(row.publishedAt, { time: true }),
+    expires: row.expiresAt ? formatEthiopian(row.expiresAt, { time: true }) : '',
+    created: formatEthiopian(row.createdAt),
   }));
 
   const subtitle =

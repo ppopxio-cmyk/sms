@@ -4,6 +4,8 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
 import { audit } from '../services/audit.service.js';
 import { MAIL_TRANSPORT, sendTestEmail } from '../services/mail.service.js';
+import { revokeAllExceptUsers } from '../services/session.service.js';
+import { logger } from '../utils/logger.js';
 import {
   applySettingsPatch,
   getSettings,
@@ -97,6 +99,27 @@ export const updateMaintenance = asyncHandler(async (req, res) => {
   await settings.save();
   invalidateSettingsCache();
 
+  // Closing the portal ends every non-admin session immediately. Administrators keep
+  // their sessions so the person who closed it can reopen it without being locked out.
+  let sessionsEnded = 0;
+  let revocationFailed = false;
+  if (enabled) {
+    try {
+      const admins = await User.find({ role: 'ADMIN', deletedAt: null }).select('_id').lean();
+      // Keep the caller even if a concurrent role change made the query miss them: the
+      // person closing the portal must never revoke the only route back in.
+      const keep = admins.map((row) => row._id);
+      if (!keep.some((id) => String(id) === String(admin._id))) keep.push(admin._id);
+      sessionsEnded = await revokeAllExceptUsers(keep, {
+        reason: 'maintenance_mode',
+        by: admin._id,
+      });
+    } catch (err) {
+      revocationFailed = true;
+      logger.error({ err: err.message }, 'non-admin sessions could not be revoked for maintenance');
+    }
+  }
+
   const after = maintenanceState(settings);
   audit({
     req,
@@ -106,6 +129,8 @@ export const updateMaintenance = asyncHandler(async (req, res) => {
     meta: {
       before: { enabled: before.enabled, until: before.until },
       after: { enabled: after.enabled, until: after.until, message: after.message },
+      sessionsEnded,
+      revocationFailed,
     },
   });
 
@@ -113,7 +138,11 @@ export const updateMaintenance = asyncHandler(async (req, res) => {
     maintenance: after,
     settings: publicSettings(settings),
     message: enabled
-      ? 'Maintenance mode is on. Non-admin APIs now return a maintenance response; admin recovery still works.'
+      ? revocationFailed
+        ? 'Maintenance mode is on. Non-admin sessions will be refused on their next request; admin recovery still works.'
+        : sessionsEnded
+          ? `Maintenance mode is on. ${sessionsEnded} other ${sessionsEnded === 1 ? 'session was' : 'sessions were'} signed out; admin recovery still works.`
+          : 'Maintenance mode is on. No other sessions were open; admin recovery still works.'
       : 'Maintenance mode is off. The portal is open again.',
   });
 });

@@ -53,8 +53,8 @@ export function formatEthiopian(input = new Date(), { time = false } = {}) {
   return `${date}, ${clock}`;
 }
 
-// The screens and mail are English, but the school's downloads are read in Amharic.
-// Keep this separate from formatEthiopian so the two audiences do not change each other.
+// Kept for any future Amharic-only surface. Downloads deliberately use formatEthiopian
+// above so exported labels and dates remain English.
 export function formatEthiopianAmharic(input = new Date(), { time = false } = {}) {
   if (!input) return '—';
   const { year, month, day } = toEthiopian(input);

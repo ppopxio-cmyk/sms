@@ -29,7 +29,7 @@ import Field from '../components/ui/Field';
 import FilterTabs from '../components/ui/FilterTabs';
 import LiveStamp from '../components/ui/LiveStamp';
 import Modal from '../components/ui/Modal';
-import { Skeleton, SkeletonPage } from '../components/ui/Skeleton';
+import { SkeletonPage } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/StatePanel';
 
 const TABS = [
@@ -153,6 +153,9 @@ export default function AdminSettings() {
   useEffect(() => {
     if (!settingsQuery.data?.settings) return;
     const safe = JSON.parse(JSON.stringify(settingsQuery.data.settings));
+    // The saved settings seed the editable draft once they arrive. This is the one
+    // deliberate server-to-form copy; background refreshes never overwrite edits.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft(safe);
     setBaseline(safe);
   }, [settingsQuery.data]);
@@ -310,7 +313,7 @@ export default function AdminSettings() {
                 <CardHeader
                   icon={Wrench}
                   title="Maintenance mode"
-                  subtitle="Close the portal without deleting data or signing anyone out."
+                  subtitle="Close the portal, end other roles' sessions and keep admin recovery open."
                   action={
                     <Badge tone={maintenanceState?.enabled ? 'danger' : 'success'}>
                       {maintenanceState?.enabled ? 'Closed' : 'Open'}
@@ -330,7 +333,7 @@ export default function AdminSettings() {
                         <p className="mt-1 text-sm leading-relaxed text-slate-600">
                           {maintenanceState?.enabled
                             ? maintenanceState.message
-                            : 'Everyone can use the portal normally. Turning maintenance on keeps sessions and data intact.'}
+                            : 'Everyone can use the portal normally. Turning maintenance on signs out every other role and keeps all data intact.'}
                         </p>
                         {maintenanceState?.enabled && maintenanceState.until ? (
                           <p className="mt-2 text-xs font-medium text-slate-500">
@@ -351,8 +354,9 @@ export default function AdminSettings() {
                   </div>
 
                   <Alert tone="info" title="What remains available while maintenance is on">
-                    Sign-in, health checks, and the admin workspace stay reachable so you can always reopen it. Every other API answers
-                    with a maintenance response. Sessions, audit history and announcements are not deleted.
+                    Sign-in, health checks, and the admin workspace stay reachable so you can always reopen it. Other roles are signed
+                    out immediately, and every other API answers with a maintenance response. Accounts, audit history and announcements
+                    are not deleted.
                   </Alert>
 
                   <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-4 py-3 text-xs leading-relaxed text-slate-500">
@@ -368,7 +372,7 @@ export default function AdminSettings() {
                   {[
                     ['Server-enforced', 'The maintenance check runs in the API before protected routes. Hiding a screen in the browser is not enough.'],
                     ['Admin recovery', 'Admins can still sign in, read the audit trail and turn maintenance off.'],
-                    ['Data preserved', 'Sessions are not revoked. People resume where they were when the portal reopens.'],
+                    ['Data preserved', 'Accounts, audit history and announcements stay. Other roles sign in again after reopening.'],
                     ['Audited', 'Both activation and deactivation record who changed it, when, and the message shown.'],
                   ].map(([title, text]) => (
                     <div key={title} className="rounded-2xl border border-slate-100 bg-white/60 p-3.5">
@@ -595,8 +599,8 @@ export default function AdminSettings() {
         title={maintenanceState?.enabled ? 'Reopen the portal?' : 'Close the portal for maintenance?'}
         subtitle={
           maintenanceState?.enabled
-            ? 'Everyone will be able to use the portal again. Sessions and data stay exactly as they are.'
-            : 'Every non-admin API will answer with a maintenance response. Admins can still sign in and reopen it.'
+            ? 'Everyone will be able to sign in again. Accounts and data stay exactly as they are.'
+            : 'Every other role will be signed out immediately. Admins keep their session and can reopen the portal at any time.'
         }
         footer={
           <>

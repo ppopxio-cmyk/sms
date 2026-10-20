@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Menu, Wrench } from 'lucide-react';
@@ -23,8 +23,6 @@ export default function AppShell() {
 
   // One live connection for the whole app: notices float in as they happen, on every page
   // and for every role. The service worker is registered once in main.jsx.
-  useNotificationStream(true);
-
   const status = useQuery({
     queryKey: ['system-status'],
     queryFn: async () => (await api.get('/status')).data,
@@ -34,6 +32,29 @@ export default function AppShell() {
   });
   const maintenance = status.data?.maintenance;
   const isAdmin = user?.role === 'ADMIN';
+
+  // Wait for the public status before opening a non-admin stream. Otherwise a tab that
+  // was open when maintenance began asks for a ticket it will only be refused for.
+  useNotificationStream(Boolean(user) && (isAdmin || (status.isSuccess && !maintenance?.enabled)));
+
+  // A closure signs out everyone except administrators. This is the client half of the
+  // server rule: the API already refuses the request, and this sends the browser to the
+  // public note instead of leaving a broken page behind.
+  useEffect(() => {
+    if (!maintenance?.enabled || isAdmin || !user) return;
+    navigate('/maintenance', { replace: true, state: { maintenance } });
+    void logout();
+  }, [maintenance, isAdmin, user, logout, navigate]);
+
+  useEffect(() => {
+    const onMaintenance = (event) => {
+      if (isAdmin) return;
+      navigate('/maintenance', { replace: true, state: { maintenance: event.detail } });
+      void logout();
+    };
+    window.addEventListener('sms:maintenance', onMaintenance);
+    return () => window.removeEventListener('sms:maintenance', onMaintenance);
+  }, [isAdmin, logout, navigate]);
 
   const signOut = async () => {
     setOpen(false);

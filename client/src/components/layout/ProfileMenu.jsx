@@ -21,8 +21,9 @@ const initials = (value) =>
 export default function ProfileMenu() {
   const [open, setOpen] = useState(false);
   const user = useAuth((s) => s.user);
+  const status = useAuth((s) => s.status);
   const logout = useAuth((s) => s.logout);
-  const unread = useUnread();
+  const unread = useUnread({ enabled: status === 'ready' && Boolean(user) });
   const navigate = useNavigate();
 
   const count = unread.data?.unread ?? 0;

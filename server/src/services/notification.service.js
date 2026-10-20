@@ -27,7 +27,11 @@ async function deliver(entry, { exceptSid, exceptDeviceKey } = {}) {
     const payload = toPayload(doc);
     const live = stream.sendToUser(doc.userId, 'notification', payload, { exceptSid });
     if (live === 0) {
-      await push.sendToUser(doc.userId, { kind: 'notification', ...payload }, { exceptDeviceKey });
+      await push.sendToUser(
+        doc.userId,
+        { kind: 'notification', ...payload, tag: `sms-${doc._id}`, url: '/notifications' },
+        { exceptDeviceKey },
+      );
     }
     return payload;
   } catch (err) {

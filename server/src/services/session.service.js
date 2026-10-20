@@ -7,7 +7,7 @@ import { deviceKey } from '../utils/device.js';
 import { newRefreshToken, sha256 } from './token.service.js';
 import { audit } from './audit.service.js';
 import { securityPolicy } from './securityPolicy.service.js';
-import { atOrAfter } from '../utils/mongo.js';
+import { atOrAfter, trusted } from '../utils/mongo.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const CACHE_MS = 30_000;
@@ -138,6 +138,22 @@ export async function revokeSession(id, { by, reason } = {}) {
 export async function revokeAllForUser(userId, reason) {
   const list = await Session.find({ userId, status: 'active' }).select('_id').lean();
   await Promise.all(list.map((s) => revokeSession(s._id, { reason })));
+}
+
+// Maintenance mode signs out every role except the administrators. The keep-list is
+// trusted because it is built from the database, not from a request. Clearing the
+// in-process cache makes the revocation effective immediately rather than after the
+// 30-second fast path expires.
+export async function revokeAllExceptUsers(userIds, { reason, by } = {}) {
+  const keep = (userIds || []).filter(Boolean);
+  const filter = { status: 'active' };
+  if (keep.length) filter.userId = trusted({ $nin: keep });
+
+  const result = await Session.updateMany(filter, {
+    $set: { status: 'revoked', revokedAt: new Date(), revokedBy: by ?? null, revokeReason: reason },
+  });
+  cache.clear();
+  return result.modifiedCount ?? 0;
 }
 
 // Swap the refresh token for a new one. Returns { session, refresh }.
