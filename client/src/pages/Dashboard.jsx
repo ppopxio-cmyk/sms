@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../store/auth';
 import { api } from '../lib/api';
+import { deviceTitle, placeLine } from '../lib/deviceName';
 import { formatEthiopian, timeAgo } from '../lib/ethiopianDate';
 import Card, { CardBody, CardHeader } from '../components/ui/Card';
 import Badge, { RoleBadge } from '../components/ui/Badge';
@@ -144,12 +145,9 @@ export default function Dashboard() {
               devices.slice(0, 3).map((s) => (
                 <div key={s.id} className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50/80 px-4 py-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-800">
-                      {s.deviceName ? `${s.deviceName} · ` : ''}
-                      {s.browser} on {s.os}
-                    </p>
+                    <p className="truncate text-sm font-semibold text-slate-800">{deviceTitle(s)}</p>
                     <p className="truncate text-xs text-slate-500">
-                      {s.location || 'Unknown place'} · {s.ip} · {timeAgo(s.lastSeenAt)}
+                      {placeLine(s)} · {s.ip} · {timeAgo(s.lastSeenAt)}
                     </p>
                   </div>
                   {s.current ? <Badge tone="success">This device</Badge> : <Badge tone="neutral">{s.deviceType}</Badge>}

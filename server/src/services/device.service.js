@@ -7,10 +7,23 @@ export async function isNewDevice(userId, key) {
 }
 
 export async function rememberDevice({ userId, key, info }) {
-  const { browser, os, deviceType, deviceName, ip, location } = info ?? {};
+  const { browser, os, deviceType, deviceName, deviceModelSource, ip, location, locationSource } = info ?? {};
   await KnownDevice.updateOne(
     { userId, key },
-    { $set: { browser, os, deviceType, deviceName, ip, location, lastSeenAt: new Date() }, $setOnInsert: { firstSeenAt: new Date() } },
+    {
+      $set: {
+        browser,
+        os,
+        deviceType,
+        deviceName,
+        deviceModelSource,
+        ip,
+        location,
+        locationSource,
+        lastSeenAt: new Date(),
+      },
+      $setOnInsert: { firstSeenAt: new Date() },
+    },
     { upsert: true },
   );
 }

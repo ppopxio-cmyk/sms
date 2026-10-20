@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Search, ShieldCheck, Users } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
+import { deviceSubtitle, deviceTitle, placeLine } from '../lib/deviceName';
 import { formatEthiopian, timeAgo } from '../lib/ethiopianDate';
 import Card, { CardBody, CardHeader } from '../components/ui/Card';
 import Badge, { RoleBadge } from '../components/ui/Badge';
@@ -118,12 +119,12 @@ export default function AdminSessions() {
                         )}
                       </div>
                       <p className="mt-0.5 truncate text-xs text-slate-500">{s.user?.email}</p>
+                      <p className="mt-0.5 truncate text-xs text-slate-500">{deviceTitle(s)}</p>
+                      {deviceSubtitle(s) ? (
+                        <p className="mt-0.5 truncate text-xs text-slate-400">{deviceSubtitle(s)}</p>
+                      ) : null}
                       <p className="mt-0.5 truncate text-xs text-slate-500">
-                        {s.deviceName ? `${s.deviceName} · ` : ''}
-                        {s.browser} on {s.os}
-                      </p>
-                      <p className="mt-0.5 truncate text-xs text-slate-500">
-                        {s.location || 'Unknown place'} · {s.ip}
+                        {placeLine(s)} · {s.ip}
                       </p>
                       <p className="mt-0.5 text-xs text-slate-400">
                         Started {formatEthiopian(s.createdAt, { time: true })} · last active {timeAgo(s.lastSeenAt)}

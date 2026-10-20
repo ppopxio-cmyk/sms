@@ -8,6 +8,7 @@ import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { MAIL_TRANSPORT, verifyMail } from './services/mail.service.js';
 import { isAllowedOrigin } from './utils/origin.js';
+import { resolveClient } from './utils/device.js';
 import { isPrivateAddress } from './utils/geo.js';
 import { globalLimiter } from './middleware/rateLimit.js';
 import { csrfGuard } from './middleware/csrf.js';
@@ -19,20 +20,18 @@ export function createApp() {
   app.disable('x-powered-by');
   if (env.TRUST_PROXY) app.set('trust proxy', env.TRUST_PROXY);
 
-  // Express can only name the nearest hop, and behind the host that is a private address
-  // like 10.192.117.149 - unroutable, unplaceable on a map, and shared by everybody. The
-  // edge in front states the caller's own address in a header of its own, which a caller
-  // cannot forge because the edge overwrites it. Everything that cares about "which
-  // address is this" (rate limits, sign-in alerts) reads that instead.
+  // Express can only name the nearest hop. When the site is called through its Vercel
+  // address - which is how the browser reaches this API - Vercel states the visitor's own
+  // address and cannot be made to lie about it. Everything that cares which address this is
+  // (rate limits, sign-in alerts) uses that instead of the private hop behind it.
   app.use((req, _res, next) => {
-    const edge = String(req.get('cf-connecting-ip') || req.get('true-client-ip') || '')
-      .trim()
-      .replace(/^::ffff:/, '');
-    if (edge && !isPrivateAddress(edge)) {
+    const { ip } = resolveClient(req);
+    const usable = Boolean(ip) && ip !== '::1' && !ip.startsWith('127.') && !isPrivateAddress(ip);
+    if (usable && ip !== req.ip) {
       try {
-        Object.defineProperty(req, 'ip', { value: edge, configurable: true, enumerable: true, writable: true });
+        Object.defineProperty(req, 'ip', { value: ip, configurable: true, enumerable: true, writable: true });
       } catch {
-        // Express's own answer stays in place; the address is still improved elsewhere.
+        // Express's own answer stays in place; the display path resolves it separately.
       }
     }
     next();
@@ -48,7 +47,7 @@ export function createApp() {
         origin: isAllowedOrigin(req, req.get('origin')),
         credentials: true,
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Device-Fingerprint', 'X-Device-Info'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Device-Fingerprint', 'X-Device-Info', 'X-Device-Location', 'CF-Turnstile-Response'],
         maxAge: 600,
       });
     }),
@@ -72,9 +71,27 @@ export function createApp() {
     res.json({ ok: true, commit: process.env.RENDER_GIT_COMMIT?.slice(0, 7) || null }),
   );
 
-  // What this service thinks the caller's address is. Handy when a sign-in says "unknown
-  // place": it shows whether the address arrived at all, without echoing anything else.
-  app.get('/api/health/ip', (req, res) => res.json({ ip: req.ip }));
+  // What this service thinks the caller's address and place are, and which header it
+  // believed. Handy when a sign-in says the wrong country: it shows where the answer came
+  // from without echoing anything else.
+  app.get('/api/health/ip', (req, res) => {
+    const { ip, via } = resolveClient(req);
+    let city = String(req.get('x-vercel-ip-city') || '');
+    try {
+      city = decodeURIComponent(city);
+    } catch {
+      // leave it as it arrived; it is only a label
+    }
+    res.json({
+      ip,
+      via,
+      city: city || null,
+      country: req.get('x-vercel-ip-country') || null,
+      // Which of the address headers actually arrived. Names only; the values are what is
+      // already shown above.
+      saw: ['x-vercel-id', 'x-real-ip', 'cf-connecting-ip', 'x-vercel-ip-city'].filter((name) => Boolean(req.get(name))),
+    });
+  });
 
   // Which way mail leaves this server, and whether it can authenticate at this moment.
   // That one answer decides whether a code or a link can reach anybody, and reading it

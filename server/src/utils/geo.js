@@ -19,7 +19,7 @@ let geoip;
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CACHE_MAX = 500;
-const cache = new Map(); // address -> { place, until }
+const cache = new Map(); // key -> { place, until }
 
 // Addresses that cannot be looked up and should never pretend to be a place.
 const PRIVATE =
@@ -27,11 +27,15 @@ const PRIVATE =
 
 export const isPrivateAddress = (ip) => PRIVATE.test(String(ip || '').replace(/^::ffff:/, ''));
 
-const countryName = (code) => (code ? regionNames?.of(code) ?? code : '');
+export const countryName = (code) => {
+  const value = String(code || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(value)) return '';
+  return regionNames?.of(value) ?? value;
+};
 
-const remember = (ip, place) => {
+const remember = (key, place) => {
   if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
-  cache.set(ip, { place, until: Date.now() + CACHE_TTL_MS });
+  cache.set(key, { place, until: Date.now() + CACHE_TTL_MS });
   return place;
 };
 
@@ -78,4 +82,35 @@ export async function placeForAddress(rawIp) {
   if (online) return remember(ip, online);
 
   return remember(ip, country || 'Unknown place');
+}
+
+// The place the person themselves allowed the browser to share. The coordinates never
+// leave this function: only a city and a country are kept, and only for a sign-in record.
+// OpenStreetMap's service is free, needs no key, and asks for a name in the request, which
+// is why one is sent.
+export async function placeForCoordinates(lat, lon) {
+  const rounded = `${Number(lat).toFixed(2)},${Number(lon).toFixed(2)}`;
+  const hitCache = cache.get(`c:${rounded}`);
+  if (hitCache && hitCache.until > Date.now()) return hitCache.place;
+
+  try {
+    const url =
+      'https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&addressdetails=1&accept-language=en' +
+      `&lat=${Number(lat).toFixed(4)}&lon=${Number(lon).toFixed(4)}`;
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(1800),
+      headers: {
+        accept: 'application/json',
+        'user-agent': 'SchoolManagementSystem/1.0 (sign-in location record)',
+      },
+    });
+    if (!res.ok) return '';
+    const data = await res.json();
+    const address = data?.address ?? {};
+    const city = address.city || address.town || address.village || address.municipality || address.county || address.state || '';
+    const country = address.country || countryName(address.country_code);
+    return remember(`c:${rounded}`, [city, country].filter(Boolean).join(', '));
+  } catch {
+    return '';
+  }
 }

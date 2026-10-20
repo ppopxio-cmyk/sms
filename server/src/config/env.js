@@ -47,6 +47,9 @@ const schema = z.object({
   GOOGLE_CLIENT_SECRET: optionalText(z.string().min(1)),
   GOOGLE_REFRESH_TOKEN: optionalText(z.string().min(1)),
   MAIL_FROM_NAME: z.string().default('School Management System'),
+  // Cloudflare Turnstile guards the public sign-in, reset and resend screens. A blank value
+  // turns the check off, which is what local development uses; production must set it.
+  TURNSTILE_SECRET_KEY: optionalText(z.string().min(10)),
   VAPID_PUBLIC_KEY: z.string().min(1),
   VAPID_PRIVATE_KEY: z.string().min(1),
   VAPID_SUBJECT: z.string().min(1),

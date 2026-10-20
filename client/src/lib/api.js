@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { deviceFingerprint } from './fingerprint';
 import { primeDeviceInfo } from './device-info';
+import { readLocation, locationHeader } from './location';
 
 // Vite proxies /api to the Express server, so this stays same-origin in dev
 // and works unchanged if the built site is served by the API in production.
@@ -62,6 +63,15 @@ export const api = axios.create({
 
 // What the browser will say about its own system, once it has answered (see device-info).
 primeDeviceInfo(api);
+
+// A place the person already allowed on this sign-in screen. The header carries only the
+// rounded coordinates, and the server turns them into a city and keeps nothing else.
+const sharedLocation = readLocation();
+if (sharedLocation) api.defaults.headers.common['X-Device-Location'] = locationHeader(sharedLocation);
+
+export const applyLocationHeader = (location) => {
+  api.defaults.headers.common['X-Device-Location'] = locationHeader(location);
+};
 
 api.interceptors.request.use((config) => {
   if (accessToken) {

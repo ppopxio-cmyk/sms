@@ -10,6 +10,7 @@ import Button from '../components/ui/Button';
 import Alert from '../components/ui/Alert';
 import CodeInput from '../components/ui/CodeInput';
 import PasswordMeter from '../components/ui/PasswordMeter';
+import Turnstile, { turnstileEnabled } from '../components/ui/Turnstile';
 import { api, errorMessage } from '../lib/api';
 import { emailOnlySchema, resetPasswordSchema, emailField } from '../lib/validation';
 import { FLOW_KEYS, clearFlow, readFlow, writeFlow } from '../lib/session-flow';
@@ -37,6 +38,22 @@ export default function ForgotPassword() {
   const [error, setError] = useState(null);
   const timer = useResendTimer('forgot-password');
 
+  // Two widgets, because a token is single use and the code step can ask for another
+  // code after the first one has already been spent.
+  const [emailToken, setEmailToken] = useState('');
+  const [emailKey, setEmailKey] = useState(0);
+  const [codeToken, setCodeToken] = useState('');
+  const [codeKey, setCodeKey] = useState(0);
+
+  const freshEmailCheck = () => {
+    setEmailToken('');
+    setEmailKey((n) => n + 1);
+  };
+  const freshCodeCheck = () => {
+    setCodeToken('');
+    setCodeKey((n) => n + 1);
+  };
+
   const emailOk = email.length > 0 && emailField.safeParse(email).success;
 
   const emailForm = useForm({
@@ -63,13 +80,18 @@ export default function ForgotPassword() {
   const requestCode = async (values) => {
     setError(null);
     try {
-      await api.post('/auth/forgot-password', { email: values.email });
+      await api.post(
+        '/auth/forgot-password',
+        { email: values.email },
+        emailToken ? { headers: { 'cf-turnstile-response': emailToken } } : undefined,
+      );
       setEmail(values.email);
       setCode('');
       timer.start();
       setStep('code');
       toast.success('If that email has an account, a code is on its way.');
     } catch (err) {
+      if (turnstileEnabled) freshEmailCheck();
       setError(errorMessage(err));
     }
   };
@@ -95,10 +117,15 @@ export default function ForgotPassword() {
   const resend = async () => {
     setError(null);
     try {
-      await api.post('/auth/forgot-password', { email });
+      await api.post(
+        '/auth/forgot-password',
+        { email },
+        codeToken ? { headers: { 'cf-turnstile-response': codeToken } } : undefined,
+      );
       timer.start();
       toast.success('We sent a new code.');
     } catch (err) {
+      if (turnstileEnabled) freshCodeCheck();
       setError(errorMessage(err));
     }
   };
@@ -188,6 +215,11 @@ export default function ForgotPassword() {
           <Button type="submit" size="lg" loading={emailForm.formState.isSubmitting} className="w-full">
             Send code
           </Button>
+          <Turnstile
+            key={emailKey}
+            onToken={setEmailToken}
+            className="flex min-h-[65px] justify-center"
+          />
         </form>
       ) : null}
 
@@ -208,6 +240,8 @@ export default function ForgotPassword() {
               </button>
             )}
           </div>
+
+          <Turnstile key={codeKey} onToken={setCodeToken} className="flex min-h-[65px] justify-center" />
         </div>
       ) : null}
 

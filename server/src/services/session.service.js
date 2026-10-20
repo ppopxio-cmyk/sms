@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { env } from '../config/env.js';
 import { Session } from '../models/Session.js';
+import { KnownDevice } from '../models/KnownDevice.js';
 import { AppError } from '../utils/AppError.js';
 import { deviceKey } from '../utils/device.js';
 import { newRefreshToken, sha256 } from './token.service.js';
@@ -56,12 +57,16 @@ export async function createSession({ user, deviceId, fingerprint, info }) {
     live.filter((s) => deviceKey(s.fingerprint, s.deviceId) === key).map((s) => s._id),
   );
   const refresh = newRefreshToken();
+  // A name the person gave this browser last time belongs on the new row too, otherwise
+  // signing in again would forget it.
+  const known = await KnownDevice.findOne({ userId: user._id, key }).select('deviceLabel').lean();
   const session = await Session.create({
     userId: user._id,
     deviceId,
     fingerprint: fingerprint ?? undefined,
     refreshHash: sha256(refresh),
     ...info,
+    deviceLabel: known?.deviceLabel,
     expiresAt: new Date(now + env.REFRESH_TTL_DAYS * DAY),
     absoluteExpiresAt: new Date(now + env.REFRESH_ABSOLUTE_DAYS * DAY),
   });

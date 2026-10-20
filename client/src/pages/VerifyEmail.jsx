@@ -11,6 +11,7 @@ import Button from '../components/ui/Button';
 import Alert from '../components/ui/Alert';
 import Field from '../components/ui/Field';
 import PasswordMeter from '../components/ui/PasswordMeter';
+import Turnstile, { turnstileEnabled } from '../components/ui/Turnstile';
 import { api, errorMessage } from '../lib/api';
 import { nameField, setupAccountSchema } from '../lib/validation';
 import { FLOW_KEYS, clearFlow, readFlow, writeFlow } from '../lib/session-flow';
@@ -32,6 +33,8 @@ export default function VerifyEmail() {
   const [state, setState] = useState(token ? 'verifying' : flow?.ticket ? 'setup' : 'waiting');
   const [message, setMessage] = useState(null);
   const [sending, setSending] = useState(false);
+  const [sendToken, setSendToken] = useState('');
+  const [sendKey, setSendKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const started = useRef(false);
   const { left, start, clear } = useResendTimer('verify-email');
@@ -111,11 +114,16 @@ export default function VerifyEmail() {
     setMessage(null);
     setSending(true);
     try {
-      await api.post('/auth/resend-verification', { email });
+      const headers = sendToken ? { 'cf-turnstile-response': sendToken } : undefined;
+      await api.post('/auth/resend-verification', { email }, { headers });
       start();
       toast.success('A new link is on its way.');
     } catch (err) {
       setMessage(errorMessage(err));
+      if (turnstileEnabled) {
+        setSendToken('');
+        setSendKey((n) => n + 1);
+      }
     } finally {
       setSending(false);
     }
@@ -265,13 +273,17 @@ export default function VerifyEmail() {
                 <button
                   type="button"
                   onClick={send}
-                  disabled={sending}
+                  disabled={sending || (turnstileEnabled && !sendToken)}
                   className="focus-ring rounded-lg font-semibold text-brand-600 hover:text-brand-700 disabled:opacity-50"
                 >
                   Send a new link
                 </button>
               )}
             </div>
+
+            {left === 0 ? (
+              <Turnstile key={sendKey} onToken={setSendToken} className="flex min-h-[65px] justify-center" />
+            ) : null}
           </>
         )}
       </div>

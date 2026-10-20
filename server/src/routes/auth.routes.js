@@ -4,14 +4,15 @@ import { validate } from '../middleware/validate.js';
 import { authenticate, requirePasswordChanged } from '../middleware/authenticate.js';
 import {
   emailOnlySchema, verifyEmailSchema, loginSchema, loginVerifySchema, ticketSchema,
-  setupAccountSchema, changePasswordSchema, sessionConfirmSchema, idParamSchema, twoStepSchema,
+  setupAccountSchema, changePasswordSchema, sessionConfirmSchema, sessionNameSchema, idParamSchema, twoStepSchema,
   deletePasswordSchema, deleteAccountSchema,
 } from '../validators/auth.schemas.js';
 import {
   verifyEmail, setupAccount, resendVerification, login, loginVerify, loginResend,
-  refresh, logout, me, heartbeat, changePassword, listMySessions,
+  refresh, logout, me, heartbeat, changePassword, listMySessions, renameMySession,
   requestSessionCode, terminateMySession, setTwoStep, requestDeleteCode, deleteAccount,
 } from '../controllers/auth.controller.js';
+import { turnstile } from '../middleware/turnstile.js';
 
 const r = Router();
 
@@ -19,9 +20,9 @@ const r = Router();
 r.post('/verify-email', codeLimiter, validate(verifyEmailSchema), verifyEmail);
 // Finishing that new account - its own name and password - right after the link is used.
 r.post('/setup-account', authLimiter, validate(setupAccountSchema), setupAccount);
-r.post('/resend-verification', codeLimiter, validate(emailOnlySchema), resendVerification);
+r.post('/resend-verification', codeLimiter, turnstile, validate(emailOnlySchema), resendVerification);
 
-r.post('/login', authLimiter, validate(loginSchema), login);
+r.post('/login', authLimiter, turnstile, validate(loginSchema), login);
 r.post('/login/verify', codeLimiter, validate(loginVerifySchema), loginVerify);
 r.post('/login/resend', codeLimiter, validate(ticketSchema), loginResend);
 
@@ -35,6 +36,14 @@ r.post('/delete-account/code', authLimiter, authenticate, requirePasswordChanged
 r.post('/delete-account', authLimiter, authenticate, requirePasswordChanged, validate(deleteAccountSchema), deleteAccount);
 r.post('/heartbeat', authenticate, requirePasswordChanged, heartbeat);
 r.get('/sessions', authenticate, requirePasswordChanged, listMySessions);
+r.patch(
+  '/sessions/:id/name',
+  authenticate,
+  requirePasswordChanged,
+  validate(idParamSchema, 'params'),
+  validate(sessionNameSchema),
+  renameMySession,
+);
 r.post(
   '/sessions/:id/code',
   authenticate,

@@ -80,6 +80,16 @@ export const pushUnsubscribeSchema = z.strictObject({ endpoint: z.url('That push
 export const idParamSchema = z.strictObject({ id: z.string().regex(/^[a-f0-9]{24}$/i, 'That id is not valid.') });
 export const sessionConfirmSchema = z.strictObject({ code });
 
+// A device name a person chose for their own browser ("HP EliteBook 830 G8"), because no
+// browser on Windows will ever reveal the hardware model by itself.
+export const sessionNameSchema = z.strictObject({
+  label: z
+    .string()
+    .trim()
+    .min(2, 'Use at least two characters.')
+    .max(40, 'That name is too long.'),
+});
+
 // ---- Accounts that an administrator creates ------------------------------------
 // An account starts as nothing but an email address and a role. No password is chosen,
 // stored or handed over: the person picks their own full name and password when they

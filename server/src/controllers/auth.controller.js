@@ -1,6 +1,7 @@
 import argon2 from 'argon2';
 import { User } from '../models/User.js';
 import { Session } from '../models/Session.js';
+import { KnownDevice } from '../models/KnownDevice.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ensureDeviceId, describeRequest, deviceFingerprint, deviceKey } from '../utils/device.js';
@@ -375,13 +376,35 @@ export const listMySessions = asyncHandler(async (req, res) => {
         os: s.os,
         deviceType: s.deviceType,
         deviceName: s.deviceName,
+        deviceLabel: s.deviceLabel,
+        deviceModelSource: s.deviceModelSource,
         location: s.location,
+        locationSource: s.locationSource,
         ip: s.ip,
         createdAt: s.createdAt,
         lastSeenAt: s.lastSeenAt,
         current: String(s._id) === req.user.sid,
       })),
   });
+});
+
+// A name a person gives their own browser. The model of a laptop is invisible to every
+// website, so this is the only way a row can honestly say "HP EliteBook 830 G8". The name is
+// set on every open session for the same browser, and remembered for the next sign-in.
+export const renameMySession = asyncHandler(async (req, res) => {
+  const session = await Session.findOne({ _id: req.valid.params.id, userId: req.user.id, status: 'active' });
+  if (!session) throw new AppError(404, 'NOT_FOUND', 'That device is no longer signed in.');
+
+  const label = req.body.label.trim();
+
+  await Session.updateMany({ userId: req.user.id, deviceId: session.deviceId }, { $set: { deviceLabel: label } });
+  await KnownDevice.updateOne(
+    { userId: req.user.id, key: deviceKey(session.fingerprint, session.deviceId) },
+    { $set: { deviceLabel: label } },
+  );
+
+  audit({ req, actorId: req.user.id, actorRole: req.user.role, action: 'auth.device_named', targetType: 'session', targetId: session._id });
+  res.json({ message: 'Device named.', label });
 });
 
 // Signing one of your own devices out asks for a code first, so a borrowed laptop

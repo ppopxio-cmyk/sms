@@ -3,17 +3,20 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
-import { ArrowLeft, Lock, Mail } from 'lucide-react';
+import { ArrowLeft, Lock, Mail, MapPin } from 'lucide-react';
 import AuthLayout from '../components/layout/AuthLayout';
 import Field from '../components/ui/Field';
 import Button from '../components/ui/Button';
 import Alert from '../components/ui/Alert';
 import CodeInput from '../components/ui/CodeInput';
-import { api, errorMessage } from '../lib/api';
+import Turnstile, { turnstileEnabled } from '../components/ui/Turnstile';
+import LocationGate from '../components/auth/LocationGate';
+import { api, applyLocationHeader, errorMessage } from '../lib/api';
 import { loginSchema, emailField } from '../lib/validation';
 import { FLOW_KEYS, clearFlow, writeFlow } from '../lib/session-flow';
 import { homeFor } from '../lib/roles';
 import useResendTimer, { formatWait } from '../lib/useResendTimer';
+import { readLocation, saveLocation } from '../lib/location';
 import { useAuth } from '../store/auth';
 
 export default function Login() {
@@ -29,6 +32,14 @@ export default function Login() {
   const [serverError, setServerError] = useState(null);
   const [unverified, setUnverified] = useState(null);
   const [locked, setLocked] = useState(false);
+
+  // The sign-in button stays disabled until the browser has shared a place, or the person
+  // has chosen the network estimate instead. A place allowed earlier in this tab is reused.
+  const [locationMode, setLocationMode] = useState(() => (readLocation() ? 'device' : null));
+  const [gate, setGate] = useState(() => (readLocation() ? 'closed' : 'ask'));
+
+  const [captcha, setCaptcha] = useState('');
+  const [captchaKey, setCaptchaKey] = useState(0);
 
   // One countdown per journey, kept in sessionStorage so a refresh does not restart it.
   const loginTimer = useResendTimer('login');
@@ -50,6 +61,33 @@ export default function Login() {
   const email = useWatch({ control, name: 'email' }) ?? '';
   const emailOk = email.length > 0 && emailField.safeParse(email).success;
 
+  const canSubmit = Boolean(locationMode) && (!turnstileEnabled || Boolean(captcha));
+
+  const askForLocation = () => {
+    if (!('geolocation' in navigator)) {
+      setGate('unavailable');
+      return;
+    }
+    setGate('asking');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const shared = { lat: position.coords.latitude, lon: position.coords.longitude };
+        saveLocation(shared);
+        applyLocationHeader(shared);
+        setLocationMode('device');
+        setGate('closed');
+        toast.success('Location allowed for this sign-in.');
+      },
+      (error) => setGate(error?.code === 1 ? 'denied' : 'unavailable'),
+      { enableHighAccuracy: false, timeout: 12000, maximumAge: 10 * 60 * 1000 },
+    );
+  };
+
+  const useNetwork = () => {
+    setLocationMode('network');
+    setGate('closed');
+  };
+
   const finish = (data, greeting) => {
     clearFlow(FLOW_KEYS.pendingVerify);
     setSession(data);
@@ -58,11 +96,13 @@ export default function Login() {
   };
 
   const onSubmit = async (values) => {
+    if (!canSubmit) return;
     setServerError(null);
     setUnverified(null);
     setLocked(false);
     try {
-      const { data } = await api.post('/auth/login', values);
+      const headers = captcha ? { 'cf-turnstile-response': captcha } : undefined;
+      const { data } = await api.post('/auth/login', values, { headers });
       if (data.requires2fa) {
         setTicket(data.ticket);
         setCode('');
@@ -86,6 +126,11 @@ export default function Login() {
         verifyTimer.start();
       }
       if (code === 'ACCOUNT_LOCKED') setLocked(true);
+      // A token is spent by the attempt, so the widget is replaced for the next try.
+      if (turnstileEnabled) {
+        setCaptcha('');
+        setCaptchaKey((n) => n + 1);
+      }
       setServerError(errorMessage(err, 'We could not sign you in.'));
     }
   };
@@ -162,6 +207,14 @@ export default function Login() {
       title="Welcome back"
       footer={<span>Accounts are created by your school administrator.</span>}
     >
+      <LocationGate
+        open={gate !== 'closed'}
+        state={gate}
+        onAllow={askForLocation}
+        onNotNow={() => setGate('denied')}
+        onUseNetwork={useNetwork}
+      />
+
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
         {serverError ? <Alert tone="danger">{serverError}</Alert> : null}
 
@@ -217,14 +270,44 @@ export default function Login() {
           </Link>
         </div>
 
+        <Turnstile
+          key={captchaKey}
+          onToken={setCaptcha}
+          className="flex min-h-[65px] justify-center"
+        />
+
         <Button
           type="submit"
           size="lg"
           loading={isSubmitting}
+          disabled={!canSubmit}
           className="btn-shine relative w-full overflow-hidden"
         >
           Sign in
         </Button>
+
+        {locationMode === 'device' ? (
+          <p className="flex items-center justify-center gap-1.5 text-center text-xs text-slate-400">
+            <MapPin className="h-3.5 w-3.5 text-emerald-500" />
+            This sign-in records this device’s place.
+          </p>
+        ) : locationMode === 'network' ? (
+          <p className="flex flex-wrap items-center justify-center gap-1.5 text-center text-xs text-slate-400">
+            <MapPin className="h-3.5 w-3.5 text-amber-500" />
+            Recording an approximate place from your network.
+            <button
+              type="button"
+              onClick={() => setGate('ask')}
+              className="focus-ring rounded font-semibold text-brand-600 hover:text-brand-700"
+            >
+              Allow location instead
+            </button>
+          </p>
+        ) : (
+          <p className="text-center text-xs font-medium text-slate-500">
+            Allow location above to turn on sign-in.
+          </p>
+        )}
       </form>
     </AuthLayout>
   );

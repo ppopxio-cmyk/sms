@@ -5,21 +5,25 @@ const SIZES = { sm: 'sm:max-w-sm', md: 'sm:max-w-lg', lg: 'sm:max-w-2xl' };
 
 // One reusable dialog for add, edit and delete, as the design plan asks. Escape
 // closes it, the backdrop closes it, and the panel is scrollable on a small screen.
-export default function Modal({ open, title, subtitle, onClose, children, footer, size = 'md' }) {
+export default function Modal({ open, title, subtitle, onClose, children, footer, size = 'md', dismissible = true }) {
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open || !dismissible) return undefined;
     const onKey = (event) => {
       if (event.key === 'Escape') onClose?.();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open, onClose, dismissible]);
 
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6">
-      <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 cursor-default bg-slate-900/40 backdrop-blur-sm" />
+      {dismissible ? (
+        <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 cursor-default bg-slate-900/40 backdrop-blur-sm" />
+      ) : (
+        <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
+      )}
 
       <div
         role="dialog"
@@ -32,14 +36,16 @@ export default function Modal({ open, title, subtitle, onClose, children, footer
             <h2 className="text-lg font-bold tracking-tight text-slate-900">{title}</h2>
             {subtitle ? <p className="mt-1 text-sm leading-relaxed text-slate-500">{subtitle}</p> : null}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="focus-ring rounded-xl p-2 text-slate-400 transition hover:bg-slate-50 hover:text-slate-600"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          {dismissible ? (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="focus-ring rounded-xl p-2 text-slate-400 transition hover:bg-slate-50 hover:text-slate-600"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          ) : null}
         </header>
 
         <div className="mt-5">{children}</div>

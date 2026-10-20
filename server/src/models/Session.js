@@ -18,7 +18,12 @@ const sessionSchema = new mongoose.Schema(
     os: String,
     deviceType: String,
     deviceName: String,
+    // A name a person gave this device ("HP EliteBook 830 G8"), because no browser can read
+    // the hardware model of a laptop. It wins over the detected name wherever it is shown.
+    deviceLabel: String,
+    deviceModelSource: String,
     location: String,
+    locationSource: String,
     status: { type: String, enum: ['active', 'revoked'], default: 'active' },
     revokedAt: Date,
     revokedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
