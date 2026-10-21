@@ -12,6 +12,7 @@ import ProfileMenu from './ProfileMenu';
 import GlobalSearch from './GlobalSearch';
 import Sidebar from './Sidebar';
 import CommandPalette from './CommandPalette';
+import Breadcrumbs from './Breadcrumbs';
 
 // The app has one fixed column on a wide screen and a drawer on a phone. The header keeps
 // the three things that are always wanted within reach: search, notices and the account.
@@ -116,6 +117,7 @@ export default function AppShell() {
         ) : null}
 
         <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+          <Breadcrumbs />
           <Outlet />
         </main>
 

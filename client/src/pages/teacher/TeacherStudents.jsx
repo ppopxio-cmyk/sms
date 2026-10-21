@@ -1,0 +1,219 @@
+import { useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { ArrowRight, GraduationCap, Users } from 'lucide-react';
+import { api } from '../../lib/api';
+import { classTitle } from '../../lib/teacher';
+import { useDebounced } from '../../lib/useDebounced';
+import ClassSelect from '../../components/teacher/ClassSelect';
+import TeacherPageHeader from '../../components/teacher/TeacherPageHeader';
+import Badge from '../../components/ui/Badge';
+import Card, { CardBody } from '../../components/ui/Card';
+import FilterTabs from '../../components/ui/FilterTabs';
+import Pagination from '../../components/ui/Pagination';
+import SearchInput from '../../components/ui/SearchInput';
+import { EmptyState, ErrorState } from '../../components/ui/StatePanel';
+import { SkeletonRows } from '../../components/ui/Skeleton';
+
+const studentSubtitle = (student) => [student.program, student.batch, student.level ? `Level ${student.level}` : ''].filter(Boolean).join(' · ');
+
+export default function TeacherStudents() {
+  const [params, setParams] = useSearchParams();
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('active');
+  const [assignmentId, setAssignmentId] = useState(params.get('assignmentId') || '');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+  const debounced = useDebounced(search);
+
+  const classes = useQuery({
+    queryKey: ['teacher', 'classes', 'options'],
+    queryFn: async () => (await api.get('/teacher/courses', { params: { status: 'all', limit: 100 } })).data,
+  });
+
+  const query = useQuery({
+    queryKey: ['teacher', 'students', { search: debounced, status, assignmentId, page, limit }],
+    queryFn: async () =>
+      (
+        await api.get('/teacher/students', {
+          params: { search: debounced || undefined, status, assignmentId: assignmentId || undefined, page, limit },
+        })
+      ).data,
+    placeholderData: keepPreviousData,
+  });
+
+  const students = query.data?.students ?? [];
+  const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0 };
+
+  return (
+    <div className="space-y-6">
+      <TeacherPageHeader
+        eyebrow="People"
+        title="My students"
+        subtitle="Students registered in the classes assigned to you. Another teacher's students are never shown here."
+      />
+
+      <Card>
+        <CardBody className="space-y-4">
+          <div className="grid gap-3 lg:grid-cols-[1fr_280px]">
+            <SearchInput
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+              }}
+              placeholder="Search name, student ID, programme or batch"
+              loading={query.isFetching}
+            />
+            <ClassSelect
+              assignments={classes.data?.assignments ?? []}
+              value={assignmentId}
+              allLabel="All my classes"
+              label="Filter by class"
+              onChange={(value) => {
+                setAssignmentId(value);
+                setPage(1);
+                if (value) setParams({ assignmentId: value });
+                else setParams({});
+              }}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <FilterTabs
+              label="Registration status"
+              value={status}
+              onChange={(next) => {
+                setStatus(next);
+                setPage(1);
+              }}
+              tabs={[
+                { key: 'active', label: 'Active' },
+                { key: 'all', label: 'All registrations' },
+              ]}
+            />
+            <p className="text-xs text-slate-500">
+              {pagination.total} student{pagination.total === 1 ? '' : 's'}
+            </p>
+          </div>
+
+          {query.isError ? (
+            <ErrorState message="We could not load your students." onRetry={query.refetch} />
+          ) : query.isLoading ? (
+            <SkeletonRows rows={6} />
+          ) : !students.length ? (
+            <EmptyState
+              icon={GraduationCap}
+              title={search || assignmentId ? 'No students match these filters' : 'No students registered yet'}
+              message={
+                search || assignmentId
+                  ? 'Try a different search or show every class.'
+                  : 'When the registrar registers students in your classes, their records will appear here.'
+              }
+            />
+          ) : (
+            <>
+              <div className="hidden overflow-x-auto md:block">
+                <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                      <th className="pb-3 pr-4">Student</th>
+                      <th className="pb-3 pr-4">Student ID</th>
+                      <th className="pb-3 pr-4">Programme</th>
+                      <th className="pb-3 pr-4">Batch / level</th>
+                      <th className="pb-3 pr-4">Classes</th>
+                      <th className="pb-3 text-right">Open</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {students.map((student) => (
+                      <tr key={student.id} className="group">
+                        <td className="py-3.5 pr-4">
+                          <Link to={`/teacher/students/${student.id}`} className="font-semibold text-slate-800 hover:text-brand-700">
+                            {student.name}
+                          </Link>
+                          <p className="mt-0.5 text-xs text-slate-500">{student.sex === 'unspecified' ? '' : student.sex}</p>
+                        </td>
+                        <td className="py-3.5 pr-4 font-mono text-xs text-slate-600">{student.studentNumber || '—'}</td>
+                        <td className="py-3.5 pr-4 text-slate-600">{student.program || '—'}</td>
+                        <td className="py-3.5 pr-4 text-slate-600">
+                          {[student.batch, student.level ? `Level ${student.level}` : ''].filter(Boolean).join(' · ') || '—'}
+                        </td>
+                        <td className="py-3.5 pr-4">
+                          <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                            {student.classes?.length ?? 0}
+                          </span>
+                        </td>
+                        <td className="py-3.5 text-right">
+                          <Link
+                            to={`/teacher/students/${student.id}`}
+                            className="focus-ring inline-flex h-8 items-center gap-1 rounded-lg px-2.5 text-xs font-semibold text-brand-600 transition hover:bg-brand-50"
+                          >
+                            View
+                            <ArrowRight className="h-3.5 w-3.5" />
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <ul className="space-y-2 md:hidden">
+                {students.map((student) => (
+                  <li key={student.id}>
+                    <Link
+                      to={`/teacher/students/${student.id}`}
+                      className="focus-ring block rounded-2xl border border-slate-100 bg-white/75 p-4 transition hover:bg-white"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-900">{student.name}</p>
+                          <p className="mt-0.5 text-xs text-slate-500">{student.studentNumber || 'No student ID'}</p>
+                        </div>
+                        <Badge tone="neutral">{student.classes?.length ?? 0} classes</Badge>
+                      </div>
+                      <p className="mt-2 text-xs text-slate-500">{studentSubtitle(student) || 'Programme not recorded'}</p>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {students.length ? (
+            <Pagination
+              page={pagination.page}
+              pages={pagination.pages}
+              total={pagination.total}
+              limit={limit}
+              onPage={setPage}
+              onLimit={(value) => {
+                setLimit(value);
+                setPage(1);
+              }}
+            />
+          ) : null}
+        </CardBody>
+      </Card>
+
+      {assignmentId ? (
+        <p className="inline-flex items-center gap-2 text-xs text-slate-500">
+          <Users className="h-3.5 w-3.5" />
+          Showing only students in {classTitle(classes.data?.assignments?.find((row) => row.id === assignmentId))}.
+          <button
+            type="button"
+            onClick={() => {
+              setAssignmentId('');
+              setPage(1);
+              setParams({});
+            }}
+            className="font-semibold text-brand-600 hover:text-brand-800"
+          >
+            Clear
+          </button>
+        </p>
+      ) : null}
+    </div>
+  );
+}

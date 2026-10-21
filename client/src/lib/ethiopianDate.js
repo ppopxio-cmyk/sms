@@ -36,6 +36,46 @@ export function formatEthiopian(input = new Date(), { time = false } = {}) {
   return `${date}, ${clock}`;
 }
 
+// A date field starts from a stored Gregorian key and shows the Ethiopian calendar. The
+// reverse search is deliberately small: it compares real formatted dates, so leap years
+// and Pagume are handled by the same conversion used everywhere else on the screen.
+export function fromEthiopian({ year, month, day } = {}) {
+  const targetYear = Number(year);
+  const targetMonth = Number(month);
+  const targetDay = Number(day);
+  if (!targetYear || !targetMonth || !targetDay) return null;
+
+  let low = Date.UTC(1800, 0, 1, 12);
+  let high = Date.UTC(2200, 11, 31, 12);
+  while (low <= high) {
+    const middle = low + Math.floor((high - low) / (2 * 86_400_000)) * 86_400_000;
+    const value = toEthiopian(new Date(middle));
+    const order =
+      value.year - targetYear ||
+      value.month - targetMonth ||
+      value.day - targetDay;
+    if (order === 0) return new Date(middle);
+    if (order < 0) low = middle + 86_400_000;
+    else high = middle - 86_400_000;
+  }
+  return null;
+}
+
+export function dateKeyToEthiopian(key) {
+  if (!key) return toEthiopian();
+  return toEthiopian(new Date(`${key}T12:00:00+03:00`));
+}
+
+export function ethiopianToDateKey(parts) {
+  const date = fromEthiopian(parts);
+  return date ? date.toISOString().slice(0, 10) : '';
+}
+
+export function formatEthiopianKey(key, options) {
+  if (!key) return '—';
+  return formatEthiopian(new Date(`${key}T12:00:00+03:00`), options);
+}
+
 // Chart axes need a smaller label than a sentence. The month is abbreviated, the year is
 // carried by the range already on screen, and the day is enough to read the trend.
 export function formatEthiopianShort(input = new Date()) {

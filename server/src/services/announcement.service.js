@@ -9,6 +9,21 @@ import { atOrBefore, oneOf, trusted } from '../utils/mongo.js';
 import { getSettings } from './settings.service.js';
 
 const ACTIVE_USER = { deletedAt: null, status: 'active' };
+const REGISTRAR_ROLES = new Set(['TEACHER', 'ACCOUNTANT']);
+
+// A Registrar notice may never become a college-wide notice, and it may never reach an
+// administrator. This is checked both when the notice is saved and again when its send
+// time arrives, because an account can change role between those two moments.
+export async function registrarAudienceAllowed(announcement) {
+  if (announcement?.audiencePolicy !== 'registrar-restricted') return true;
+  if (announcement.audience === 'all') return false;
+  if (announcement.audience === 'role') return REGISTRAR_ROLES.has(announcement.audienceRole);
+  if (announcement.audience === 'user') {
+    const user = await User.findOne({ _id: announcement.audienceUser, ...ACTIVE_USER }).select('role').lean();
+    return Boolean(user && REGISTRAR_ROLES.has(user.role));
+  }
+  return false;
+}
 const emailJobs = new Set();
 const fanoutJobs = new Set();
 
@@ -57,6 +72,13 @@ function notificationPayload(doc) {
 async function fanoutOnce(announcementId) {
   const announcement = await Announcement.findOne({ _id: announcementId, status: 'published' });
   if (!announcement || announcement.fanoutAt) return null;
+  if (!(await registrarAudienceAllowed(announcement))) {
+    announcement.status = 'archived';
+    announcement.archivedAt = new Date();
+    await announcement.save();
+    logger.warn({ announcementId: String(announcement._id) }, 'restricted announcement audience failed revalidation');
+    return null;
+  }
 
   const [users, author, settings] = await Promise.all([
     resolveAudience({
@@ -155,6 +177,12 @@ export async function publishAnnouncement(id, { userId } = {}) {
   if (existing.status === 'archived') return { status: 'archived' };
   if (existing.status === 'expired') return { status: 'expired' };
   if (existing.status === 'published') return { status: 'already', announcement: existing };
+  if (!(await registrarAudienceAllowed(existing))) {
+    existing.status = 'archived';
+    existing.archivedAt = now;
+    await existing.save();
+    return { status: 'invalid_audience', announcement: existing };
+  }
 
   const claimed = await Announcement.findOneAndUpdate(
     { _id: id, status: oneOf(['draft', 'scheduled']) },
@@ -187,10 +215,10 @@ export async function publishAnnouncement(id, { userId } = {}) {
 
 export async function publishDueAnnouncements() {
   const now = new Date();
-  const due = await Announcement.find({
+  const due = await Announcement.find(trusted({
     status: 'scheduled',
     $or: [{ publishAt: null }, { publishAt: atOrBefore(now) }],
-  })
+  }))
     .select('_id')
     .limit(20)
     .lean();

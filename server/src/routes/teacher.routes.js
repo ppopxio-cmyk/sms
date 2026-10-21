@@ -1,0 +1,235 @@
+import { Router } from 'express';
+import { authenticate, requirePasswordChanged } from '../middleware/authenticate.js';
+import { requirePermission, requireRole } from '../middleware/authorize.js';
+import { validate } from '../middleware/validate.js';
+import { exportLimiter } from '../middleware/rateLimit.js';
+import {
+  assignmentParamSchema,
+  assessmentParamSchema,
+  attendanceOverviewQuerySchema,
+  attendanceReportQuerySchema,
+  attendanceRosterQuerySchema,
+  competencyReportQuerySchema,
+  createAssessmentSchema,
+  createMaterialSchema,
+  finalizeAttendanceSchema,
+  finalizeAttendanceParamSchema,
+  gradeSheetQuerySchema,
+  gradesQuerySchema,
+  listAssessmentsQuerySchema,
+  listAssignmentsQuerySchema,
+  listMaterialsQuerySchema,
+  listStudentsQuerySchema,
+  materialParamSchema,
+  reportOptionsQuerySchema,
+  rosterReportQuerySchema,
+  saveAttendanceSchema,
+  saveGradesSchema,
+  studentParamSchema,
+  updateAssessmentSchema,
+  updateMaterialSchema,
+} from '../validators/teacher.schemas.js';
+import {
+  assignmentDetail,
+  dashboard,
+  listAssignments,
+  listStudents,
+  studentDetail,
+} from '../controllers/teacher.controller.js';
+import {
+  finalize,
+  overview as attendanceOverviewController,
+  roster as attendanceRosterController,
+  save as saveAttendanceController,
+} from '../controllers/teacherAttendance.controller.js';
+import {
+  close,
+  create as createAssessment,
+  detail as assessmentDetail,
+  grades,
+  list as listAssessments,
+  publish,
+  save as saveGradesController,
+  submit,
+  update as updateAssessment,
+} from '../controllers/teacherAssessments.controller.js';
+import {
+  create as createMaterial,
+  list as listMaterials,
+  remove as removeMaterial,
+  update as updateMaterial,
+} from '../controllers/teacherMaterials.controller.js';
+import {
+  attendanceSummary,
+  competency,
+  exportReport,
+  gradeSheet,
+  options as reportOptions,
+  roster as reportRoster,
+} from '../controllers/teacherReports.controller.js';
+
+const r = Router();
+
+// A teacher's workspace is closed to every other role before any handler runs. Each
+// route repeats its permission so the permission map stays the source of truth.
+r.use(authenticate, requirePasswordChanged, requireRole('TEACHER'));
+
+r.get('/dashboard', requirePermission('teacher:dashboard'), dashboard);
+
+r.get('/courses', requirePermission('teacher:courses:read'), validate(listAssignmentsQuerySchema, 'query'), listAssignments);
+r.get(
+  '/courses/:assignmentId',
+  requirePermission('teacher:courses:read'),
+  validate(assignmentParamSchema, 'params'),
+  assignmentDetail,
+);
+r.get(
+  '/courses/:assignmentId/attendance',
+  requirePermission('teacher:attendance:manage'),
+  validate(assignmentParamSchema, 'params'),
+  validate(attendanceRosterQuerySchema, 'query'),
+  attendanceRosterController,
+);
+r.put(
+  '/courses/:assignmentId/attendance',
+  requirePermission('teacher:attendance:manage'),
+  validate(assignmentParamSchema, 'params'),
+  validate(saveAttendanceSchema),
+  saveAttendanceController,
+);
+r.post(
+  '/courses/:assignmentId/attendance/:attendanceId/finalize',
+  requirePermission('teacher:attendance:manage'),
+  validate(finalizeAttendanceParamSchema, 'params'),
+  validate(finalizeAttendanceSchema),
+  finalize,
+);
+
+r.get('/students', requirePermission('teacher:students:read'), validate(listStudentsQuerySchema, 'query'), listStudents);
+r.get(
+  '/students/:studentId',
+  requirePermission('teacher:students:read'),
+  validate(studentParamSchema, 'params'),
+  studentDetail,
+);
+
+r.get('/attendance', requirePermission('teacher:attendance:manage'), validate(attendanceOverviewQuerySchema, 'query'), attendanceOverviewController);
+
+r.get('/assessments', requirePermission('teacher:assessments:manage'), validate(listAssessmentsQuerySchema, 'query'), listAssessments);
+r.post(
+  '/courses/:assignmentId/assessments',
+  requirePermission('teacher:assessments:manage'),
+  validate(assignmentParamSchema, 'params'),
+  validate(createAssessmentSchema),
+  createAssessment,
+);
+r.get(
+  '/assessments/:assessmentId',
+  requirePermission('teacher:assessments:manage'),
+  validate(assessmentParamSchema, 'params'),
+  assessmentDetail,
+);
+r.patch(
+  '/assessments/:assessmentId',
+  requirePermission('teacher:assessments:manage'),
+  validate(assessmentParamSchema, 'params'),
+  validate(updateAssessmentSchema),
+  updateAssessment,
+);
+r.post(
+  '/assessments/:assessmentId/publish',
+  requirePermission('teacher:assessments:manage'),
+  validate(assessmentParamSchema, 'params'),
+  publish,
+);
+r.post(
+  '/assessments/:assessmentId/close',
+  requirePermission('teacher:assessments:manage'),
+  validate(assessmentParamSchema, 'params'),
+  close,
+);
+r.get(
+  '/assessments/:assessmentId/grades',
+  requirePermission('teacher:assessments:manage'),
+  validate(assessmentParamSchema, 'params'),
+  validate(gradesQuerySchema, 'query'),
+  grades,
+);
+r.put(
+  '/assessments/:assessmentId/grades',
+  requirePermission('teacher:assessments:manage'),
+  validate(assessmentParamSchema, 'params'),
+  validate(saveGradesSchema),
+  saveGradesController,
+);
+r.post(
+  '/assessments/:assessmentId/submit',
+  requirePermission('teacher:assessments:manage'),
+  validate(assessmentParamSchema, 'params'),
+  submit,
+);
+
+r.get('/materials', requirePermission('teacher:materials:manage'), validate(listMaterialsQuerySchema, 'query'), listMaterials);
+r.post('/materials', requirePermission('teacher:materials:manage'), validate(createMaterialSchema), createMaterial);
+r.patch(
+  '/materials/:materialId',
+  requirePermission('teacher:materials:manage'),
+  validate(materialParamSchema, 'params'),
+  validate(updateMaterialSchema),
+  updateMaterial,
+);
+r.delete(
+  '/materials/:materialId',
+  requirePermission('teacher:materials:manage'),
+  validate(materialParamSchema, 'params'),
+  removeMaterial,
+);
+
+r.get('/reports/options', requirePermission('teacher:reports:read'), validate(reportOptionsQuerySchema, 'query'), reportOptions);
+r.get(
+  '/reports/grade-sheet/export',
+  exportLimiter,
+  requirePermission('teacher:reports:read'),
+  validate(gradeSheetQuerySchema, 'query'),
+  exportReport('grades'),
+);
+r.get(
+  '/reports/grade-sheet',
+  requirePermission('teacher:reports:read'),
+  validate(gradeSheetQuerySchema, 'query'),
+  gradeSheet,
+);
+r.get(
+  '/reports/attendance/export',
+  exportLimiter,
+  requirePermission('teacher:reports:read'),
+  validate(attendanceReportQuerySchema, 'query'),
+  exportReport('attendance'),
+);
+r.get(
+  '/reports/attendance',
+  requirePermission('teacher:reports:read'),
+  validate(attendanceReportQuerySchema, 'query'),
+  attendanceSummary,
+);
+r.get(
+  '/reports/roster/export',
+  exportLimiter,
+  requirePermission('teacher:reports:read'),
+  validate(rosterReportQuerySchema, 'query'),
+  exportReport('roster'),
+);
+r.get(
+  '/reports/roster',
+  requirePermission('teacher:reports:read'),
+  validate(rosterReportQuerySchema, 'query'),
+  reportRoster,
+);
+r.get(
+  '/reports/competency',
+  requirePermission('teacher:reports:read'),
+  validate(competencyReportQuerySchema, 'query'),
+  competency,
+);
+
+export default r;

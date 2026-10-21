@@ -4,7 +4,7 @@ import { LogOut } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../store/auth';
 import { useUnread } from '../../lib/notifications';
-import { PERSONAL_ITEMS } from '../../lib/menu';
+import { personalItems } from '../../lib/menu';
 import { RoleBadge } from '../ui/Badge';
 
 const initials = (value) =>
@@ -70,7 +70,7 @@ export default function ProfileMenu() {
 
             <div className="my-1 h-px bg-slate-100" />
 
-            {PERSONAL_ITEMS.map((item) => (
+            {personalItems(user?.role).map((item) => (
               <Link
                 key={item.to}
                 to={item.to}
@@ -79,7 +79,7 @@ export default function ProfileMenu() {
               >
                 <item.icon className="h-4 w-4" />
                 {item.label}
-                {item.to === '/notifications' && count ? (
+                {item.to.endsWith('/notifications') && count ? (
                   <span className="brand-gradient ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold text-white">
                     {count > 9 ? '9+' : count}
                   </span>

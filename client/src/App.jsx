@@ -32,11 +32,41 @@ const AdminAnnouncements = lazy(() => import('./pages/AdminAnnouncements.jsx'));
 const AdminSettings = lazy(() => import('./pages/AdminSettings.jsx'));
 const AdminExportCenter = lazy(() => import('./pages/AdminExportCenter.jsx'));
 const AdminAccount = lazy(() => import('./pages/AdminAccount.jsx'));
+const TeacherDashboard = lazy(() => import('./pages/teacher/TeacherDashboard.jsx'));
+const TeacherClasses = lazy(() => import('./pages/teacher/TeacherClasses.jsx'));
+const TeacherClass = lazy(() => import('./pages/teacher/TeacherClass.jsx'));
+const TeacherStudents = lazy(() => import('./pages/teacher/TeacherStudents.jsx'));
+const TeacherStudent = lazy(() => import('./pages/teacher/TeacherStudent.jsx'));
+const TeacherAttendance = lazy(() => import('./pages/teacher/TeacherAttendance.jsx'));
+const TeacherAttendanceMark = lazy(() => import('./pages/teacher/TeacherAttendanceMark.jsx'));
+const TeacherAssessments = lazy(() => import('./pages/teacher/TeacherAssessments.jsx'));
+const TeacherAssessment = lazy(() => import('./pages/teacher/TeacherAssessment.jsx'));
+const TeacherMaterials = lazy(() => import('./pages/teacher/TeacherMaterials.jsx'));
+const TeacherReports = lazy(() => import('./pages/teacher/TeacherReports.jsx'));
+const RegistrarDashboard = lazy(() => import('./pages/registrar/RegistrarDashboard.jsx'));
+const RegistrarStudents = lazy(() => import('./pages/registrar/RegistrarStudents.jsx'));
+const RegistrarStudent = lazy(() => import('./pages/registrar/RegistrarStudent.jsx'));
+const RegistrarEnrollments = lazy(() => import('./pages/registrar/RegistrarEnrollments.jsx'));
+const RegistrarAcademicStructure = lazy(() => import('./pages/registrar/RegistrarAcademicStructure.jsx'));
+const RegistrarCalendar = lazy(() => import('./pages/registrar/RegistrarCalendar.jsx'));
+const RegistrarBatches = lazy(() => import('./pages/registrar/RegistrarBatches.jsx'));
+const RegistrarCurriculum = lazy(() => import('./pages/registrar/RegistrarCurriculum.jsx'));
+const RegistrarOfferings = lazy(() => import('./pages/registrar/RegistrarOfferings.jsx'));
+const RegistrarCourseRegistration = lazy(() => import('./pages/registrar/RegistrarCourseRegistration.jsx'));
+const RegistrarAttendance = lazy(() => import('./pages/registrar/RegistrarAttendance.jsx'));
+const RegistrarResults = lazy(() => import('./pages/registrar/RegistrarResults.jsx'));
+const RegistrarGpa = lazy(() => import('./pages/registrar/RegistrarGpa.jsx'));
+const RegistrarGraduation = lazy(() => import('./pages/registrar/RegistrarGraduation.jsx'));
+const RegistrarTranscripts = lazy(() => import('./pages/registrar/RegistrarTranscripts.jsx'));
+const RegistrarCertificates = lazy(() => import('./pages/registrar/RegistrarCertificates.jsx'));
+const RegistrarReports = lazy(() => import('./pages/registrar/RegistrarReports.jsx'));
+const RegistrarAnnouncements = lazy(() => import('./pages/registrar/RegistrarAnnouncements.jsx'));
+const RegistrarNotifications = lazy(() => import('./pages/registrar/RegistrarNotifications.jsx'));
 const NotFound = lazy(() => import('./pages/NotFound.jsx'));
 
-// The roles whose own area exists so far. ADMIN has the real screens; the rest land on
-// their dashboard under their own prefix, ready for their tools.
-const OTHER_ROLES = ['REGISTRAR', 'TEACHER', 'ACCOUNTANT'];
+// The accountant's generic dashboard still lives under its own prefix. The Registrar
+// workspace has explicit routes below.
+const OTHER_ROLES = ['ACCOUNTANT'];
 
 function Home() {
   const status = useAuth((s) => s.status);
@@ -104,6 +134,48 @@ export default function App() {
               <Route path="/admin/my-account" element={<Navigate to="/admin/account" replace />} />
               <Route path="/admin/devices" element={<Sessions />} />
               <Route path="/admin/my-devices" element={<Navigate to="/admin/devices" replace />} />
+            </Route>
+
+            <Route element={<RequireRole roles={['TEACHER']} />}>
+              <Route path="/teacher" element={<Navigate to="/teacher/dashboard" replace />} />
+              <Route path="/teacher/dashboard" element={<TeacherDashboard />} />
+              <Route path="/teacher/classes" element={<TeacherClasses />} />
+              <Route path="/teacher/classes/:assignmentId" element={<TeacherClass />} />
+              <Route path="/teacher/students" element={<TeacherStudents />} />
+              <Route path="/teacher/students/:studentId" element={<TeacherStudent />} />
+              <Route path="/teacher/attendance" element={<TeacherAttendance />} />
+              <Route path="/teacher/attendance/:assignmentId" element={<TeacherAttendanceMark />} />
+              <Route path="/teacher/assessments" element={<TeacherAssessments />} />
+              <Route path="/teacher/assessments/:assessmentId" element={<TeacherAssessment />} />
+              <Route path="/teacher/materials" element={<TeacherMaterials />} />
+              <Route path="/teacher/reports" element={<TeacherReports />} />
+            </Route>
+
+            <Route element={<RequireRole roles={['REGISTRAR']} />}>
+              <Route path="/registrar" element={<Navigate to="/registrar/dashboard" replace />} />
+              <Route path="/registrar/dashboard" element={<RegistrarDashboard />} />
+              <Route path="/registrar/students" element={<RegistrarStudents />} />
+              <Route path="/registrar/students/:studentId" element={<RegistrarStudent />} />
+              <Route path="/registrar/enrollments" element={<RegistrarEnrollments />} />
+              <Route path="/registrar/academic-structure" element={<RegistrarAcademicStructure />} />
+              <Route path="/registrar/academic-calendar" element={<RegistrarCalendar />} />
+              <Route path="/registrar/batches" element={<RegistrarBatches />} />
+              <Route path="/registrar/curriculum" element={<RegistrarCurriculum />} />
+              <Route path="/registrar/course-offerings" element={<RegistrarOfferings />} />
+              <Route path="/registrar/course-registration" element={<RegistrarCourseRegistration />} />
+              <Route path="/registrar/attendance" element={<RegistrarAttendance />} />
+              <Route path="/registrar/results" element={<RegistrarResults />} />
+              <Route path="/registrar/gpa-cgpa" element={<RegistrarGpa />} />
+              <Route path="/registrar/graduation-eligibility" element={<RegistrarGraduation />} />
+              <Route path="/registrar/transcripts" element={<RegistrarTranscripts />} />
+              <Route path="/registrar/certificates" element={<RegistrarCertificates />} />
+              <Route path="/registrar/reports" element={<RegistrarReports />} />
+              <Route path="/registrar/announcements" element={<RegistrarAnnouncements />} />
+              <Route path="/registrar/notifications" element={<RegistrarNotifications />} />
+              <Route path="/registrar/my-account" element={<Me />} />
+              <Route path="/registrar/my-devices" element={<Sessions />} />
+              <Route path="/registrar/account" element={<Navigate to="/registrar/my-account" replace />} />
+              <Route path="/registrar/devices" element={<Navigate to="/registrar/my-devices" replace />} />
             </Route>
 
             {OTHER_ROLES.map((role) => (

@@ -2,7 +2,12 @@ import { NavLink } from 'react-router-dom';
 import {
   BarChart3,
   Bell,
+  BookOpen,
+  ClipboardCheck,
+  ClipboardList,
   Download,
+  FileBarChart,
+  FolderOpen,
   LayoutDashboard,
   LogOut,
   Megaphone,
@@ -15,6 +20,7 @@ import {
 import Brand from '../ui/Brand';
 import { RoleBadge } from '../ui/Badge';
 import { formatEthiopian } from '../../lib/ethiopianDate';
+import RegistrarNav from './RegistrarNav';
 
 // The first entry is the role's own front door, so it is the same page for everybody but
 // under a different address. Personal pages (notices, profile, devices, signing out) live
@@ -32,7 +38,13 @@ const navItems = () => [
   { to: '/admin/export', label: 'Export Center', icon: Download, roles: ['ADMIN'] },
   { to: '/admin/settings', label: 'System Settings', icon: Settings2, roles: ['ADMIN'] },
   { to: '/registrar', label: 'Dashboard', icon: LayoutDashboard, end: true, roles: ['REGISTRAR'] },
-  { to: '/teacher', label: 'Dashboard', icon: LayoutDashboard, end: true, roles: ['TEACHER'] },
+  { to: '/teacher/dashboard', label: 'Dashboard', icon: LayoutDashboard, end: true, roles: ['TEACHER'] },
+  { to: '/teacher/classes', label: 'Classes', icon: BookOpen, roles: ['TEACHER'] },
+  { to: '/teacher/students', label: 'Students', icon: Users, roles: ['TEACHER'] },
+  { to: '/teacher/attendance', label: 'Attendance', icon: ClipboardCheck, roles: ['TEACHER'] },
+  { to: '/teacher/assessments', label: 'Assessments', icon: ClipboardList, roles: ['TEACHER'] },
+  { to: '/teacher/materials', label: 'Materials', icon: FolderOpen, roles: ['TEACHER'] },
+  { to: '/teacher/reports', label: 'Reports', icon: FileBarChart, roles: ['TEACHER'] },
   { to: '/accountant', label: 'Dashboard', icon: LayoutDashboard, end: true, roles: ['ACCOUNTANT'] },
 ];
 
@@ -83,7 +95,11 @@ export default function Sidebar({ role, user, onNavigate, onClose, onSignOut }) 
 
       <nav className="flex flex-col gap-1.5">
         <p className="px-3.5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Menu</p>
-        <NavItems role={role} onNavigate={onNavigate} />
+        {role === 'REGISTRAR' ? (
+          <RegistrarNav onNavigate={onNavigate} />
+        ) : (
+          <NavItems role={role} onNavigate={onNavigate} />
+        )}
       </nav>
 
       <div className="mt-auto rounded-3xl border border-white/70 bg-white/70 p-3 shadow-sm">

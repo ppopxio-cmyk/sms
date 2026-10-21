@@ -3,8 +3,8 @@
 // live under /me and are the same for everybody.
 export const HOME = {
   ADMIN: '/admin',
-  REGISTRAR: '/registrar',
-  TEACHER: '/teacher',
+  REGISTRAR: '/registrar/dashboard',
+  TEACHER: '/teacher/dashboard',
   ACCOUNTANT: '/accountant',
 };
 
@@ -17,6 +17,6 @@ export const ROLE_LABEL = {
   ACCOUNTANT: 'Accountant',
 };
 
-// The role pages that exist so far. The administrator has the real ones; the other
-// roles get a dashboard to land on while their tools are built.
+// The role pages that exist so far. Administrators and teachers have their real screens;
+// the remaining roles land on a dashboard while their tools are built.
 export const ROLE_PAGE = (role) => `${homeFor(role)}`;

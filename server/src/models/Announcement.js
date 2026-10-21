@@ -32,6 +32,11 @@ const announcementSchema = new mongoose.Schema(
     type: { type: String, enum: ANNOUNCEMENT_TYPES, default: 'general', index: true },
     priority: { type: String, enum: ANNOUNCEMENT_PRIORITIES, default: 'normal', index: true },
     audience: { type: String, enum: ['all', 'role', 'user'], default: 'all' },
+    // Registrar notices are deliberately narrower than an administrator's notice:
+    // teachers, accountants, or one named non-admin account. The audience policy is
+    // re-checked when a scheduled notice is finally published.
+    kind: { type: String, enum: ['announcement', 'notification'], default: 'announcement', index: true },
+    audiencePolicy: { type: String, enum: ['standard', 'registrar-restricted'], default: 'standard' },
     audienceRole: { type: String, enum: ['ADMIN', 'REGISTRAR', 'TEACHER', 'ACCOUNTANT'], default: null },
     audienceUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     status: { type: String, enum: ANNOUNCEMENT_STATUSES, default: 'draft', index: true },

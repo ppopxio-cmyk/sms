@@ -5,6 +5,7 @@ import { Bell, CornerDownLeft, Loader2, Search, UserRound, X } from 'lucide-reac
 import { api } from '../../lib/api';
 import { useDebounced } from '../../lib/useDebounced';
 import { timeAgo } from '../../lib/ethiopianDate';
+import { useAuth } from '../../store/auth';
 import { RoleBadge } from '../ui/Badge';
 
 const initials = (value) =>
@@ -31,10 +32,16 @@ export default function GlobalSearch() {
 
   const q = useDebounced(term.trim(), 250);
   const ready = q.length >= 2;
+  const role = useAuth((s) => s.user?.role);
+  const isRegistrar = role === 'REGISTRAR';
 
   const { data, isFetching } = useQuery({
-    queryKey: ['search', q],
-    queryFn: ({ signal }) => api.get('/search', { params: { q }, signal }).then((r) => r.data),
+    queryKey: ['search', role, q],
+    queryFn: ({ signal }) =>
+      (isRegistrar
+        ? api.get('/registrar/search', { params: { search: q }, signal })
+        : api.get('/search', { params: { q }, signal })
+      ).then((r) => r.data),
     enabled: ready,
     staleTime: 30_000,
     gcTime: 5 * 60_000,
@@ -43,10 +50,19 @@ export default function GlobalSearch() {
 
   const results = useMemo(() => {
     if (!ready) return [];
+    if (isRegistrar) {
+      return (data?.results ?? []).map((row) => ({
+        kind: row.kind,
+        key: `${row.kind}-${row.id}`,
+        title: row.label,
+        detail: row.detail,
+        id: row.id,
+      }));
+    }
     const people = (data?.users ?? []).map((u) => ({ kind: 'person', key: `u-${u.id}`, ...u }));
     const notes = (data?.notifications ?? []).map((n) => ({ kind: 'note', key: `n-${n.id}`, ...n }));
     return [...people, ...notes];
-  }, [data, ready]);
+  }, [data, ready, isRegistrar]);
 
   // The shortcut everybody already knows from other applications.
   useEffect(() => {
@@ -73,6 +89,12 @@ export default function GlobalSearch() {
     setOpen(false);
     setTerm('');
     input.current?.blur();
+    if (isRegistrar) {
+      if (item.kind === 'student') navigate(`/registrar/students/${item.id}`);
+      else if (item.kind === 'curriculum') navigate(`/registrar/curriculum?plan=${item.id}`);
+      else navigate('/registrar/academic-structure');
+      return;
+    }
     if (item.kind === 'person') navigate('/admin/users', { state: { search: item.email } });
     else navigate('/notifications');
   };
@@ -170,7 +192,11 @@ export default function GlobalSearch() {
                   <Fragment key={item.key}>
                     {first ? (
                       <li className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                        {item.kind === 'person' ? 'People' : 'Notifications'}
+                        {isRegistrar
+                          ? { student: 'Students', programme: 'Programmes', curriculum: 'Curriculum' }[item.kind] ?? 'Results'
+                          : item.kind === 'person'
+                            ? 'People'
+                            : 'Notifications'}
                       </li>
                     ) : null}
                     <li role="option" aria-selected={highlight}>
@@ -196,6 +222,16 @@ export default function GlobalSearch() {
                               ) : null}
                             </span>
                             <RoleBadge role={item.role} />
+                          </>
+                        ) : isRegistrar ? (
+                          <>
+                            <span className="brand-gradient flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-[11px] font-bold text-white">
+                              {item.kind === 'student' ? initials(item.title) : <UserRound className="h-4 w-4" />}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-semibold text-slate-800">{item.title}</span>
+                              <span className="block truncate text-xs text-slate-500">{item.detail}</span>
+                            </span>
                           </>
                         ) : (
                           <>

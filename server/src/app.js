@@ -16,6 +16,7 @@ import { notFound, errorHandler } from './middleware/error.js';
 import { maintenanceGuard } from './middleware/maintenance.js';
 import { getSettings, maintenanceState, publicSettings } from './services/settings.service.js';
 import routes from './routes/index.js';
+import { imagekitWebhook } from './controllers/registrar.webhook.controller.js';
 
 export function createApp() {
   const app = express();
@@ -67,6 +68,14 @@ export function createApp() {
     }),
   );
   app.use(pinoHttp({ logger, autoLogging: env.NODE_ENV !== 'test' }));
+  // ImageKit signs the exact bytes it sends. This route must read the raw body before
+  // the JSON parser consumes it, and it is deliberately outside the API's CSRF and
+  // maintenance gates: the provider is not a browser session.
+  app.post(
+    '/api/webhooks/imagekitA',
+    express.raw({ type: 'application/json', limit: '1mb' }),
+    imagekitWebhook,
+  );
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());
 

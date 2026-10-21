@@ -53,6 +53,17 @@ const schema = z.object({
   VAPID_PUBLIC_KEY: z.string().min(1),
   VAPID_PRIVATE_KEY: z.string().min(1),
   VAPID_SUBJECT: z.string().min(1),
+  // ImageKit is the only binary store for student photos and certificate branding.
+  // Missing values keep the API running, but upload and certificate operations return
+  // a clear configuration error instead of pretending to succeed.
+  IMAGEKIT_PUBLIC_KEY: optionalText(z.string().min(1)),
+  IMAGEKIT_PRIVATE_KEY: optionalText(z.string().min(1)),
+  IMAGEKIT_URL_ENDPOINT: optionalText(z.url().transform((s) => s.replace(/\/+$/, ''))),
+  IMAGEKIT_WEBHOOK_SECRET: optionalText(z.string().min(1)),
+  IMAGEKIT_ENDPOINT_URL: optionalText(z.url()),
+  IMAGEKIT_PHOTO_MAX_BYTES: z.coerce.number().int().min(100_000).max(15_000_000).default(5_000_000),
+  IMAGEKIT_PHOTO_MIN_PX: z.coerce.number().int().min(100).max(4000).default(300),
+  CERTIFICATE_PHOTO_MIN_PX: z.coerce.number().int().min(100).max(4000).default(472),
 }).superRefine((value, ctx) => {
   const smtp = Boolean(value.SMTP_APP_PASSWORD);
   const api = Boolean(value.GOOGLE_CLIENT_ID && value.GOOGLE_CLIENT_SECRET && value.GOOGLE_REFRESH_TOKEN);
