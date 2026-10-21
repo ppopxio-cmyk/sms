@@ -31,7 +31,7 @@ const GROUPS = [
       { to: '/registrar/students', label: 'Students', icon: Users },
       { to: '/registrar/enrollments', label: 'Enrollments', icon: Layers3 },
       { to: '/registrar/batches', label: 'Batches', icon: UserSquare2 },
-      { to: '/registrar/graduation-eligibility', label: 'Graduation eligibility', icon: GraduationCap },
+      { to: '/registrar/grading-policy', label: 'Grading policy', icon: FileBarChart },
     ],
   },
   {
@@ -51,9 +51,9 @@ const GROUPS = [
     label: 'Records & documents',
     icon: FileText,
     items: [
-      { to: '/registrar/attendance', label: 'Attendance', icon: ClipboardCheck },
       { to: '/registrar/results', label: 'Results', icon: FileCheck2 },
       { to: '/registrar/gpa-cgpa', label: 'GPA & CGPA', icon: CreditCard },
+      { to: '/registrar/grading-policy', label: 'Grading policy', icon: FileBarChart },
       { to: '/registrar/transcripts', label: 'Transcripts', icon: FileText },
       { to: '/registrar/certificates', label: 'Certificates', icon: GraduationCap },
     ],
@@ -64,7 +64,6 @@ const GROUPS = [
     icon: Megaphone,
     items: [
       { to: '/registrar/announcements', label: 'Announcements', icon: Megaphone },
-      { to: '/registrar/notifications', label: 'Notifications', icon: Bell },
       { to: '/registrar/reports', label: 'Reports & exports', icon: FileBarChart },
     ],
   },

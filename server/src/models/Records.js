@@ -103,16 +103,27 @@ gradingPolicySchema.pre('validate', function validateBands() {
   for (let index = 0; index < sorted.length; index += 1) {
     const band = sorted[index];
     if (band.max < band.min) throw new Error('A grade band maximum cannot be below its minimum.');
-    if (index > 0 && band.min <= sorted[index - 1].max) {
-      throw new Error('Grade bands must not overlap.');
+    // Bands must meet exactly: each band starts where the previous one ends. This is the
+    // same rule the service and the academic setup script apply, so a band can never be
+    // written that overlaps its neighbour or leaves a mark with no grade at all.
+    if (index > 0 && band.min !== sorted[index - 1].max) {
+      throw new Error('Grade bands must be contiguous: each band must start where the previous one ends.');
     }
   }
   this.bands = sorted;
 });
 
+// The single place a mark is turned into a grade. Bands cover 0 to 100 and meet exactly,
+// so the boundary between two bands belongs to both. The first matching band in
+// ascending order wins, which puts the shared boundary in the lower band and leaves
+// every mark from 0 to 100 with exactly one grade.
 export function findBand(policy, mark) {
-  if (!policy?.bands?.length || typeof mark !== 'number') return null;
-  return policy.bands.find((band) => mark >= band.min && mark <= band.max) ?? null;
+  if (!policy?.bands?.length || typeof mark !== 'number' || Number.isNaN(mark)) return null;
+  const sorted = [...policy.bands].sort((a, b) => a.min - b.min);
+  for (const band of sorted) {
+    if (mark >= band.min && mark <= band.max) return band;
+  }
+  return null;
 }
 
 export const AttendanceRecord = mongoose.model('AttendanceRecord', attendanceSchema);

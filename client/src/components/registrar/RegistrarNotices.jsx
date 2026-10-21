@@ -11,6 +11,7 @@ import {
   Megaphone,
   Pencil,
   Plus,
+  RotateCcw,
   Send,
   Users,
 } from 'lucide-react';
@@ -58,6 +59,10 @@ export default function RegistrarNotices({ kind = 'announcement' }) {
   const [order, setOrder] = useState('desc');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
+  const [author, setAuthor] = useState('all');
+  const [audienceRole, setAudienceRole] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   const [compose, setCompose] = useState(null);
   const [archiving, setArchiving] = useState(null);
   const [publishing, setPublishing] = useState(null);
@@ -68,9 +73,13 @@ export default function RegistrarNotices({ kind = 'announcement' }) {
     limit,
     ...(debounced.trim() ? { search: debounced.trim() } : {}),
     ...(status !== 'all' ? { status } : {}),
+    ...(author !== 'all' ? { author } : {}),
+    ...(audienceRole ? { audienceRole } : {}),
+    ...(from ? { from: from + 'T00:00:00' } : {}),
+    ...(to ? { to: to + 'T23:59:59' } : {}),
     sort,
     order,
-  }), [kind, page, limit, debounced, status, sort, order]);
+  }), [kind, page, limit, debounced, status, author, audienceRole, from, to, sort, order]);
 
   const query = useQuery({
     queryKey: ['registrar', 'notices', params],
@@ -139,20 +148,38 @@ export default function RegistrarNotices({ kind = 'announcement' }) {
       <Card className="p-4 sm:p-5">
         <div className="flex flex-col gap-3">
           <SearchInput value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder={`Search ${plural} by title or text`} loading={query.isFetching} />
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-4">
             <SelectField label="Status" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
               <option value="all">All statuses</option>
               {['draft', 'scheduled', 'published', 'expired', 'archived'].map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
+            </SelectField>
+            <SelectField label="Author" value={author} onChange={(event) => { setAuthor(event.target.value); setPage(1); }}>
+              <option value="all">All authors</option>
+              <option value="mine">My announcements</option>
+            </SelectField>
+            <SelectField label="Audience role" value={audienceRole} onChange={(event) => { setAudienceRole(event.target.value); setPage(1); }}>
+              <option value="">All audiences</option>
+              <option value="ADMIN">Admin</option>
+              <option value="REGISTRAR">Registrar</option>
+              <option value="TEACHER">Teachers</option>
+              <option value="ACCOUNTANT">Accountants</option>
             </SelectField>
             <SelectField label="Sort" value={sort} onChange={(event) => setSort(event.target.value)}>
               <option value="createdAt">Newest created</option>
               <option value="publishAt">Publish date</option>
               <option value="status">Status</option>
             </SelectField>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-4">
             <SelectField label="Order" value={order} onChange={(event) => setOrder(event.target.value)}>
               <option value="desc">Newest first</option>
               <option value="asc">Oldest first</option>
             </SelectField>
+            <Field label="From date" type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} placeholder="yyyy-mm-dd" />
+            <Field label="To date" type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} placeholder="yyyy-mm-dd" />
+            <div className="sm:col-span-1 flex items-end">
+              <Button variant="secondary" size="sm" onClick={() => { setAuthor('all'); setAudienceRole(''); setFrom(''); setTo(''); setStatus('all'); setPage(1); }} className="gap-1 w-full"><RotateCcw className="h-3.5 w-3.5" /> Clear filters</Button>
+            </div>
           </div>
         </div>
       </Card>
@@ -160,7 +187,7 @@ export default function RegistrarNotices({ kind = 'announcement' }) {
       <Card>
         <CardHeader
           title={kind === 'notification' ? 'Sent notifications' : 'Announcement history'}
-          subtitle="Only notices created by your Registrar account are listed."
+          subtitle="All announcements you are authorized to view, plus your own. Use the filters to narrow by author, audience role, or date."
           icon={kind === 'notification' ? Bell : Megaphone}
           action={<Badge tone="neutral">{pagination.total ?? 0} total</Badge>}
         />

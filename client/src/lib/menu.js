@@ -13,8 +13,8 @@ export const PERSONAL_ITEMS = [
 export const personalItems = (role) =>
   role === 'REGISTRAR'
     ? [
-        { to: '/registrar/notifications', label: 'Notifications', icon: Bell },
-        { to: '/registrar/my-account', label: 'My Account', icon: UserRound },
-        { to: '/registrar/my-devices', label: 'My Devices', icon: Fingerprint },
+        { to: '/notifications', label: 'Notifications', icon: Bell },
+        { to: '/me', label: 'My Account', icon: UserRound },
+        { to: '/me/devices', label: 'My Devices', icon: Fingerprint },
       ]
     : PERSONAL_ITEMS;

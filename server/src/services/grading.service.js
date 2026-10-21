@@ -1,22 +1,13 @@
-import { GradingPolicy, findBand } from '../models/Records.js';
+import { findBand } from '../models/Records.js';
 import { Result } from '../models/Records.js';
 import { AppError } from '../utils/AppError.js';
+import { getPolicy, requirePolicy } from './gradingPolicy.service.js';
 
-export async function getGradingPolicy() {
-  return GradingPolicy.findOne({ key: 'global' }).lean();
-}
-
-export async function requireGradingPolicy() {
-  const policy = await getGradingPolicy();
-  if (!policy?.bands?.length) {
-    throw new AppError(
-      409,
-      'GRADING_POLICY_MISSING',
-      'The grading policy has not been configured. An administrator must load the institution’s grade bands first.',
-    );
-  }
-  return policy;
-}
+// One authority for the policy: gradingPolicy.service.js owns reading, validating and
+// saving it, so a result, a transcript and a CGPA can never be graded against a
+// different set of bands than the one the Registrar approved.
+export const getGradingPolicy = getPolicy;
+export const requireGradingPolicy = requirePolicy;
 
 export function gradeFor(policy, mark) {
   const band = findBand(policy, Number(mark));

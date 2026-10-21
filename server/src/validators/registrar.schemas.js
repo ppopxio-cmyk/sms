@@ -399,4 +399,30 @@ export const listTranscriptsQuerySchema = paginationSchema.extend({
 export const noticeListSchema = paginationSchema.extend({
   kind: z.enum(['announcement', 'notification']).optional().default('announcement'),
   status: z.enum(['all', 'draft', 'scheduled', 'published', 'expired', 'archived']).optional().default('all'),
+  // Filters for the announcements list
+  author: z.enum(['all', 'mine']).optional().default('all'),
+  audienceRole: z.enum(['ADMIN', 'REGISTRAR', 'TEACHER', 'ACCOUNTANT']).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  search: z.string().optional().default(''),
+});
+
+const gradeBandSchema = z.object({
+  min: z.coerce.number().min(0).max(100),
+  max: z.coerce.number().min(0).max(100),
+  letter: text(10).min(1),
+  points: z.coerce.number().min(0).max(4),
+  pass: z.boolean().default(true),
+});
+
+export const gradingPolicyUpdateSchema = z.object({
+  bands: z.array(gradeBandSchema).min(1),
+  repeatPolicy: z.enum(['all', 'best', 'latest']).default('all'),
+  rounding: z.coerce.number().int().min(0).max(4).default(2),
+  effectiveFrom: z.coerce.date().optional(),
+  reason: text(1000).optional(),
+});
+
+export const gradingPolicyPreviewSchema = z.object({
+  marks: z.array(z.coerce.number().min(0).max(100)).min(1).max(20),
 });

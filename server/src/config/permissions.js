@@ -42,6 +42,8 @@ export const PERMISSIONS = {
   'certificates:revoke': ['REGISTRAR'],
   'reports:view': ['REGISTRAR'],
   'reports:export': ['REGISTRAR'],
+  'grading_policy:view': ['REGISTRAR'],
+  'grading_policy:manage': ['REGISTRAR'],
   'registrar:announcements': ['REGISTRAR'],
   'registrar:notifications': ['REGISTRAR'],
   'teacher:dashboard': ['TEACHER'],

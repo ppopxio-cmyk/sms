@@ -23,7 +23,7 @@ export default function RegistrarAcademicStructure() {
   const [search, setSearch] = useState('');
   const query = useQuery({
     queryKey: ['registrar', 'structure'],
-    queryFn: async () => (await api.get(`${REGISTRAR}/academic/structure`)).data,
+    queryFn: async () => (await api.get(`${REGISTRAR}/academic-structure`)).data,
   });
 
   const term = search.trim().toLowerCase();

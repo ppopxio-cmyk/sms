@@ -57,6 +57,7 @@ const RegistrarAttendance = lazy(() => import('./pages/registrar/RegistrarAttend
 const RegistrarResults = lazy(() => import('./pages/registrar/RegistrarResults.jsx'));
 const RegistrarGpa = lazy(() => import('./pages/registrar/RegistrarGpa.jsx'));
 const RegistrarGraduation = lazy(() => import('./pages/registrar/RegistrarGraduation.jsx'));
+const RegistrarGradingPolicy = lazy(() => import('./pages/registrar/RegistrarGradingPolicy.jsx'));
 const RegistrarTranscripts = lazy(() => import('./pages/registrar/RegistrarTranscripts.jsx'));
 const RegistrarCertificates = lazy(() => import('./pages/registrar/RegistrarCertificates.jsx'));
 const RegistrarReports = lazy(() => import('./pages/registrar/RegistrarReports.jsx'));
@@ -171,7 +172,7 @@ export default function App() {
               <Route path="/registrar/certificates" element={<RegistrarCertificates />} />
               <Route path="/registrar/reports" element={<RegistrarReports />} />
               <Route path="/registrar/announcements" element={<RegistrarAnnouncements />} />
-              <Route path="/registrar/notifications" element={<RegistrarNotifications />} />
+              <Route path="/registrar/grading-policy" element={<RegistrarGradingPolicy />} />
               <Route path="/registrar/my-account" element={<Me />} />
               <Route path="/registrar/my-devices" element={<Sessions />} />
               <Route path="/registrar/account" element={<Navigate to="/registrar/my-account" replace />} />

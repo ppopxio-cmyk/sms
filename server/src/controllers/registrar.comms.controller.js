@@ -5,7 +5,7 @@ import { publishAnnouncement, audiencePreview, registrarAudienceAllowed } from '
 import { audit } from '../services/audit.service.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { pageOf, paged, searchFilter, mergeFilters, sortOf } from '../services/registrar.helpers.js';
+import { pageOf, paged, searchFilter, mergeFilters, sortOf, ownFilter } from '../services/registrar.helpers.js';
 
 const ALLOWED_ROLES = new Set(['TEACHER', 'ACCOUNTANT']);
 
@@ -66,11 +66,42 @@ export const previewAudience = asyncHandler(async (req, res) => {
 export const listNotices = asyncHandler(async (req, res) => {
   const query = req.valid.query;
   const { page, limit, skip } = pageOf(query);
-  const filter = mergeFilters(
-    { createdBy: req.user.id, kind: query.kind },
+  const userId = req.user.id;
+  const userRole = req.user.role;
+
+  // Build the authorization filter: the user can see announcements where
+  // 1. They are the author (createdBy)
+  // 2. audience is 'all'
+  // 3. audience is 'role' AND audienceRole matches their role
+  // 4. audience is 'user' AND audienceUser is them
+  const authFilter = ownFilter({
+    $or: [
+      { createdBy: userId },
+      { audience: 'all' },
+      { audience: 'role', audienceRole: userRole },
+      { audience: 'user', audienceUser: userId },
+    ],
+  });
+
+  // Additional filters
+  const additionalFilters = mergeFilters(
+    query.kind ? { kind: query.kind } : null,
     query.status && query.status !== 'all' ? { status: query.status } : null,
     searchFilter(query.search, ['title', 'body']),
+    query.author === 'mine' ? { createdBy: userId } : null,
+    query.audienceRole ? { audienceRole: query.audienceRole } : null,
+    query.from || query.to
+      ? {
+          createdAt: ownFilter({
+            ...(query.from ? { $gte: new Date(query.from) } : {}),
+            ...(query.to ? { $lte: new Date(query.to) } : {}),
+          }),
+        }
+      : null,
   );
+
+  const filter = mergeFilters(authFilter, additionalFilters);
+
   const [rows, total] = await Promise.all([
     Announcement.find(filter)
       .sort(sortOf(query, ['createdAt', 'updatedAt', 'publishAt', 'status'], 'createdAt'))
@@ -79,6 +110,7 @@ export const listNotices = asyncHandler(async (req, res) => {
       .lean(),
     Announcement.countDocuments(filter),
   ]);
+
   res.json({ ...paged(rows.map(announcementView), total, page, limit) });
 });
 

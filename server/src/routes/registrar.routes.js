@@ -50,6 +50,8 @@ import {
   planCourseParamSchema,
   listCertificatesQuerySchema,
   listTranscriptsQuerySchema,
+  gradingPolicyUpdateSchema,
+  gradingPolicyPreviewSchema,
 } from '../validators/registrar.schemas.js';
 import {
   listStudents, getStudent, createStudent, updateStudent, uploadStudentPhoto, removeStudentPhoto, studentOptions,
@@ -69,6 +71,9 @@ import {
   publishResult, rejectResult, correctResult, gpaCgpa, listGraduation, evaluateGraduation,
   graduationStudent, resultOptions,
 } from '../controllers/registrar.records.controller.js';
+import {
+  viewPolicy, updatePolicy as updateGradingPolicy, previewPolicy, policyHistory,
+} from '../controllers/registrar.grading-policy.controller.js';
 import {
   listCertificates, getCertificate, preview, issue, downloadCertificate, revokeCertificate,
   reissueCertificate, listTranscripts, createTranscript, downloadTranscript, revokeTranscript, certificateMeta,
@@ -174,6 +179,12 @@ r.patch('/results/:id/correct', requirePermission('results:review'), validate(id
 
 // ---- GPA / CGPA -------------------------------------------------------------
 r.get('/gpa-cgpa', requirePermission('gpa:view'), validate(gpaQuerySchema, 'query'), gpaCgpa);
+
+// ---- Grading Policy ---------------------------------------------------------
+r.get('/grading-policy', requirePermission('grading_policy:view'), viewPolicy);
+r.patch('/grading-policy', requirePermission('grading_policy:manage'), validate(gradingPolicyUpdateSchema), updateGradingPolicy);
+r.post('/grading-policy/preview', requirePermission('grading_policy:view'), validate(gradingPolicyPreviewSchema), previewPolicy);
+r.get('/grading-policy/history', requirePermission('grading_policy:view'), policyHistory);
 
 // ---- Graduation -------------------------------------------------------------
 r.get('/graduation-eligibility', requirePermission('graduation:view'), validate(graduationQuerySchema, 'query'), listGraduation);
