@@ -314,7 +314,7 @@ export const exportSessions = auditedExport('export.sessions', 'sessions', async
     state: SESSION_STATE_LABEL[session.state] || session.state,
     device: deviceLabel(session),
     ip: session.ip || '—',
-    place: session.location || 'Unknown',
+    place: session.location || 'Unknown location',
     lastActive: formatEthiopian(session.lastSeenAt, { time: true }),
     started: formatEthiopian(session.createdAt),
     ended: session.revokedAt ? formatEthiopian(session.revokedAt, { time: true }) : '',
@@ -421,6 +421,7 @@ export const exportAuditLogs = auditedExport('export.audit_logs', 'audit_logs', 
       .filter(Boolean)
       .join(' · '),
     ip: entry.ip || '—',
+    place: entry.location || entry.meta?.location || 'Unknown location',
   }));
 
   const rangeLabel =
@@ -459,6 +460,7 @@ export const exportAuditLogs = auditedExport('export.audit_logs', 'audit_logs', 
       { key: 'outcome', header: 'Outcome', width: 10 },
       { key: 'target', header: 'Target', width: 22 },
       { key: 'ip', header: 'IP address', width: 17 },
+      { key: 'place', header: 'Place', width: 24 },
     ],
     rows,
   });

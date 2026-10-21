@@ -1,4 +1,5 @@
 import argon2 from 'argon2';
+import { performance } from 'node:perf_hooks';
 import { User } from '../models/User.js';
 import { Session } from '../models/Session.js';
 import { KnownDevice } from '../models/KnownDevice.js';
@@ -6,6 +7,8 @@ import { AuditLog } from '../models/AuditLog.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ensureDeviceId, describeRequest, deviceFingerprint, deviceKey } from '../utils/device.js';
+import { lookupAddress } from '../utils/geo.js';
+import { logger } from '../utils/logger.js';
 import { REFRESH_COOKIE, refreshCookieOptions, clearRefreshOptions } from '../utils/cookies.js';
 import { signAccess, signTicket, readTicket, sha256 } from '../services/token.service.js';
 import { checkCode, resendWaitMessage } from '../services/code.service.js';
@@ -83,23 +86,111 @@ export const safeUser = (u) => ({
   lastLoginAt: u.lastLoginAt ?? null,
 });
 
+const LOCATION_FIELDS = [
+  'location',
+  'locationSource',
+  'country',
+  'countryCode',
+  'city',
+  'region',
+  'detectionStatus',
+  'detectedAt',
+];
+
+const locationFields = (info) =>
+  Object.fromEntries(
+    LOCATION_FIELDS.filter((field) => info?.[field] !== undefined).map((field) => [field, info[field]]),
+  );
+
+const loginMeta = (info) => ({
+  browser: info.browser,
+  os: info.os,
+  location: info.location,
+  country: info.country,
+  countryCode: info.countryCode,
+  city: info.city,
+  region: info.region,
+  detectionStatus: info.detectionStatus,
+  detectedAt: info.detectedAt,
+});
+
+function timingHeader(res, parts) {
+  const values = Object.entries(parts).filter(([, value]) => Number.isFinite(value));
+  if (!values.length) return;
+  res.set(
+    'Server-Timing',
+    values.map(([name, value]) => `${name};dur=${Math.max(0, value).toFixed(1)}`).join(', '),
+  );
+}
+
+// Everything here happens after the access token and refresh cookie are already on the
+// wire. The location lookup can take a second on a slow provider; it must never hold up
+// the person who just signed in. The session is updated when the answer arrives, and
+// the alert, device memory and audit entry then describe the same canonical answer.
+function finishLoginInBackground({ req, user, session, info, deviceId, fingerprint }) {
+  const key = deviceKey(fingerprint, deviceId);
+
+  void (async () => {
+    let enriched = info;
+
+    if (info.detectionStatus === 'pending' && info.ip) {
+      const started = performance.now();
+      try {
+        const place = await lookupAddress(info.ip);
+        enriched = { ...info, ...place };
+        await Session.updateOne({ _id: session._id }, { $set: locationFields(place) });
+        logger.debug(
+          { locationMs: Math.round(performance.now() - started), detectionStatus: place.detectionStatus },
+          'sign-in location enriched',
+        );
+      } catch (err) {
+        logger.warn({ err: err.message }, 'sign-in location enrichment failed');
+      }
+    }
+
+    await rememberDevice({ userId: user._id, key, info: enriched }).catch((err) => {
+      logger.warn({ err: err.message }, 'known device could not be remembered');
+    });
+
+    // A name the person gave this browser is what the alert should say, not the system label.
+    const detail = { ...enriched, deviceLabel: session.deviceLabel };
+    const settings = await getSettings().catch(() => null);
+    if (wantsSecurityEmail(user, settings)) {
+      void sendLoginAlert({ to: user.email, name: user.name, ...detail, at: new Date() }).catch((err) => {
+        logger.warn({ err: err.message }, 'sign-in alert could not be sent');
+      });
+    }
+
+    // Open tabs and other devices hear about this at once; the administrator is told when
+    // it is somebody else. The browser that just signed in is left out of its own notice.
+    void notifySignIn({ user, sid: session._id, deviceKey: key, info: detail }).catch((err) => {
+      logger.warn({ err: err.message }, 'sign-in notice could not be delivered');
+    });
+
+    audit({
+      req,
+      actorId: user._id,
+      actorRole: user.role,
+      action: 'auth.login',
+      targetType: 'session',
+      targetId: session._id,
+      meta: loginMeta(enriched),
+    });
+  })().catch((err) => {
+    logger.warn({ err: err.message }, 'post-sign-in work failed');
+  });
+}
+
 async function startSession(req, res, user, { deviceId, fingerprint }) {
-  const info = await describeRequest(req);
+  // This is deliberately synchronous: parsing the user agent is cheap, and the optional
+  // address lookup is scheduled after the response below.
+  const info = describeRequest(req);
   const { session, refresh } = await createSession({ user, deviceId, fingerprint, info });
   res.cookie(REFRESH_COOKIE, refresh, refreshCookieOptions(session.expiresAt.getTime() - Date.now()));
   await User.updateOne({ _id: user._id }, { lastLoginAt: new Date(), failedLogins: 0, $unset: { lockUntil: 1 } });
-  // This browser has now signed in, so the next sign-in from it is not "new".
-  void rememberDevice({ userId: user._id, key: deviceKey(fingerprint, deviceId), info }).catch(() => {});
-  // A name the person gave this browser is what the alert should say, not the system label.
-  const detail = { ...info, deviceLabel: session.deviceLabel };
-  const settings = await getSettings().catch(() => null);
-  if (wantsSecurityEmail(user, settings)) {
-    void sendLoginAlert({ to: user.email, name: user.name, ...detail, at: new Date() });
-  }
-  // Open tabs and other devices hear about this at once; the administrator is told when
-  // it is somebody else. The browser that just signed in is left out of its own notice.
-  void notifySignIn({ user, sid: session._id, deviceKey: deviceKey(fingerprint, deviceId), info: detail }).catch(() => {});
-  audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.login', targetType: 'session', targetId: session._id, meta: { browser: info.browser, os: info.os } });
+
+  finishLoginInBackground({ req, user, session, info, deviceId, fingerprint });
+
   return { accessToken: signAccess(user, session._id), user: safeUser(user), session: { id: session._id } };
 }
 
@@ -184,9 +275,17 @@ export const resendVerification = asyncHandler(async (req, res) => {
 });
 
 export const login = asyncHandler(async (req, res) => {
+  const started = performance.now();
   const { email, password } = req.body;
-  const policy = await securityPolicy();
-  const user = await User.findOne({ email }).select('+passwordHash');
+
+  // The settings read and the person lookup do not depend on each other. Doing them
+  // together removes one database round trip from every sign-in.
+  const dbStarted = performance.now();
+  const [policy, user] = await Promise.all([
+    securityPolicy(),
+    User.findOne({ email }).select('+passwordHash'),
+  ]);
+  const dbMs = performance.now() - dbStarted;
 
   if (user?.lockUntil && user.lockUntil > new Date()) {
     throw new AppError(
@@ -208,7 +307,9 @@ export const login = asyncHandler(async (req, res) => {
     throw new AppError(403, 'ACCOUNT_NOT_SET_UP', 'Finish setting up your account first. We sent a fresh link to your inbox.', { email: user.email });
   }
 
+  const hashStarted = performance.now();
   const passwordOk = await argon2.verify(user?.passwordHash ?? DUMMY_HASH, password);
+  const hashMs = performance.now() - hashStarted;
   if (!user || !passwordOk) {
     if (user) {
       const updated = await User.findOneAndUpdate({ _id: user._id }, { $inc: { failedLogins: 1 } }, { returnDocument: 'after' });
@@ -235,21 +336,34 @@ export const login = asyncHandler(async (req, res) => {
     throw new AppError(403, 'EMAIL_NOT_VERIFIED', 'Please confirm your email first. We sent a link to your inbox.', { email: user.email });
   }
 
-  try {
-    await ensureSignInAllowed(user);
-  } catch (err) {
-    audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.login_blocked_maintenance', status: 'fail' });
-    throw err;
-  }
-
   const deviceId = ensureDeviceId(req, res);
   const fingerprint = deviceFingerprint(req);
-  const fresh = await isNewDevice(user._id, deviceKey(fingerprint, deviceId));
+
+  // These are independent. Running the maintenance check beside the device lookup keeps
+  // a stale policy from adding a second wait to the password step.
+  let fresh;
+  try {
+    [, fresh] = await Promise.all([
+      ensureSignInAllowed(user),
+      isNewDevice(user._id, deviceKey(fingerprint, deviceId)),
+    ]);
+  } catch (err) {
+    if (err?.code === 'MAINTENANCE') {
+      audit({ req, actorId: user._id, actorRole: user.role, action: 'auth.login_blocked_maintenance', status: 'fail' });
+    }
+    throw err;
+  }
 
   // A code is asked for when the account turned 2-step on, when the administrator
   // requires it for everybody, or when this browser has never signed in before.
   if (policy.requireTwoStep || user.twoStepEnabled || fresh) {
     await sendCode(user, 'login_2fa');
+    const totalMs = performance.now() - started;
+    timingHeader(res, { db: dbMs, hash: hashMs, total: totalMs });
+    logger.debug(
+      { loginMs: { db: Math.round(dbMs), hash: Math.round(hashMs), total: Math.round(totalMs) } },
+      'sign-in timing (code step)',
+    );
     return res.json({
       requires2fa: true,
       reason: policy.requireTwoStep || user.twoStepEnabled ? 'twoStep' : 'newDevice',
@@ -257,7 +371,14 @@ export const login = asyncHandler(async (req, res) => {
     });
   }
 
-  res.json(await startSession(req, res, user, { deviceId, fingerprint }));
+  const result = await startSession(req, res, user, { deviceId, fingerprint });
+  const totalMs = performance.now() - started;
+  timingHeader(res, { db: dbMs, hash: hashMs, total: totalMs });
+  logger.debug(
+    { loginMs: { db: Math.round(dbMs), hash: Math.round(hashMs), total: Math.round(totalMs) } },
+    'sign-in timing',
+  );
+  res.json(result);
 });
 
 export const loginVerify = asyncHandler(async (req, res) => {
@@ -382,7 +503,7 @@ export const myActivity = asyncHandler(async (req, res) => {
   const rows = await AuditLog.find({ actorId: req.user.id })
     .sort({ createdAt: -1, _id: -1 })
     .limit(40)
-    .select('action status targetType targetId ip createdAt')
+    .select('action status targetType targetId ip location country countryCode city region detectionStatus detectedAt createdAt')
     .lean();
 
   res.json({
@@ -394,6 +515,13 @@ export const myActivity = asyncHandler(async (req, res) => {
       targetType: row.targetType,
       targetId: row.targetId,
       ip: row.ip,
+      location: row.location || 'Unknown location',
+      country: row.country || '',
+      countryCode: row.countryCode || '',
+      city: row.city || '',
+      region: row.region || '',
+      detectionStatus: row.detectionStatus || (row.location ? 'legacy' : 'unavailable'),
+      detectedAt: row.detectedAt ?? null,
       createdAt: row.createdAt,
     })),
   });
@@ -519,8 +647,14 @@ export const listMySessions = asyncHandler(async (req, res) => {
         deviceName: s.deviceName,
         deviceLabel: s.deviceLabel,
         deviceModelSource: s.deviceModelSource,
-        location: s.location,
-        locationSource: s.locationSource,
+        location: s.location || 'Unknown location',
+        locationSource: s.locationSource || (s.location ? 'legacy' : 'none'),
+        country: s.country || '',
+        countryCode: s.countryCode || '',
+        city: s.city || '',
+        region: s.region || '',
+        detectionStatus: s.detectionStatus || (s.location ? 'legacy' : 'unavailable'),
+        detectedAt: s.detectedAt ?? null,
         ip: s.ip,
         createdAt: s.createdAt,
         lastSeenAt: s.lastSeenAt,

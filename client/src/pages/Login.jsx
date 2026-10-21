@@ -4,20 +4,18 @@ import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, Lock, Mail, MapPin } from 'lucide-react';
+import { ArrowLeft, Lock, Mail } from 'lucide-react';
 import AuthLayout from '../components/layout/AuthLayout';
 import Field from '../components/ui/Field';
 import Button from '../components/ui/Button';
 import Alert from '../components/ui/Alert';
 import CodeInput from '../components/ui/CodeInput';
 import Turnstile, { turnstileEnabled } from '../components/ui/Turnstile';
-import LocationGate from '../components/auth/LocationGate';
-import { api, applyLocationHeader, errorMessage } from '../lib/api';
+import { api, errorMessage } from '../lib/api';
 import { loginSchema, emailField } from '../lib/validation';
 import { FLOW_KEYS, clearFlow, writeFlow } from '../lib/session-flow';
 import { homeFor } from '../lib/roles';
 import useResendTimer, { formatWait } from '../lib/useResendTimer';
-import { readLocation, saveLocation } from '../lib/location';
 import { useAuth } from '../store/auth';
 
 export default function Login() {
@@ -48,11 +46,9 @@ export default function Login() {
   const [unverified, setUnverified] = useState(null);
   const [locked, setLocked] = useState(false);
 
-  // The sign-in button stays disabled until the browser has shared a place, or the person
-  // has chosen the network estimate instead. A place allowed earlier in this tab is reused.
-  const [locationMode, setLocationMode] = useState(() => (readLocation() ? 'device' : null));
-  const [gate, setGate] = useState(() => (readLocation() ? 'closed' : 'ask'));
-
+  // React Hook Form switches isSubmitting on before it calls onSubmit, and the button is
+  // disabled while it is true. The early guard covers a second form submit (for example
+  // from a repeated Enter key) that starts before the disabled render is painted.
   const [captcha, setCaptcha] = useState('');
   const [captchaKey, setCaptchaKey] = useState(0);
 
@@ -76,32 +72,7 @@ export default function Login() {
   const email = useWatch({ control, name: 'email' }) ?? '';
   const emailOk = email.length > 0 && emailField.safeParse(email).success;
 
-  const canSubmit = Boolean(locationMode) && (!turnstileEnabled || Boolean(captcha));
-
-  const askForLocation = () => {
-    if (!('geolocation' in navigator)) {
-      setGate('unavailable');
-      return;
-    }
-    setGate('asking');
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const shared = { lat: position.coords.latitude, lon: position.coords.longitude };
-        saveLocation(shared);
-        applyLocationHeader(shared);
-        setLocationMode('device');
-        setGate('closed');
-        toast.success('Location allowed for this sign-in.');
-      },
-      (error) => setGate(error?.code === 1 ? 'denied' : 'unavailable'),
-      { enableHighAccuracy: false, timeout: 12000, maximumAge: 10 * 60 * 1000 },
-    );
-  };
-
-  const useNetwork = () => {
-    setLocationMode('network');
-    setGate('closed');
-  };
+  const canSubmit = !turnstileEnabled || Boolean(captcha);
 
   const finish = (data, greeting) => {
     clearFlow(FLOW_KEYS.pendingVerify);
@@ -111,7 +82,7 @@ export default function Login() {
   };
 
   const onSubmit = async (values) => {
-    if (!canSubmit) return;
+    if (isSubmitting || !canSubmit) return;
     setServerError(null);
     setUnverified(null);
     setLocked(false);
@@ -241,14 +212,6 @@ export default function Login() {
       title="Welcome back"
       footer={<span>Accounts are created by your school administrator.</span>}
     >
-      <LocationGate
-        open={gate !== 'closed'}
-        state={gate}
-        onAllow={askForLocation}
-        onNotNow={() => setGate('denied')}
-        onUseNetwork={useNetwork}
-      />
-
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
         {maintenance?.enabled && adminEntry ? (
           <Alert tone="warning" title="Maintenance mode is on">
@@ -325,29 +288,6 @@ export default function Login() {
         >
           Sign in
         </Button>
-
-        {locationMode === 'device' ? (
-          <p className="flex items-center justify-center gap-1.5 text-center text-xs text-slate-400">
-            <MapPin className="h-3.5 w-3.5 text-emerald-500" />
-            This sign-in records this device’s place.
-          </p>
-        ) : locationMode === 'network' ? (
-          <p className="flex flex-wrap items-center justify-center gap-1.5 text-center text-xs text-slate-400">
-            <MapPin className="h-3.5 w-3.5 text-amber-500" />
-            Recording an approximate place from your network.
-            <button
-              type="button"
-              onClick={() => setGate('ask')}
-              className="focus-ring rounded font-semibold text-brand-600 hover:text-brand-700"
-            >
-              Allow location instead
-            </button>
-          </p>
-        ) : (
-          <p className="text-center text-xs font-medium text-slate-500">
-            Allow location above to turn on sign-in.
-          </p>
-        )}
       </form>
     </AuthLayout>
   );

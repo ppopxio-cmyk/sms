@@ -9,6 +9,9 @@ let running = null;
 const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
 function buildDoc({ req, actorId, actorRole, action, targetType, targetId, status = 'success', meta }) {
+  // Login entries carry the canonical place in meta. Lifting it to top-level fields
+  // keeps audit history readable after the session row (the other copy) is deleted.
+  const place = meta && typeof meta === 'object' ? meta : {};
   return {
     actorId: actorId ?? req?.user?.id,
     actorRole: actorRole ?? req?.user?.role,
@@ -19,6 +22,13 @@ function buildDoc({ req, actorId, actorRole, action, targetType, targetId, statu
     meta,
     ip: req?.ip,
     sessionId: req?.user?.sid,
+    location: place.location,
+    country: place.country,
+    countryCode: place.countryCode,
+    city: place.city,
+    region: place.region,
+    detectionStatus: place.detectionStatus,
+    detectedAt: place.detectedAt,
   };
 }
 

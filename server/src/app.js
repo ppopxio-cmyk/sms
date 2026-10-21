@@ -22,10 +22,11 @@ export function createApp() {
   app.disable('x-powered-by');
   if (env.TRUST_PROXY) app.set('trust proxy', env.TRUST_PROXY);
 
-  // Express can only name the nearest hop. When the site is called through its Vercel
-  // address - which is how the browser reaches this API - Vercel states the visitor's own
-  // address and cannot be made to lie about it. Everything that cares which address this is
-  // (rate limits, sign-in alerts) uses that instead of the private hop behind it.
+  // Express can only name the nearest hop. The browser normally reaches this API through
+  // Vercel, whose edge marker lets us use the address Vercel overwrote. A direct call to
+  // the API hostname instead uses Cloudflare's own header. An arbitrary X-Forwarded-For
+  // sent by a caller is ignored. Everything that cares which address this is (rate limits,
+  // sign-in alerts) uses that answer instead of a private hop behind it.
   app.use((req, _res, next) => {
     const { ip } = resolveClient(req);
     const usable = Boolean(ip) && ip !== '::1' && !ip.startsWith('127.') && !isPrivateAddress(ip);
@@ -49,8 +50,8 @@ export function createApp() {
         origin: isAllowedOrigin(req, req.get('origin')),
         credentials: true,
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Device-Fingerprint', 'X-Device-Info', 'X-Device-Location', 'CF-Turnstile-Response'],
-        exposedHeaders: ['Content-Disposition', 'X-Export-Rows'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Device-Fingerprint', 'X-Device-Info', 'CF-Turnstile-Response'],
+        exposedHeaders: ['Content-Disposition', 'X-Export-Rows', 'Server-Timing'],
         maxAge: 600,
       });
     }),
@@ -110,7 +111,16 @@ export function createApp() {
       country: req.get('x-vercel-ip-country') || null,
       // Which of the address headers actually arrived. Names only; the values are what is
       // already shown above.
-      saw: ['x-vercel-id', 'x-real-ip', 'cf-connecting-ip', 'x-vercel-ip-city'].filter((name) => Boolean(req.get(name))),
+      saw: [
+        'x-vercel-id',
+        'x-real-ip',
+        'x-forwarded-for',
+        'x-vercel-forwarded-for',
+        'cf-connecting-ip',
+        'x-vercel-ip-city',
+        'x-vercel-ip-country',
+        'x-vercel-ip-country-region',
+      ].filter((name) => Boolean(req.get(name))),
     });
   });
 

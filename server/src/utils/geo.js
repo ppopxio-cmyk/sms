@@ -1,13 +1,17 @@
 import { logger } from './logger.js';
 
-// Where a sign-in came from, as far as an address can say. Nothing here is precise: a mobile
-// carrier hands out addresses registered somewhere else entirely, and an office proxy can
-// hide the town. Every screen that shows this says so.
+// Where a sign-in came from, as far as an address can say. Nothing here is precise:
+// a mobile carrier hands out addresses registered somewhere else entirely, and an
+// office proxy can hide the town. Every screen that shows this says so.
 //
-// Two sources are used. The bundled database answers instantly and offline, but it often
-// knows only the country. When it cannot name a city, one lookup service is asked (over
-// HTTPS, no key, nothing but the address is sent) and the answer is kept for a few hours.
-// The address is a caller's own, already visible to every server it reaches.
+// The bundled database answers instantly and offline, but it is easily out of date and
+// often knows only the country. The online service is asked first, because it also
+// says who owns the address. That matters: a cloud or VPN address belongs to a data
+// centre, not to the person signing in, and must not be shown as their country.
+//
+// The address is a caller's own, already visible to every server it reaches. No
+// browser coordinates are accepted or stored. The only value kept is an approximate
+// place name and the normalised fields below.
 let regionNames = null;
 try {
   regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
@@ -21,17 +25,78 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CACHE_MAX = 500;
 const cache = new Map(); // key -> { place, until }
 
+export const UNKNOWN_LOCATION = 'Unknown location';
+
 // Addresses that cannot be looked up and should never pretend to be a place.
 const PRIVATE =
   /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|127\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|f[cd][0-9a-f]{2}:|fe80:|::1$)/i;
 
 export const isPrivateAddress = (ip) => PRIVATE.test(String(ip || '').replace(/^::ffff:/, ''));
 
+const clean = (value, max = 80) => {
+  if (typeof value !== 'string') return '';
+  return value.trim().slice(0, max);
+};
+
+const codeOf = (value) => {
+  const raw = clean(value, 3).toUpperCase();
+  return raw.length === 2 && /^[A-Z]{2}$/.test(raw) ? raw : '';
+};
+
 export const countryName = (code) => {
-  const value = String(code || '').trim().toUpperCase();
-  if (!/^[A-Z]{2}$/.test(value)) return '';
+  const value = codeOf(code);
+  if (!value) return '';
   return regionNames?.of(value) ?? value;
 };
+
+// One shape for every caller. `location` is the human line existing screens already
+// display; the other fields are the canonical values new code can query and audit.
+export function locationResult({
+  location,
+  city = '',
+  region = '',
+  country = '',
+  countryCode = '',
+  locationSource = 'network',
+  detectionStatus = 'estimated',
+  detectedAt = new Date(),
+} = {}) {
+  const code = codeOf(countryCode);
+  const countryLabel = clean(country) || countryName(code);
+  const cityLabel = clean(city);
+  const regionLabel = clean(region);
+  const place =
+    clean(location) ||
+    [cityLabel || regionLabel, countryLabel].filter(Boolean).join(', ') ||
+    UNKNOWN_LOCATION;
+
+  return {
+    location: place,
+    country: countryLabel,
+    countryCode: code,
+    city: cityLabel,
+    region: regionLabel,
+    locationSource,
+    detectionStatus,
+    detectedAt,
+  };
+}
+
+export function localLocation(ip) {
+  const address = String(ip || '').replace(/^::ffff:/, '');
+  if (!address || address === '::1' || address.startsWith('127.')) {
+    return locationResult({
+      location: 'This computer',
+      locationSource: 'local',
+      detectionStatus: 'local',
+    });
+  }
+  return locationResult({
+    location: 'Local network',
+    locationSource: 'local',
+    detectionStatus: 'local',
+  });
+}
 
 const remember = (key, place) => {
   if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
@@ -39,78 +104,99 @@ const remember = (key, place) => {
   return place;
 };
 
+// Cloud, hosting and VPN addresses describe the proxy, never the person. The list is
+// deliberately about providers, not countries: a normal Ethiopian mobile address is
+// untouched. If the provider cannot tell us who owns the address, we leave the normal
+// country answer in place.
+const HOSTING =
+  /(amazon|aws|google cloud|microsoft azure|\bazure\b|digitalocean|linode|hetzner|\bovh\b|leaseweb|contabo|m247|oracle cloud|fastly|akamai|cloudflare|vercel|render|hosting|data ?cent(er|re)|\bvpn\b|\bproxy\b|\bcolo\b)/i;
+
+const ownerText = (data) =>
+  [data?.connection?.org, data?.connection?.isp, data?.connection?.domain]
+    .filter(Boolean)
+    .join(' ')
+    .slice(0, 240);
+
 async function askOnline(ip) {
   try {
     const res = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}`, {
       signal: AbortSignal.timeout(1200),
       headers: { accept: 'application/json' },
     });
-    if (!res.ok) return '';
+    if (!res.ok) return null;
     const data = await res.json();
-    if (!data?.success) return '';
-    return [data.city || data.region, data.country].filter(Boolean).join(', ');
+    if (!data?.success) return null;
+
+    if (HOSTING.test(ownerText(data))) {
+      return locationResult({
+        detectionStatus: 'proxy',
+        locationSource: 'network',
+      });
+    }
+
+    return locationResult({
+      city: data.city,
+      region: data.region,
+      country: data.country,
+      countryCode: data.country_code,
+      locationSource: 'network',
+      detectionStatus: 'estimated',
+    });
   } catch {
-    return '';
+    return null;
   }
 }
 
-export async function placeForAddress(rawIp) {
+// The offline database is a last resort. It is not allowed to supply a city here:
+// an outdated city is worse than a country, and the online answer is tried first.
+async function offlineAddress(ip) {
+  try {
+    geoip ??= (await import('geoip-lite')).default;
+    const hit = geoip.lookup(ip);
+    if (!hit?.country) return null;
+    return locationResult({
+      countryCode: hit.country,
+      locationSource: 'network',
+      detectionStatus: 'estimated',
+    });
+  } catch (err) {
+    logger.error({ err: err.message }, 'the bundled address database could not be read');
+    return null;
+  }
+}
+
+export async function lookupAddress(rawIp) {
   const ip = String(rawIp ?? '').replace(/^::ffff:/, '').trim();
-  if (!ip) return 'Unknown place';
-  if (ip === '::1' || ip.startsWith('127.')) return 'This computer';
-  if (isPrivateAddress(ip)) return 'Local network';
+  if (!ip) {
+    return locationResult({
+      detectionStatus: 'unavailable',
+      locationSource: 'none',
+    });
+  }
+  if (ip === '::1' || ip.startsWith('127.') || isPrivateAddress(ip)) {
+    return localLocation(ip);
+  }
 
   const hitCache = cache.get(ip);
   if (hitCache && hitCache.until > Date.now()) return hitCache.place;
 
-  let city = '';
-  let country = '';
-  try {
-    geoip ??= (await import('geoip-lite')).default;
-    const hit = geoip.lookup(ip);
-    if (hit) {
-      city = hit.city || '';
-      country = countryName(hit.country);
-    }
-  } catch (err) {
-    logger.error({ err: err.message }, 'the bundled address database could not be read');
-  }
-
-  if (city) return remember(ip, [city, country].filter(Boolean).join(', '));
-
   const online = await askOnline(ip);
   if (online) return remember(ip, online);
 
-  return remember(ip, country || 'Unknown place');
+  const offline = await offlineAddress(ip);
+  if (offline) return remember(ip, offline);
+
+  return remember(
+    ip,
+    locationResult({
+      detectionStatus: 'unavailable',
+      locationSource: 'none',
+    }),
+  );
 }
 
-// The place the person themselves allowed the browser to share. The coordinates never
-// leave this function: only a city and a country are kept, and only for a sign-in record.
-// OpenStreetMap's service is free, needs no key, and asks for a name in the request, which
-// is why one is sent.
-export async function placeForCoordinates(lat, lon) {
-  const rounded = `${Number(lat).toFixed(2)},${Number(lon).toFixed(2)}`;
-  const hitCache = cache.get(`c:${rounded}`);
-  if (hitCache && hitCache.until > Date.now()) return hitCache.place;
-
-  try {
-    const url =
-      'https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&addressdetails=1&accept-language=en' +
-      `&lat=${Number(lat).toFixed(4)}&lon=${Number(lon).toFixed(4)}`;
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(1800),
-      headers: {
-        accept: 'application/json',
-        'user-agent': 'SchoolManagementSystem/1.0 (sign-in location record)',
-      },
-    });
-    if (!res.ok) return '';
-    const data = await res.json();
-    const address = data?.address ?? {};
-    const city = address.city || address.town || address.village || address.municipality || address.county || address.state || '';
-    const country = address.country || countryName(address.country_code);
-    return remember(`c:${rounded}`, [city, country].filter(Boolean).join(', '));
-  } catch {
-    return '';
-  }
+// Kept for callers that only need the sentence. New code should use lookupAddress so
+// the country, city and detection status travel together.
+export async function placeForAddress(rawIp) {
+  return (await lookupAddress(rawIp)).location;
 }

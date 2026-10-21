@@ -24,6 +24,17 @@ const sessionSchema = new mongoose.Schema(
     deviceModelSource: String,
     location: String,
     locationSource: String,
+    // Canonical place fields. `location` remains the sentence older screens render;
+    // these make the same answer queryable and auditable without parsing a label.
+    country: String,
+    countryCode: String,
+    city: String,
+    region: String,
+    detectionStatus: {
+      type: String,
+      enum: ['pending', 'estimated', 'unavailable', 'proxy', 'local', 'legacy'],
+    },
+    detectedAt: Date,
     status: { type: String, enum: ['active', 'revoked'], default: 'active' },
     revokedAt: Date,
     revokedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
