@@ -14,13 +14,16 @@ const STUDENT_SORT = ['createdAt', 'updatedAt', 'studentId', 'fullName', 'level'
 
 function photoView(photo) {
   if (!photo) return null;
-  const url = photo.filePath ? signedImageUrl(photo.filePath, { expiresIn: 3600 }) : photo.url;
-  const thumbnailUrl = photo.filePath
-    ? signedImageUrl(photo.filePath, {
-        transformation: [{ width: 160, height: 160, crop: 'maintain_ratio', focus: 'face' }],
-        expiresIn: 3600,
-      })
-    : photo.thumbnailUrl;
+  const usable = photo.status !== 'missing';
+  const url = usable && photo.filePath ? signedImageUrl(photo.filePath, { expiresIn: 3600 }) : usable ? photo.url : null;
+  const thumbnailUrl = usable
+    ? photo.filePath
+      ? signedImageUrl(photo.filePath, {
+          transformation: [{ width: 160, height: 160, crop: 'maintain_ratio', focus: 'face' }],
+          expiresIn: 3600,
+        })
+      : photo.thumbnailUrl
+    : null;
   return { ...photo, url, thumbnailUrl };
 }
 
@@ -278,9 +281,12 @@ export const removeStudentPhoto = asyncHandler(async (req, res) => {
   const student = await Student.findById(req.valid.params.studentId);
   if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student record was not found.');
   if (!student.photo?.fileId) throw new AppError(404, 'PHOTO_NOT_FOUND', 'This student has no photo to remove.');
-  await deleteImage(student.photo.fileId);
+  const { fileId } = student.photo;
   student.photo = {};
   await student.save();
+  await deleteImage(fileId).catch((err) =>
+    logger.warn({ err: err?.message, fileId }, 'student photo reference cleared but the stored file could not be deleted'),
+  );
   audit({
     req,
     action: 'registrar.student.photo.remove',

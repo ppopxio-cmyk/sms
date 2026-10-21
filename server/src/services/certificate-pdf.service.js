@@ -195,13 +195,13 @@ function drawCertificatePage(doc, { certificate, template, photoBuffer, sealBuff
 
   const snapshot = certificate.studentSnapshot || {};
   fontFor(doc, snapshot.fullName, { bold: true });
-  doc.fillColor('#1b2a23').fontSize(25).text(snapshot.fullName || 'Student name', MARGIN + 120, 248, {
-    width: PAGE.width - MARGIN * 2 - 120,
+  doc.fillColor('#1b2a23').fontSize(24).text(snapshot.fullName || 'Student name', MARGIN + 30, 248, {
+    width: 335,
     align: 'center',
   });
   doc
-    .moveTo(MARGIN + 150, doc.y + 7)
-    .lineTo(PAGE.width - MARGIN - 150, doc.y + 7)
+    .moveTo(MARGIN + 56, doc.y + 7)
+    .lineTo(MARGIN + 365, doc.y + 7)
     .lineWidth(0.7)
     .strokeColor(accent)
     .stroke();
@@ -214,17 +214,17 @@ function drawCertificatePage(doc, { certificate, template, photoBuffer, sealBuff
     .fillColor('#26352d')
     .text(
       `has completed the requirements for the ${program.name || 'programme'}${qualification ? ` (${qualification})` : ''}`,
-      MARGIN + 104,
+      MARGIN + 30,
       doc.y + 20,
-      { width: PAGE.width - MARGIN * 2 - 104, align: 'center' },
+      { width: 335, align: 'center' },
     );
   if (certificate.cgpa !== null && certificate.cgpa !== undefined) {
     doc
       .font('Helvetica')
       .fontSize(9)
       .fillColor('#4b5b52')
-      .text(`Cumulative grade point average: ${Number(certificate.cgpa).toFixed(2)}`, MARGIN + 104, doc.y + 6, {
-        width: PAGE.width - MARGIN * 2 - 104,
+      .text(`Cumulative grade point average: ${Number(certificate.cgpa).toFixed(2)}`, MARGIN + 30, doc.y + 6, {
+        width: 335,
         align: 'center',
       });
   }

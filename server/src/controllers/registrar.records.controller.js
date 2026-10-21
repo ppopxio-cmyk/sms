@@ -239,6 +239,15 @@ export const publishResult = asyncHandler(async (req, res) => {
 export const rejectResult = asyncHandler(async (req, res) => {
   const result = await Result.findById(req.valid.params.id);
   if (!result) throw new AppError(404, 'RESULT_NOT_FOUND', 'That result was not found.');
+  if (!['submitted', 'under_review', 'approved'].includes(result.status)) {
+    throw new AppError(
+      409,
+      'RESULT_STATE',
+      result.status === 'published'
+        ? 'A published result cannot be rejected. Use the correction workflow so the change is versioned.'
+        : 'Only a submitted, under-review or approved result can be returned for correction.',
+    );
+  }
   const previousStatus = result.status;
   result.status = 'rejected';
   result.reviewedBy = req.user.id;
@@ -262,7 +271,17 @@ export const correctResult = asyncHandler(async (req, res) => {
     gradePoint: result.gradePoint,
     passed: result.passed,
   };
-  if (req.body.components) result.components = req.body.components;
+  if (req.body.components) {
+    const invalid = req.body.components.find((row) => Number(row.score) > Number(row.max));
+    if (invalid) {
+      throw new AppError(400, 'COMPONENT_SCORE_INVALID', 'A component score cannot be higher than its maximum.');
+    }
+    const componentTotal = req.body.components.reduce((sum, row) => sum + Number(row.score || 0), 0);
+    if (componentTotal > 100) {
+      throw new AppError(400, 'COMPONENT_TOTAL_INVALID', 'Component scores cannot add up to more than 100.');
+    }
+    result.components = req.body.components;
+  }
   if (req.body.components && req.body.totalMark === undefined) {
     result.totalMark = req.body.components.reduce((sum, row) => sum + Number(row.score || 0), 0);
   } else if (req.body.totalMark !== undefined) {

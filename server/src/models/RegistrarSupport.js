@@ -8,7 +8,7 @@ const eventSchema = new Schema(
     type: { type: String, required: true, trim: true, maxlength: 80, index: true },
     fileId: { type: String, trim: true, maxlength: 160, default: null, index: true },
     payloadHash: { type: String, trim: true, maxlength: 64, default: null },
-    outcome: { type: String, enum: ['received', 'processed', 'ignored', 'failed'], default: 'received', index: true },
+    outcome: { type: String, enum: ['received', 'processing', 'processed', 'ignored', 'failed'], default: 'received', index: true },
     detail: { type: String, trim: true, maxlength: 500, default: '' },
     attempts: { type: Number, default: 1 },
     processedAt: { type: Date, default: null },

@@ -51,6 +51,50 @@ export async function loadBrandingAssets(template) {
   return { logoBuffer, sealBuffer, signatureBuffer };
 }
 
+function requireOfficialAssets(assets) {
+  if (!assets?.sealBuffer) {
+    throw new AppError(
+      409,
+      'CERTIFICATE_CONFIG_MISSING',
+      'The official seal is not configured. Upload it before issuing certificates.',
+    );
+  }
+  if (!assets?.signatureBuffer) {
+    throw new AppError(
+      409,
+      'CERTIFICATE_CONFIG_MISSING',
+      'The authorised signature is not configured. Upload it before issuing certificates.',
+    );
+  }
+}
+
+async function fetchCertificatePhoto(template, photo) {
+  const required = template?.photoPolicy === 'required';
+  if (!photo?.filePath) {
+    if (required) {
+      throw new AppError(
+        409,
+        'CERTIFICATE_PHOTO_MISSING',
+        'A student photo is required by the certificate policy, but no stored photo is available.',
+      );
+    }
+    return null;
+  }
+  try {
+    return await fetchAssetBuffer(photo, { jpeg: true });
+  } catch (err) {
+    if (required) {
+      throw new AppError(
+        502,
+        'CERTIFICATE_PHOTO_UNAVAILABLE',
+        'The student photo could not be loaded, so the certificate was not rendered.',
+      );
+    }
+    logger.warn({ err: err?.message }, 'optional certificate photo could not be loaded');
+    return null;
+  }
+}
+
 export async function activeTemplate() {
   return CertificateTemplate.findOne({ active: true }).lean();
 }
@@ -115,7 +159,8 @@ export async function certificatePreview(studentId, userId) {
   }
   if (template.photoPolicy === 'required') assertPhoto(data.student);
   const assets = await loadBrandingAssets(template);
-  const photoBuffer = await fetchAssetBuffer(data.student.photo, { jpeg: true }).catch(() => null);
+  requireOfficialAssets(assets);
+  const photoBuffer = await fetchCertificatePhoto(template, data.student.photo);
   const certificate = {
     certificateNumber: 'PREVIEW',
     verificationId: 'preview',
@@ -178,9 +223,10 @@ async function nextCertificateNumber(prefix, year) {
   return `${prefix || 'CERT'}-${year}-${String(counter.value).padStart(6, '0')}`;
 }
 
-async function renderIssuedCertificate(certificate, template) {
-  const assets = await loadBrandingAssets(template);
-  const photoBuffer = await fetchAssetBuffer(certificate.studentSnapshot?.photo, { jpeg: true }).catch(() => null);
+async function renderIssuedCertificate(certificate, template, prepared = null) {
+  const assets = prepared || (await loadBrandingAssets(template));
+  requireOfficialAssets(assets);
+  const photoBuffer = prepared?.photoBuffer ?? (await fetchCertificatePhoto(template, certificate.studentSnapshot?.photo));
   const pdf = await renderCertificatePdf({
     certificate,
     template,
@@ -237,6 +283,9 @@ export async function issueCertificate({ studentId, userId, idempotencyKey }) {
   const academicStudent = data.student;
   const academicYearId = data.enrollment?.academicYear ?? academicStudent.admissionAcademicYear?._id ?? academicStudent.admissionAcademicYear ?? null;
   const completionYear = new Date(data.completionDate).getFullYear();
+  const preparedAssets = await loadBrandingAssets(template);
+  requireOfficialAssets(preparedAssets);
+  const preparedPhoto = await fetchCertificatePhoto(template, academicStudent.photo);
   const certificateNumber = await nextCertificateNumber(template.certificatePrefix, completionYear);
   const verificationId = crypto.randomBytes(12).toString('hex');
   const record = {
@@ -288,7 +337,10 @@ export async function issueCertificate({ studentId, userId, idempotencyKey }) {
   }
 
   try {
-    const pdf = await renderIssuedCertificate(certificate.toObject(), template);
+    const pdf = await renderIssuedCertificate(certificate.toObject(), template, {
+      ...preparedAssets,
+      photoBuffer: preparedPhoto,
+    });
     certificate.pdfGeneratedAt = new Date();
     logger.info(
       { certificateId: String(certificate._id), bytes: pdf.length },
@@ -311,7 +363,8 @@ export async function certificatePdf(certificateId) {
   const template = await CertificateTemplate.findById(certificate.template).lean();
   if (!template) throw new AppError(409, 'CERTIFICATE_TEMPLATE_MISSING', 'The certificate template is no longer available.');
   const assets = await loadBrandingAssets(template);
-  const photoBuffer = await fetchAssetBuffer(certificate.studentSnapshot?.photo, { jpeg: true }).catch(() => null);
+  requireOfficialAssets(assets);
+  const photoBuffer = await fetchCertificatePhoto(template, certificate.studentSnapshot?.photo);
   return {
     certificate,
     buffer: await renderCertificatePdf({ certificate, template, photoBuffer, ...assets }),

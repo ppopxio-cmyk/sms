@@ -169,7 +169,7 @@ export default function RegistrarResults() {
           {['approved', 'submitted', 'under_review'].includes(row.status) ? (
             <Button size="sm" variant="secondary" onClick={() => setPublishing(row)}>Publish</Button>
           ) : null}
-          {['submitted', 'under_review', 'approved', 'published'].includes(row.status) ? (
+          {['submitted', 'under_review', 'approved'].includes(row.status) ? (
             <Button size="sm" variant="ghost" onClick={() => setRejecting(row)} aria-label="Reject result"><ThumbsDown className="h-3.5 w-3.5 text-rose-500" /></Button>
           ) : null}
           {['approved', 'published'].includes(row.status) ? (
@@ -337,7 +337,7 @@ function ResultDetailModal({ resultId, onClose, onAction, actionPending }) {
           {['submitted', 'rejected'].includes(result.status) ? <Button variant="secondary" onClick={() => onAction('review', result)}>Take under review</Button> : null}
           {['submitted', 'under_review'].includes(result.status) ? <Button onClick={() => onAction('approve', result)} loading={actionPending}>Approve</Button> : null}
           {['approved', 'submitted', 'under_review'].includes(result.status) ? <Button variant="secondary" onClick={() => onAction('publish', result)}>Publish</Button> : null}
-          {['submitted', 'under_review', 'approved', 'published'].includes(result.status) ? <Button variant="ghost" onClick={() => onAction('reject', result)}>Reject</Button> : null}
+          {['submitted', 'under_review', 'approved'].includes(result.status) ? <Button variant="ghost" onClick={() => onAction('reject', result)}>Reject</Button> : null}
           {['approved', 'published'].includes(result.status) ? <Button variant="secondary" onClick={() => onAction('correct', result)}>Correct</Button> : null}
         </div>
       ) : null}

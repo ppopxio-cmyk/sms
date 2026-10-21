@@ -35,22 +35,37 @@ export const imagekitWebhook = asyncHandler(async (req, res) => {
     throw new AppError(400, 'BAD_WEBHOOK', 'The webhook body does not match the expected shape.');
   }
 
-  const existing = await ImageKitEvent.findOne({ eventId: hash }).lean();
+  const existing = await ImageKitEvent.findOne({ eventId: hash });
   if (existing) {
-    return res.json({ received: true, duplicate: true, outcome: existing.outcome });
+    if (['processed', 'ignored'].includes(existing.outcome)) {
+      return res.json({ received: true, duplicate: true, outcome: existing.outcome });
+    }
+    const stale = existing.outcome === 'processing' && Date.now() - new Date(existing.updatedAt).getTime() > 5 * 60 * 1000;
+    if (!['received', 'failed', 'processing'].includes(existing.outcome) || (existing.outcome === 'processing' && !stale)) {
+      return res.json({ received: true, duplicate: true, processing: true });
+    }
+    // A previous delivery may have failed or stopped before recording its result. Claim
+    // the stored event and reconcile again, without ever creating a second event row.
+    existing.outcome = 'processing';
+    existing.attempts = (existing.attempts || 0) + 1;
+    existing.detail = '';
+    existing.processedAt = null;
+    await existing.save();
   }
 
-  let event;
+  let event = existing;
   try {
-    event = await ImageKitEvent.create({
-      eventId: hash,
-      type: payload.type,
-      fileId: payload.data.fileId,
-      payloadHash: hash,
-      outcome: 'received',
-    });
+    if (!event) {
+      event = await ImageKitEvent.create({
+        eventId: hash,
+        type: payload.type,
+        fileId: payload.data.fileId,
+        payloadHash: hash,
+        outcome: 'processing',
+      });
+    }
   } catch (err) {
-    if (err?.code === 11000) return res.json({ received: true, duplicate: true });
+    if (err?.code === 11000) return res.json({ received: true, duplicate: true, processing: true });
     throw err;
   }
 

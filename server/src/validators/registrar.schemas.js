@@ -213,14 +213,43 @@ export const resultDecisionSchema = z.object({
   reason: optionalText(500),
 });
 
-export const resultCorrectionSchema = z.object({
-  components: z
-    .array(z.object({ name: text(80).min(1), max: z.coerce.number().min(0.01).max(1000), score: z.coerce.number().min(0) }))
-    .max(20)
-    .optional(),
-  totalMark: z.coerce.number().min(0).max(100).optional(),
-  reason: text(1000).min(3),
-});
+export const resultCorrectionSchema = z
+  .object({
+    components: z
+      .array(z.object({ name: text(80).min(1), max: z.coerce.number().min(0.01).max(1000), score: z.coerce.number().min(0) }))
+      .max(20)
+      .optional(),
+    totalMark: z.coerce.number().min(0).max(100).optional(),
+    reason: text(1000).min(3),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.components && value.totalMark === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['totalMark'],
+        message: 'Enter a corrected mark or the corrected components.',
+      });
+    }
+    value.components?.forEach((component, index) => {
+      if (component.score > component.max) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['components', index, 'score'],
+          message: 'A component score cannot be higher than its maximum.',
+        });
+      }
+    });
+    if (value.components && value.totalMark === undefined) {
+      const total = value.components.reduce((sum, component) => sum + component.score, 0);
+      if (total > 100) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['components'],
+          message: 'Component scores cannot add up to more than 100.',
+        });
+      }
+    }
+  });
 
 export const resultEntrySchema = z.object({
   student: objectId,
@@ -301,7 +330,7 @@ export const announcementListSchema = paginationSchema.extend({
   kind: z.enum(['announcement', 'notification']).optional().default('announcement'),
 });
 
-export const registrarAnnouncementSchema = z.object({
+const registrarNoticeFields = z.object({
   title: text(160).min(3),
   body: text(5000).min(3),
   type: z.enum(['general', 'academic', 'exam', 'event', 'administrative', 'emergency', 'holiday', 'finance']).optional().default('general'),
@@ -313,7 +342,17 @@ export const registrarAnnouncementSchema = z.object({
   kind: z.enum(['announcement', 'notification']).optional().default('announcement'),
 });
 
-export const registrarNotificationSchema = registrarAnnouncementSchema.extend({
+export const registrarAnnouncementSchema = registrarNoticeFields.superRefine((value, ctx) => {
+  if (value.kind === 'notification' && value.body.length > 300) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['body'],
+      message: 'A notification message must be at most 300 characters.',
+    });
+  }
+});
+
+export const registrarNotificationSchema = registrarNoticeFields.extend({
   kind: z.literal('notification').optional().default('notification'),
   body: text(300).min(3),
 });
