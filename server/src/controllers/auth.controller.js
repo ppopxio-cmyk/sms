@@ -313,12 +313,16 @@ export const login = asyncHandler(async (req, res) => {
   if (!user || !passwordOk) {
     if (user) {
       const updated = await User.findOneAndUpdate({ _id: user._id }, { $inc: { failedLogins: 1 } }, { returnDocument: 'after' });
-      if (updated.failedLogins >= policy.lockoutAttempts) {
-        await User.updateOne({
-          _id: user._id,
-          failedLogins: 0,
-          lockUntil: new Date(Date.now() + policy.lockoutMinutes * 60_000),
-        });
+      if (updated?.failedLogins >= policy.lockoutAttempts) {
+        await User.updateOne(
+          { _id: user._id },
+          {
+            $set: {
+              failedLogins: 0,
+              lockUntil: new Date(Date.now() + policy.lockoutMinutes * 60_000),
+            },
+          },
+        );
       }
     }
     audit({ req, actorId: user?._id, action: 'auth.login_failed', status: 'fail', meta: { email } });

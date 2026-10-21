@@ -50,7 +50,10 @@ export function createApp() {
         origin: isAllowedOrigin(req, req.get('origin')),
         credentials: true,
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Device-Fingerprint', 'X-Device-Info', 'CF-Turnstile-Response'],
+        // X-Device-Location remains allowed for one release so a browser still running
+        // cached old JavaScript does not fail its CORS preflight. The server no longer
+        // reads it; new clients do not send it.
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Device-Fingerprint', 'X-Device-Info', 'X-Device-Location', 'CF-Turnstile-Response'],
         exposedHeaders: ['Content-Disposition', 'X-Export-Rows', 'Server-Timing'],
         maxAge: 600,
       });
