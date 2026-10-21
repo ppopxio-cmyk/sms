@@ -1,4 +1,4 @@
-import { getPolicy, requirePolicy, updatePolicy, previewMarks, history } from '../services/gradingPolicy.service.js';
+import { getPolicy, requirePolicy, updatePolicy as updatePolicyService, previewMarks, history } from '../services/gradingPolicy.service.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
 
@@ -25,7 +25,7 @@ export const updatePolicy = asyncHandler(async (req, res) => {
   if (!Array.isArray(bands) || !bands.length) {
     throw new AppError(400, 'INVALID_BANDS', 'Grade bands are required and must be an array.');
   }
-  const result = await updatePolicy({ bands, repeatPolicy, rounding, effectiveFrom, reason, req });
+  const result = await updatePolicyService({ bands, repeatPolicy, rounding, effectiveFrom, reason, req });
   res.json({
     policy: result.policy,
     changed: result.changed,
