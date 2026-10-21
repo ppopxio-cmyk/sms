@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowRight,
@@ -60,11 +60,17 @@ export default function Maintenance() {
     queryKey: ['system-status'],
     queryFn: async () => (await api.get('/status')).data,
     refetchInterval: 20_000,
+    refetchOnMount: 'always',
     retry: 1,
     staleTime: 10_000,
   });
 
-  const maintenance = status.data?.maintenance ?? fromApp ?? null;
+  // A fresh response wins over the cached status and the state that sent us here. That
+  // prevents a stale "maintenance on" hand-off from keeping this page open after the
+  // portal has already reopened.
+  const freshMaintenance = status.isFetchedAfterMount ? status.data?.maintenance : null;
+  const maintenance =
+    freshMaintenance ?? (fromApp?.enabled ? fromApp : status.data?.maintenance ?? fromApp ?? null);
   const open = status.data ? !maintenance?.enabled : false;
   const until = maintenance?.until ? new Date(maintenance.until) : null;
   const left = countdown(until, now);
@@ -72,6 +78,13 @@ export default function Maintenance() {
   const name = status.data?.name || 'College portal';
   const home = user?.role ? homeFor(user.role) : '/login';
   const adminHome = user?.role === 'ADMIN';
+
+  // This screen only exists while the portal is closed. Direct visits, old bookmarks
+  // and the automatic reopening all leave it for the person's own workspace.
+  if (status.isSuccess && status.isFetchedAfterMount && !status.isFetching && !maintenance?.enabled) {
+    const back = location.state?.from;
+    return <Navigate to={back && back !== '/maintenance' ? back : home} replace />;
+  }
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#060b17] text-white">

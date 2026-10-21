@@ -1,6 +1,3 @@
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import {
@@ -18,7 +15,7 @@ import {
   VerticalAlign,
   WidthType,
 } from 'docx';
-import { formatEthiopian } from '../utils/ethiopianDate.js';
+import { ETH_MONTHS, formatEthiopian, toEthiopian } from '../utils/ethiopianDate.js';
 
 export const EXPORT_LIMIT = 5000;
 
@@ -39,12 +36,6 @@ export const EXPORT_FORMATS = {
     contentType: 'application/pdf',
   },
 };
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const FONT_DIR = path.resolve(HERE, '../assets/fonts');
-const FONT_REGULAR = path.join(FONT_DIR, 'NotoSansEthiopic-Regular.ttf');
-const FONT_BOLD = path.join(FONT_DIR, 'NotoSansEthiopic-Bold.ttf');
-const HAS_ETHIOPIC_FONT = existsSync(FONT_REGULAR) && existsSync(FONT_BOLD);
 
 const INK = '0F172A';
 const MUTED = '64748B';
@@ -74,20 +65,11 @@ const sheetName = (title) =>
     .trim()
     .slice(0, 31) || 'Report';
 
-const addisDay = (date = new Date()) => {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Africa/Addis_Ababa',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  const pick = (type) => parts.find((part) => part.type === type)?.value || '';
-  return `${pick('year')}-${pick('month')}-${pick('day')}`;
-};
-
 export function exportFilename(prefix, format) {
   const clean = String(prefix || 'export').replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '') || 'export';
-  return `${clean}-${addisDay()}.${EXPORT_FORMATS[format]?.extension || 'xlsx'}`;
+  const { year, month, day } = toEthiopian(new Date());
+  const monthName = ETH_MONTHS[month - 1].toLowerCase();
+  return `${clean}-${monthName}-${day}-${year}.${EXPORT_FORMATS[format]?.extension || 'xlsx'}`;
 }
 
 function widthFor(column) {
@@ -398,13 +380,10 @@ async function buildPdf({ title, subtitle, summary, note, columns, rows }) {
     document.on('error', reject);
   });
 
-  if (HAS_ETHIOPIC_FONT) {
-    document.registerFont('sms-body', FONT_REGULAR);
-    document.registerFont('sms-bold', FONT_BOLD);
-  }
-
-  const body = () => (HAS_ETHIOPIC_FONT ? 'sms-body' : 'Helvetica');
-  const bold = () => (HAS_ETHIOPIC_FONT ? 'sms-bold' : 'Helvetica-Bold');
+  // PDFKit's built-in Helvetica is a Latin font. The Noto file in assets is Ethiopic
+  // only, so using it here turned every English label into missing-glyph boxes.
+  const body = () => 'Helvetica';
+  const bold = () => 'Helvetica-Bold';
   const margin = 34;
   const tableWidth = document.page.width - margin * 2;
   const pageBottom = document.page.height - margin;
