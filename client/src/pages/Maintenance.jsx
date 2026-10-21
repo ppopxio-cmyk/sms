@@ -32,18 +32,18 @@ function countdown(until, now) {
 function OrbitMark() {
   return (
     <div className="relative flex h-56 w-56 items-center justify-center sm:h-64 sm:w-64">
-      <span className="animate-pulse-ring absolute inset-8 rounded-full bg-cyan-400/10" />
+      <span className="animate-pulse-ring absolute inset-8 rounded-full bg-teal-400/10" />
       <span className="absolute inset-0 rounded-full border border-white/10" />
       <span className="absolute inset-6 rounded-full border border-dashed border-white/10" />
       <span className="animate-orbit absolute inset-0">
-        <span className="absolute left-1/2 top-0 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-cyan-300 shadow-[0_0_18px_5px_rgba(34,211,238,.55)]" />
+        <span className="absolute left-1/2 top-0 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-teal-300 shadow-[0_0_18px_5px_rgba(45,212,191,.55)]" />
       </span>
       <span className="animate-orbit absolute inset-10" style={{ animationDirection: 'reverse', animationDuration: '14s' }}>
         <span className="absolute bottom-0 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-amber-300 shadow-[0_0_16px_4px_rgba(251,191,36,.4)]" />
       </span>
 
       <div className="relative flex h-28 w-28 flex-col items-center justify-center rounded-[2rem] border border-white/15 bg-white/[0.07] shadow-2xl backdrop-blur-xl">
-        <Wrench className="h-9 w-9 text-cyan-300" strokeWidth={1.7} />
+        <Wrench className="h-9 w-9 text-teal-300" strokeWidth={1.7} />
         <span className="mt-2 text-[10px] font-semibold tracking-[0.16em] text-slate-300">Careful work</span>
       </div>
     </div>
@@ -85,12 +85,12 @@ export default function Maintenance() {
           maskImage: 'radial-gradient(ellipse at 50% 20%, black 20%, transparent 78%)',
         }}
       />
-      <div aria-hidden="true" className="pointer-events-none absolute -left-32 top-[-10rem] h-[34rem] w-[34rem] rounded-full bg-indigo-600/20 blur-[110px]" />
-      <div aria-hidden="true" className="pointer-events-none absolute -right-24 bottom-[-14rem] h-[38rem] w-[38rem] rounded-full bg-cyan-400/10 blur-[120px]" />
+      <div aria-hidden="true" className="pointer-events-none absolute -left-32 top-[-10rem] h-[34rem] w-[34rem] rounded-full bg-teal-500/10 blur-[110px]" />
+      <div aria-hidden="true" className="pointer-events-none absolute -right-24 bottom-[-14rem] h-[38rem] w-[38rem] rounded-full bg-teal-400/10 blur-[120px]" />
 
       <header className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-5 py-6 sm:px-8">
         <div className="flex items-center gap-3">
-          <span className="brand-gradient flex h-10 w-10 items-center justify-center rounded-2xl shadow-lg shadow-indigo-950/50">
+          <span className="brand-gradient flex h-10 w-10 items-center justify-center rounded-2xl shadow-lg shadow-black/30">
             <GraduationCap className="h-5 w-5" />
           </span>
           <div>
@@ -107,7 +107,7 @@ export default function Maintenance() {
 
       <main className="relative z-10 mx-auto grid max-w-6xl gap-12 px-5 pb-14 pt-8 sm:px-8 lg:grid-cols-[1.08fr_0.92fr] lg:items-center lg:gap-8 lg:pb-20 lg:pt-14">
         <section className="animate-rise">
-          <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/[0.08] px-3 py-1.5 text-[11px] font-semibold text-cyan-200">
+          <div className="inline-flex items-center gap-2 rounded-full border border-teal-300/20 bg-teal-300/[0.08] px-3 py-1.5 text-[11px] font-semibold text-teal-200">
             <Wrench className="h-3.5 w-3.5" />
             {open ? 'The doors are open again' : 'A short pause, handled carefully'}
           </div>
@@ -138,7 +138,7 @@ export default function Maintenance() {
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <p className="flex items-center gap-2 text-xs font-semibold text-slate-300">
-                    <Clock3 className="h-4 w-4 text-cyan-300" />
+                    <Clock3 className="h-4 w-4 text-amber-300" />
                     Planned return
                   </p>
                   <p className="mt-1.5 text-lg font-semibold text-white">
@@ -186,7 +186,7 @@ export default function Maintenance() {
             {open ? (
               <Link
                 to={home}
-                className="focus-ring inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-slate-950 shadow-xl shadow-black/20 transition hover:bg-cyan-50"
+                className="focus-ring inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-slate-950 shadow-xl shadow-black/20 transition hover:bg-teal-50"
               >
                 {user ? 'Return to your workspace' : 'Go to sign in'}
                 <ArrowRight className="h-4 w-4" />
@@ -196,7 +196,7 @@ export default function Maintenance() {
                 to={adminHome ? '/admin' : '/login?admin=1'}
                 className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/[0.08] px-5 py-3 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/[0.13]"
               >
-                <LockKeyhole className="h-4 w-4 text-cyan-300" />
+                <LockKeyhole className="h-4 w-4 text-teal-300" />
                 {adminHome ? 'Return to admin workspace' : 'Administrator sign in'}
               </Link>
             )}
@@ -221,11 +221,11 @@ export default function Maintenance() {
           <div className="mt-10 grid max-w-xl gap-3 sm:grid-cols-3">
             {[
               [ShieldCheck, 'Data is untouched', 'Accounts, marks and records stay safe.'],
-              [LockKeyhole, 'Sessions are paused', 'Signed-in sessions are closed cleanly.'],
+              [LockKeyhole, 'Sessions are closed', 'Other roles are signed out and must sign in again.'],
               [Clock3, 'No work for you', 'Come back at the planned time.'],
             ].map(([Icon, title, body]) => (
               <div key={title} className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3.5">
-                <Icon className="h-4 w-4 text-cyan-300" />
+                <Icon className="h-4 w-4 text-teal-300" />
                 <p className="mt-2 text-xs font-semibold text-slate-200">{title}</p>
                 <p className="mt-1 text-[11px] leading-5 text-slate-400">{body}</p>
               </div>
@@ -236,8 +236,8 @@ export default function Maintenance() {
         <section className="animate-fade relative flex min-h-[24rem] flex-col items-center justify-center rounded-[2.5rem] border border-white/[0.08] bg-gradient-to-b from-white/[0.055] to-transparent p-6 shadow-2xl shadow-black/20 backdrop-blur-sm sm:min-h-[30rem]">
           <div className="absolute inset-x-8 top-8 flex items-center justify-between text-[10px] font-semibold tracking-wide text-slate-400">
             <span>Portal pulse</span>
-            <span className="flex items-center gap-1.5 text-cyan-200">
-              <span className="animate-pulse-dot h-1.5 w-1.5 rounded-full bg-cyan-300" />
+            <span className="flex items-center gap-1.5 text-teal-200">
+              <span className="animate-pulse-dot h-1.5 w-1.5 rounded-full bg-teal-300" />
               live
             </span>
           </div>

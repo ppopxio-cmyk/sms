@@ -600,7 +600,7 @@ export default function AdminSettings() {
         subtitle={
           maintenanceState?.enabled
             ? 'Everyone will be able to sign in again. Accounts and data stay exactly as they are.'
-            : 'Every other role will be signed out immediately. Admins keep their session and can reopen the portal at any time.'
+            : 'Every other role will be signed out immediately. Accounts and records are untouched, and admins keep their session so they can reopen the portal.'
         }
         footer={
           <>

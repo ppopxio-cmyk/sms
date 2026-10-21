@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 // A live list of open event streams, one entry per signed-in browser tab that has the
 // portal open. It is deliberately in-process and never persisted: if the API restarts,
 // every browser reconnects and asks for a fresh ticket.
-const clients = new Map(); // key -> { userId, sid, res }
+const clients = new Map(); // key -> { userId, sid, role, res }
 const HEARTBEAT_MS = 25_000;
 
 function write(res, event, payload) {
@@ -15,14 +15,37 @@ function write(res, event, payload) {
   }
 }
 
-export function addClient(userId, res, sid) {
+export function addClient(userId, res, sid, role = null) {
   const key = crypto.randomUUID();
-  clients.set(key, { userId: String(userId), sid: sid ? String(sid) : null, res });
+  clients.set(key, {
+    userId: String(userId),
+    sid: sid ? String(sid) : null,
+    role: role || null,
+    res,
+  });
   return key;
 }
 
 export function removeClient(key) {
   clients.delete(key);
+}
+
+// Closing the portal ends ordinary browser streams too. The clients reconnect by asking
+// for a new ticket, which the maintenance guard refuses for every non-admin session.
+// Administrators keep their stream so the recovery UI still updates live.
+export function closeNonAdmins() {
+  let closed = 0;
+  for (const [key, client] of clients) {
+    if (client.role === 'ADMIN') continue;
+    try {
+      client.res.end();
+    } catch {
+      // the socket was already gone; removing the entry is enough
+    }
+    clients.delete(key);
+    closed += 1;
+  }
+  return closed;
 }
 
 export function countForUser(userId) {

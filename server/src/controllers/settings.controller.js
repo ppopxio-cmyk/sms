@@ -5,6 +5,7 @@ import { AppError } from '../utils/AppError.js';
 import { audit } from '../services/audit.service.js';
 import { MAIL_TRANSPORT, sendTestEmail } from '../services/mail.service.js';
 import { revokeAllExceptUsers } from '../services/session.service.js';
+import { closeNonAdmins } from '../services/stream.service.js';
 import { logger } from '../utils/logger.js';
 import {
   applySettingsPatch,
@@ -102,6 +103,7 @@ export const updateMaintenance = asyncHandler(async (req, res) => {
   // Closing the portal ends every non-admin session immediately. Administrators keep
   // their sessions so the person who closed it can reopen it without being locked out.
   let sessionsEnded = 0;
+  let streamsClosed = 0;
   let revocationFailed = false;
   if (enabled) {
     try {
@@ -118,6 +120,8 @@ export const updateMaintenance = asyncHandler(async (req, res) => {
       revocationFailed = true;
       logger.error({ err: err.message }, 'non-admin sessions could not be revoked for maintenance');
     }
+    // Do this even if the bulk revocation failed: the guard still refuses fresh tickets.
+    streamsClosed = closeNonAdmins();
   }
 
   const after = maintenanceState(settings);
@@ -130,6 +134,7 @@ export const updateMaintenance = asyncHandler(async (req, res) => {
       before: { enabled: before.enabled, until: before.until },
       after: { enabled: after.enabled, until: after.until, message: after.message },
       sessionsEnded,
+      streamsClosed,
       revocationFailed,
     },
   });

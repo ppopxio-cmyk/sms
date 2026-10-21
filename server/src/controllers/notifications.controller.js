@@ -89,7 +89,12 @@ export const clearAll = asyncHandler(async (req, res) => {
 // short one-purpose ticket instead of the access token. It is bound to the person and
 // to the session that asked for it, and it stops working after a minute.
 export const streamTicket = asyncHandler(async (req, res) => {
-  res.json({ ticket: signTicket(req.user.id, 'notifications-stream', '60s', { sid: req.user.sid }) });
+  res.json({
+    ticket: signTicket(req.user.id, 'notifications-stream', '60s', {
+      sid: req.user.sid,
+      role: req.user.role,
+    }),
+  });
 });
 
 export const stream = asyncHandler(async (req, res) => {
@@ -104,7 +109,7 @@ export const stream = asyncHandler(async (req, res) => {
   });
   res.flushHeaders?.();
 
-  const key = live.addClient(payload.sub, res, payload.sid);
+  const key = live.addClient(payload.sub, res, payload.sid, payload.role);
   res.write(': connected\n\n');
 
   const close = () => live.removeClient(key);

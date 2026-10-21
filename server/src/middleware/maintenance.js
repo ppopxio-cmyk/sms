@@ -1,5 +1,5 @@
 import { getMaintenanceState } from '../services/settings.service.js';
-import { verifyAccess } from '../services/token.service.js';
+import { readTicket, verifyAccess } from '../services/token.service.js';
 import { isSessionActive, revokeSession } from '../services/session.service.js';
 
 // Only the doors needed to sign in, finish an invitation, recover a password or clear a
@@ -39,6 +39,20 @@ async function isAdminRecovery(payload, state) {
   return isSessionActive(payload.sid, payload.sub);
 }
 
+// EventSource cannot send an Authorization header. Its 60-second ticket names the
+// session and the role instead, so an administrator can keep the live notice stream
+// open while everybody else is stopped at the edge.
+async function isAdminStream(path, req, state) {
+  if (path !== '/api/notifications/stream' || !state.allowAdminRecovery) return false;
+  try {
+    const payload = readTicket(String(req.query.ticket || ''), 'notifications-stream');
+    if (payload.role !== 'ADMIN') return false;
+    return isSessionActive(payload.sid, payload.sub);
+  } catch {
+    return false;
+  }
+}
+
 export async function maintenanceGuard(req, res, next) {
   const path = String(req.originalUrl || req.url || '').split('?')[0];
 
@@ -49,6 +63,7 @@ export async function maintenanceGuard(req, res, next) {
 
   const payload = readAccess(req);
   if (await isAdminRecovery(payload, state)) return next();
+  if (await isAdminStream(path, req, state)) return next();
 
   if (payload?.sid && payload.role !== 'ADMIN') {
     await revokeSession(payload.sid, { reason: 'maintenance_mode' }).catch(() => {});

@@ -139,6 +139,7 @@ function RangePicker({ days, onChange }) {
         <button
           key={value}
           type="button"
+          aria-pressed={days === value}
           onClick={() => onChange(value)}
           className={`focus-ring rounded-xl px-3 py-1.5 text-[11px] font-semibold transition ${
             days === value ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
@@ -280,8 +281,8 @@ function RoleBars({ roles = [] }) {
               <div className="h-3 overflow-hidden rounded-full bg-slate-100" style={{ width: `${width}%` }}>
                 <div className="flex h-full w-full">
                   <span
-                    className="h-full"
-                    style={{ width: `${(role.active / role.total) * 100}%`, backgroundColor: ROLE_COLORS[role.role] }}
+                    className="h-full bg-emerald-500"
+                    style={{ width: `${(role.active / role.total) * 100}%` }}
                   />
                   <span
                     className="h-full bg-amber-300"
@@ -514,7 +515,7 @@ export default function AdminAnalytics() {
             maskImage: 'radial-gradient(ellipse at 28% 12%, black 10%, transparent 72%)',
           }}
         />
-        <div aria-hidden="true" className="pointer-events-none absolute -right-20 -top-24 h-80 w-80 rounded-full bg-cyan-400/15 blur-[90px]" />
+        <div aria-hidden="true" className="pointer-events-none absolute -right-20 -top-24 h-80 w-80 rounded-full bg-teal-400/15 blur-[90px]" />
 
         <div className="relative grid gap-8 p-6 sm:p-8 lg:grid-cols-[1.35fr_.65fr] lg:p-10">
           <div className="min-w-0">
