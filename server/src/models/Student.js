@@ -1,8 +1,10 @@
 import mongoose from 'mongoose';
+import { normalizePhone, isValidEthiopianPhone } from '../utils/phone.js';
 
 export const STUDENT_SEXES = ['female', 'male', 'other', 'unspecified'];
 export const STUDENT_STATUSES = ['active', 'suspended', 'graduated', 'withdrawn', 'archived'];
 export const ENROLLMENT_STATUSES = ['pending', 'active', 'completed', 'withdrawn', 'cancelled'];
+export const STUDENT_CATEGORIES = ['regular', 'extension'];
 
 const photoSchema = new mongoose.Schema(
   {
@@ -37,7 +39,28 @@ const studentSchema = new mongoose.Schema(
     sex: { type: String, enum: STUDENT_SEXES, default: 'unspecified' },
     dateOfBirth: { type: Date, default: null },
     email: { type: String, default: '', trim: true, lowercase: true, maxlength: 254 },
-    phone: { type: String, default: '', trim: true, maxlength: 40 },
+    // Required and normalised to +251 9XX XXX XXX on the way in. A registrar cannot
+    // admit a student without a working Ethiopian mobile number.
+    phone: {
+      type: String,
+      required: [true, 'Phone number is required.'],
+      trim: true,
+      set: (value) => normalizePhone(value),
+      validate: {
+        validator: (value) => isValidEthiopianPhone(value),
+        message: '{VALUE} is not a valid Ethiopian mobile number.',
+      },
+      maxlength: 20,
+    },
+    // Regular students follow the standard programme timeline. Extension students
+    // attend part-time or repeat a level, which is why the category is stored rather
+    // than inferred from a batch flag.
+    studentCategory: {
+      type: String,
+      enum: STUDENT_CATEGORIES,
+      default: 'regular',
+      index: true,
+    },
     address: {
       region: { type: String, default: '', trim: true, maxlength: 80 },
       city: { type: String, default: '', trim: true, maxlength: 80 },

@@ -132,6 +132,32 @@ export async function fileErrorMessage(error, fallback) {
 export const studentName = (student) =>
   student?.fullName || student?.name || student?.studentId || 'Student';
 
+// Ethiopian mobile numbers are stored abroad as +251 9XX XXX XXX. The registrar
+// requires one before a student is admitted, so the field is normalised on the way in
+// and shown in that form everywhere.
+export function normalizePhoneInput(value) {
+  if (value == null) return '';
+  const text = String(value).trim();
+  if (!text) return '';
+  if (text.startsWith('+251')) return text;
+  let digits = text.replace(/\D/g, '');
+  if (digits.startsWith('0')) digits = digits.slice(1);
+  if (digits.length === 9) return `+251${digits}`;
+  if (digits.length === 12 && digits.startsWith('251')) return `+${digits}`;
+  return text;
+}
+
+export function isValidEthiopianPhone(value) {
+  const normalized = normalizePhoneInput(value);
+  return /^\+251\d{9}$/.test(normalized);
+}
+
+export function phoneError(value) {
+  if (value == null || String(value).trim() === '') return 'Phone number is required.';
+  if (!isValidEthiopianPhone(value)) return 'Enter a valid Ethiopian mobile number, e.g. +251 912 345 678.';
+  return '';
+}
+
 export const studentOptionLabel = (student) =>
   [student?.fullName, student?.studentId].filter(Boolean).join(' · ');
 

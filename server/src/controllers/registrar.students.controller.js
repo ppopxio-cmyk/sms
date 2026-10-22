@@ -30,6 +30,7 @@ function photoView(photo) {
 export const studentView = (student) => ({
   ...student,
   id: String(student._id),
+  studentCategory: student.studentCategory || 'regular',
   photo: photoView(student.photo),
   program: student.program
     ? { id: String(student.program._id), code: student.program.code, name: student.program.name, qualificationType: student.program.qualificationType }
@@ -212,7 +213,7 @@ export const updateStudent = asyncHandler(async (req, res) => {
   }
   const fields = [
     'firstName', 'middleName', 'lastName', 'sex', 'dateOfBirth', 'email', 'phone', 'address',
-    'level', 'enrollmentStatus', 'studentStatus', 'admissionDate', 'completionDate', 'notes',
+    'level', 'enrollmentStatus', 'studentStatus', 'studentCategory', 'admissionDate', 'completionDate', 'notes',
   ];
   for (const field of fields) if (input[field] !== undefined) student[field] = input[field];
   student.program = program._id;
@@ -237,7 +238,11 @@ export const uploadStudentPhoto = asyncHandler(async (req, res) => {
   if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student record was not found.');
   const info = validateImage(req.body);
   const extension = info.extension;
-  const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${extension}`;
+  // The file name carries the student number and the year it was taken so a profile
+  // folder can be audited without opening the images: STU-YYYY-NNN.ext.
+  const year = new Date().getFullYear();
+  const sequence = String(Date.now() % 1000).padStart(3, '0');
+  const fileName = `STU-${year}-${sequence}.${extension}`;
   const uploaded = await uploadImage(req.body, {
     fileName,
     folder: `/students/${student._id}/profile`,

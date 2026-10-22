@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { normalizePhone, isValidEthiopianPhone } from '../utils/phone.js';
 
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Choose a valid record.');
 const text = (max = 200) => z.string().trim().max(max);
@@ -7,6 +8,25 @@ const date = z.coerce.date();
 
 export const idParamSchema = z.object({ id: objectId });
 export const studentIdParamSchema = z.object({ studentId: objectId });
+
+// Ethiopian mobile numbers are stored in the international form (+251 9XX XXX XXX).
+// The normaliser runs before validation so the error message can speak to the value
+// the registrar actually typed.
+const ethiopianPhone = z
+  .string()
+  .trim()
+  .min(1, 'Phone number is required.')
+  .superRefine((value, ctx) => {
+    const normalized = normalizePhone(value);
+    if (!normalized || !isValidEthiopianPhone(normalized)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Enter a valid Ethiopian mobile number, e.g. +251 912 345 678.',
+      });
+    }
+    return normalized;
+  })
+  .transform((value) => normalizePhone(value));
 
 export const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).max(100000).optional().default(1),
@@ -33,7 +53,7 @@ export const createStudentSchema = z.object({
   sex: z.enum(['female', 'male', 'other', 'unspecified']).optional().default('unspecified'),
   dateOfBirth: date.nullish(),
   email: z.union([z.literal(''), z.email()]).optional().default(''),
-  phone: optionalText(40),
+  phone: ethiopianPhone,
   address: z
     .object({
       region: optionalText(80),
@@ -50,6 +70,7 @@ export const createStudentSchema = z.object({
   level: z.coerce.number().int().min(1).max(20).optional().default(1),
   enrollmentStatus: z.enum(['pending', 'active', 'completed', 'withdrawn', 'cancelled']).optional().default('pending'),
   studentStatus: z.enum(['active', 'suspended', 'graduated', 'withdrawn', 'archived']).optional().default('active'),
+  studentCategory: z.enum(['regular', 'extension']).optional().default('regular'),
   admissionDate: date.nullish(),
   notes: optionalText(2000),
 });
