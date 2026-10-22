@@ -37,7 +37,10 @@ let templateCache;
 function templateBackground() {
   if (templateCache !== undefined) return templateCache;
   try {
-    templateCache = fs.readFileSync(TEMPLATE_PATH);
+    fs.accessSync(TEMPLATE_PATH, fs.constants.R_OK);
+    // Return the path, not the bytes: PDFKit caches images by path, so the
+    // same background is embedded once even when it is clipped into patches.
+    templateCache = TEMPLATE_PATH;
   } catch {
     templateCache = null;
   }
@@ -76,10 +79,16 @@ function paperPatch(doc, background, x, y, width, height) {
   doc.restore();
 }
 
-function drawFittedText(doc, value, { x, y, width, color, bold = false, maxSize = 12, minSize = 7, align = 'left', characterSpacing = 0 } = {}) {
+function drawFittedText(doc, value, { x, y, width, color, bold = false, sans = false, maxSize = 12, minSize = 7, align = 'left', characterSpacing = 0 } = {}) {
   const text = String(value ?? '').trim();
   if (!text) return;
-  const font = fontNameFor(text, { bold });
+  const font = isEthiopic(text)
+    ? fontNameFor(text, { bold })
+    : sans
+      ? bold
+        ? 'Helvetica-Bold'
+        : 'Helvetica'
+      : fontNameFor(text, { bold });
   const box = tplSize(width);
   let size = maxSize;
   while (size > minSize) {
@@ -103,7 +112,7 @@ function drawTemplatePhoto(doc, buffer, x, y, size) {
   const dy = tplY(y);
   const extent = tplSize(size);
   doc.save();
-  doc.rect(dx, dy, extent, extent).fill('#fffdf7');
+  doc.rect(dx, dy, extent, extent).fill('#fdfcf1');
   doc.lineWidth(1).strokeColor('#b08d57').rect(dx - 1, dy - 1, extent + 2, extent + 2).stroke();
   if (buffer) {
     try {
@@ -268,13 +277,23 @@ function certificateDate(value) {
 function qualificationLabel(value) {
   const text = String(value || '').trim();
   if (!text) return '—';
-  return text.charAt(0).toUpperCase() + text.slice(1).replaceAll('-', ' ');
+  const minor = new Set(['of', 'and', 'in', 'the']);
+  return text
+    .replaceAll('-', ' ')
+    .split(/\s+/)
+    .map((word, index) =>
+      index > 0 && minor.has(word.toLowerCase())
+        ? word.toLowerCase()
+        : word.charAt(0).toUpperCase() + word.slice(1),
+    )
+    .join(' ');
 }
 
-function graduationYear(value) {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '—' : String(date.getFullYear());
+function graduationYear(value, fallback) {
+  const date = value ? new Date(value) : null;
+  if (date && !Number.isNaN(date.getTime())) return String(date.getFullYear());
+  const match = String(fallback || '').match(/\d{4}/);
+  return match ? match[0] : '—';
 }
 
 function drawTemplateCertificatePage(doc, { certificate, template, photoBuffer, sealBuffer, signatureBuffer, preview, background }) {
@@ -292,34 +311,34 @@ function drawTemplateCertificatePage(doc, { certificate, template, photoBuffer, 
 
   // The template already contains the ornate frame and the static ceremony
   // wording. Replace only the sample-specific lines with the official record.
-  paperPatch(doc, background, 245, 138, 710, 70);
-  drawFittedText(doc, template.institutionName || 'Institution', {
+  paperPatch(doc, background, 245, 150, 710, 50);
+  drawFittedText(doc, String(template.institutionName || 'Institution').toUpperCase(), {
     x: 245,
-    y: 144,
+    y: 152,
     width: 710,
     color: '#0f2747',
     bold: true,
-    maxSize: 24,
+    maxSize: 30,
     minSize: 12,
     align: 'center',
   });
 
-  paperPatch(doc, background, 255, 242, 690, 60);
-  drawFittedText(doc, template.certificateTitle || 'Certificate of Graduation', {
+  paperPatch(doc, background, 255, 242, 690, 54);
+  drawFittedText(doc, String(template.certificateTitle || 'Certificate of Graduation').toUpperCase(), {
     x: 255,
-    y: 250,
+    y: 254,
     width: 690,
     color: '#0f2747',
     bold: true,
-    maxSize: 26,
+    maxSize: 22,
     minSize: 14,
     align: 'center',
   });
 
-  paperPatch(doc, background, 370, 334, 460, 60);
+  paperPatch(doc, background, 370, 336, 460, 48);
   drawFittedText(doc, String(snapshot.fullName || 'Student name').toUpperCase(), {
     x: 370,
-    y: 340,
+    y: 342,
     width: 460,
     color: '#b08d57',
     bold: true,
@@ -329,16 +348,16 @@ function drawTemplateCertificatePage(doc, { certificate, template, photoBuffer, 
     characterSpacing: 1.1,
   });
 
-  paperPatch(doc, background, 326, 458, 156, 168);
+  paperPatch(doc, background, 300, 458, 182, 168);
   drawTemplatePhoto(doc, photoBuffer, 340, 472, 132);
 
   paperPatch(doc, background, 650, 470, 310, 140);
   const detailRows = [
-    [snapshot.studentId || '—', 474],
-    [certificate.departmentSnapshot?.name || '—', 502],
-    [program.name || '—', 530],
-    [qualificationLabel(program.qualificationType), 558],
-    [graduationYear(certificate.completionDate), 586],
+    [snapshot.studentId || '—', 477],
+    [certificate.departmentSnapshot?.name || '—', 505],
+    [program.name || '—', 533],
+    [qualificationLabel(program.qualificationType), 561],
+    [graduationYear(certificate.completionDate, certificate.academicYearLabel), 589],
   ];
   for (const [value, y] of detailRows) {
     drawFittedText(doc, value, {
@@ -346,18 +365,19 @@ function drawTemplateCertificatePage(doc, { certificate, template, photoBuffer, 
       y,
       width: 300,
       color: '#1b2a23',
+      sans: true,
       maxSize: 11,
       minSize: 8,
       align: 'left',
     });
   }
 
-  paperPatch(doc, background, 435, 640, 335, 38);
+  paperPatch(doc, background, 442, 642, 320, 34);
   const cgpa = certificate.cgpa === null || certificate.cgpa === undefined ? '—' : Number(certificate.cgpa).toFixed(2);
   drawFittedText(doc, `CUMULATIVE GPA ${cgpa} / 4.00`, {
-    x: 435,
-    y: 644,
-    width: 335,
+    x: 442,
+    y: 646,
+    width: 320,
     color: '#0f2747',
     bold: true,
     maxSize: 18,
@@ -365,43 +385,44 @@ function drawTemplateCertificatePage(doc, { certificate, template, photoBuffer, 
     align: 'center',
   });
 
-  paperPatch(doc, background, 225, 685, 140, 125);
+  paperPatch(doc, background, 212, 678, 176, 142);
   if (sealBuffer) {
     try {
-      doc.image(sealBuffer, tplX(240), tplY(695), {
+      doc.image(sealBuffer, tplX(228), tplY(695), {
         fit: [tplSize(140), tplSize(140)],
         align: 'center',
         valign: 'center',
       });
     } catch {
-      // The configuration check already guarantees a readable seal; a render
-      // failure here should not hide the rest of the certificate.
+      throw new AppError(409, 'CERTIFICATE_SEAL_INVALID', 'The configured official seal could not be read.');
     }
   }
 
   paperPatch(doc, background, 480, 695, 220, 82);
   if (signatureBuffer) {
     try {
-      doc.image(signatureBuffer, tplX(500), tplY(700), {
+      doc.image(signatureBuffer, tplX(515), tplY(700), {
         fit: [tplSize(170), tplSize(60)],
         align: 'center',
         valign: 'center',
       });
     } catch {
-      // Same reasoning as the seal above.
+      throw new AppError(409, 'CERTIFICATE_SIGNATURE_INVALID', 'The configured signature could not be read.');
     }
   }
   doc
-    .moveTo(tplX(500), tplY(752))
-    .lineTo(tplX(675), tplY(752))
+    .moveTo(tplX(520), tplY(752))
+    .lineTo(tplX(680), tplY(752))
     .lineWidth(0.6)
     .strokeColor('#8c9a92')
     .stroke();
   drawFittedText(doc, 'AUTHORIZED SIGNATURE', {
-    x: 500,
+    x: 520,
     y: 758,
-    width: 175,
+    width: 160,
     color: '#52645c',
+    bold: true,
+    sans: true,
     maxSize: 8,
     minSize: 6,
     align: 'center',
@@ -414,7 +435,7 @@ function drawTemplateCertificatePage(doc, { certificate, template, photoBuffer, 
     width: 200,
     color: '#0f2747',
     bold: true,
-    maxSize: 9,
+    maxSize: 11,
     minSize: 7,
     align: 'center',
   });
@@ -423,21 +444,26 @@ function drawTemplateCertificatePage(doc, { certificate, template, photoBuffer, 
     y: 770,
     width: 200,
     color: '#52645c',
-    maxSize: 8,
+    maxSize: 10,
     minSize: 6,
     align: 'center',
   });
 
-  paperPatch(doc, background, 1012, 680, 106, 130);
+  paperPatch(doc, background, 1010, 668, 108, 132);
   const verification = template.verificationBaseUrl
     ? `${template.verificationBaseUrl.replace(/\/+$/, '')}/${certificate.verificationId}`
     : certificate.verificationId;
-  doc.font('Helvetica-Bold').fontSize(6).fillColor('#0f2747').text('VERIFY', tplX(1012), tplY(690), {
-    width: tplSize(106),
+  doc
+    .rect(tplX(1012), tplY(676), tplSize(104), tplSize(120))
+    .lineWidth(0.8)
+    .strokeColor('#b08d57')
+    .stroke();
+  doc.font('Helvetica-Bold').fontSize(7).fillColor('#0f2747').text('VERIFY', tplX(1012), tplY(688), {
+    width: tplSize(104),
     align: 'center',
   });
   doc.font('Helvetica').fontSize(5.5).fillColor('#52645c').text(verification || '', tplX(1012), tplY(704), {
-    width: tplSize(106),
+    width: tplSize(104),
     align: 'center',
   });
 
@@ -447,6 +473,7 @@ function drawTemplateCertificatePage(doc, { certificate, template, photoBuffer, 
     y: 808,
     width: 150,
     color: '#0f2747',
+    sans: true,
     maxSize: 9,
     minSize: 7,
     align: 'center',

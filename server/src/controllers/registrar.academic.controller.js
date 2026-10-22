@@ -495,7 +495,9 @@ export const getPlan = asyncHandler(async (req, res) => {
       course: row.course
         ? { id: String(row.course._id), code: row.course.code, title: row.course.title, creditHours: row.course.creditHours }
         : null,
-      prerequisites: (row.prerequisites || []).map((course) => ({ id: String(course._id), code: course.code, title: course.title })),
+      prerequisites: (row.prerequisites || [])
+        .filter((course) => course && course._id)
+        .map((course) => ({ id: String(course._id), code: course.code, title: course.title })),
       _id: undefined,
     })),
   });

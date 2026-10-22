@@ -169,6 +169,173 @@ async function missingResults(query) {
     .filter((row) => row.missing > 0);
 }
 
+const REVIEWABLE_RESULT_STATUSES = ['submitted', 'under_review', 'approved'];
+
+function resultsForOffering(offeringId, statuses) {
+  return Result.find(ownFilter({ offering: offeringId, status: { $in: statuses } }));
+}
+
+async function offeringSummary(offeringId) {
+  const offering = await CourseOffering.findById(offeringId).populate('course', 'code title').lean();
+  return offering
+    ? { id: String(offering._id), course: offering.course ? { id: String(offering.course._id), code: offering.course.code, title: offering.course.title } : null }
+    : { id: String(offeringId), course: null };
+}
+
+export const listResultSubmissions = asyncHandler(async (req, res) => {
+  const query = req.valid.query;
+  const offeringFilter = mergeFilters(
+    query.academicYear ? { academicYear: query.academicYear } : null,
+    query.term ? { term: query.term } : null,
+  );
+  const offeringIds = (await CourseOffering.find(offeringFilter).select('_id').limit(5000).lean()).map((row) => row._id);
+  if (!offeringIds.length) return res.json({ rows: [] });
+  const groups = await Result.aggregate([
+    { $match: { offering: { $in: offeringIds }, status: { $in: REVIEWABLE_RESULT_STATUSES } } },
+    {
+      $group: {
+        _id: '$offering',
+        total: { $sum: 1 },
+        submitted: { $sum: { $cond: [{ $eq: ['$status', 'submitted'] }, 1, 0] } },
+        underReview: { $sum: { $cond: [{ $eq: ['$status', 'under_review'] }, 1, 0] } },
+        approved: { $sum: { $cond: [{ $eq: ['$status', 'approved'] }, 1, 0] } },
+        latestSubmittedAt: { $max: '$submittedAt' },
+        latestUpdatedAt: { $max: '$updatedAt' },
+      },
+    },
+    { $sort: { latestSubmittedAt: -1, latestUpdatedAt: -1 } },
+    { $limit: 200 },
+  ]);
+  const offerings = await CourseOffering.find(ownFilter({ _id: { $in: groups.map((row) => row._id) } }))
+    .populate('course', 'code title')
+    .populate('teacher', 'name email')
+    .populate('academicYear', 'label')
+    .lean();
+  const byId = new Map(offerings.map((row) => [String(row._id), row]));
+  res.json({
+    rows: groups.map((group) => {
+      const offering = byId.get(String(group._id));
+      const pending = group.submitted + group.underReview;
+      return {
+        id: String(group._id),
+        course: offering?.course ? { id: String(offering.course._id), code: offering.course.code, title: offering.course.title } : null,
+        teacher: offering?.teacher ? { id: String(offering.teacher._id), name: offering.teacher.name, email: offering.teacher.email } : null,
+        term: offering?.term ?? '',
+        level: offering?.level ?? null,
+        academicYear: offering?.academicYear?.label ?? '',
+        counts: {
+          total: group.total,
+          submitted: group.submitted,
+          underReview: group.underReview,
+          approved: group.approved,
+          pending,
+        },
+        status: pending ? (group.underReview ? 'under_review' : 'submitted') : 'approved',
+        latestSubmittedAt: group.latestSubmittedAt,
+        latestUpdatedAt: group.latestUpdatedAt,
+      };
+    }),
+  });
+});
+
+export const approveResultSubmission = asyncHandler(async (req, res) => {
+  const offeringId = req.valid.params.offering;
+  const results = await resultsForOffering(offeringId, ['submitted', 'under_review']);
+  if (!results.length) throw new AppError(409, 'RESULT_STATE', 'There are no submitted results for this offering.');
+  const missingMarks = results.filter((row) => row.totalMark === null || row.totalMark === undefined).length;
+  if (missingMarks) {
+    throw new AppError(400, 'MARK_MISSING', `Enter a total mark for every student before approving. ${missingMarks} result(s) have no mark.`);
+  }
+  const policy = await requireGradingPolicy();
+  const now = new Date();
+  const operations = results.map((result) => {
+    const band = gradeFor(policy, result.totalMark);
+    return {
+      updateOne: {
+        filter: ownFilter({ _id: result._id, status: { $in: ['submitted', 'under_review'] } }),
+        update: {
+          $set: {
+            letterGrade: band.letter,
+            gradePoint: band.points,
+            passed: band.pass,
+            gradingPolicyVersion: policy.version,
+            status: 'approved',
+            reviewedBy: req.user.id,
+            reviewedAt: now,
+          },
+        },
+      },
+    };
+  });
+  const outcome = await Result.bulkWrite(operations, { ordered: true });
+  const offering = await offeringSummary(offeringId);
+  audit({ req, action: 'registrar.result.approve.batch', targetType: 'CourseOffering', targetId: offeringId, meta: { course: offering.course?.code, count: outcome.modifiedCount } });
+  res.json({ updated: outcome.modifiedCount, offering });
+});
+
+export const declineResultSubmission = asyncHandler(async (req, res) => {
+  const offeringId = req.valid.params.offering;
+  const results = await resultsForOffering(offeringId, REVIEWABLE_RESULT_STATUSES);
+  if (!results.length) throw new AppError(409, 'RESULT_STATE', 'There are no results awaiting review for this offering.');
+  const now = new Date();
+  const operations = results.map((result) => ({
+    updateOne: {
+      filter: ownFilter({ _id: result._id, status: { $in: REVIEWABLE_RESULT_STATUSES } }),
+      update: {
+        $set: { status: 'rejected', reviewedBy: req.user.id, reviewedAt: now },
+        $push: {
+          revisionHistory: {
+            at: now,
+            by: req.user.id,
+            reason: req.body.reason,
+            from: { status: result.status },
+            to: { status: 'rejected' },
+          },
+        },
+      },
+    },
+  }));
+  const outcome = await Result.bulkWrite(operations, { ordered: true });
+  const offering = await offeringSummary(offeringId);
+  audit({ req, action: 'registrar.result.decline.batch', targetType: 'CourseOffering', targetId: offeringId, meta: { course: offering.course?.code, count: outcome.modifiedCount } });
+  res.json({ updated: outcome.modifiedCount, offering });
+});
+
+export const publishResultSubmission = asyncHandler(async (req, res) => {
+  const offeringId = req.valid.params.offering;
+  const results = await resultsForOffering(offeringId, ['approved']);
+  if (!results.length) throw new AppError(409, 'RESULT_STATE', 'There are no approved results for this offering.');
+  const missingMarks = results.filter((row) => row.totalMark === null || row.totalMark === undefined).length;
+  if (missingMarks) {
+    throw new AppError(400, 'MARK_MISSING', `Enter a total mark for every student before publishing. ${missingMarks} result(s) have no mark.`);
+  }
+  const policy = await requireGradingPolicy();
+  const now = new Date();
+  const operations = results.map((result) => {
+    const band = gradeFor(policy, result.totalMark);
+    return {
+      updateOne: {
+        filter: { _id: result._id, status: 'approved' },
+        update: {
+          $set: {
+            letterGrade: band.letter,
+            gradePoint: band.points,
+            passed: band.pass,
+            gradingPolicyVersion: policy.version,
+            status: 'published',
+            publishedAt: now,
+            publishedBy: req.user.id,
+          },
+        },
+      },
+    };
+  });
+  const outcome = await Result.bulkWrite(operations, { ordered: true });
+  const offering = await offeringSummary(offeringId);
+  audit({ req, action: 'registrar.result.publish.batch', targetType: 'CourseOffering', targetId: offeringId, meta: { course: offering.course?.code, count: outcome.modifiedCount } });
+  res.json({ updated: outcome.modifiedCount, offering });
+});
+
 export const getResult = asyncHandler(async (req, res) => {
   const row = await Result.findById(req.valid.params.id)
     .populate('student', 'studentId fullName level program')

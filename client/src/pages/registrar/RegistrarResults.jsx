@@ -37,6 +37,9 @@ export default function RegistrarResults() {
   const [rejecting, setRejecting] = useState(null);
   const [correcting, setCorrecting] = useState(null);
   const [publishing, setPublishing] = useState(null);
+  const [acceptingSubmission, setAcceptingSubmission] = useState(null);
+  const [decliningSubmission, setDecliningSubmission] = useState(null);
+  const [publishingSubmission, setPublishingSubmission] = useState(null);
 
   const options = useQuery({
     queryKey: ['registrar', 'students', 'options'],
@@ -66,6 +69,17 @@ export default function RegistrarResults() {
     placeholderData: (previous) => previous,
   });
 
+  const submissionParams = useMemo(() => ({
+    ...(academicYear ? { academicYear } : {}),
+    ...(term ? { term } : {}),
+  }), [academicYear, term]);
+
+  const submissions = useQuery({
+    queryKey: ['registrar', 'result-submissions', submissionParams],
+    queryFn: async () => (await api.get(`${REGISTRAR}/results/submissions`, { params: submissionParams })).data,
+  });
+
+  const submissionRows = submissions.data?.rows ?? [];
   const rows = query.data?.rows ?? [];
   const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0, limit };
   const counts = query.data?.counts ?? {};
@@ -74,6 +88,7 @@ export default function RegistrarResults() {
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['registrar', 'results'] });
+    queryClient.invalidateQueries({ queryKey: ['registrar', 'result-submissions'] });
     queryClient.invalidateQueries({ queryKey: ['registrar', 'dashboard'] });
   };
 
@@ -117,6 +132,36 @@ export default function RegistrarResults() {
       invalidate();
     },
     onError: (err) => toast.error(errorMessage(err, 'The correction could not be recorded.')),
+  });
+
+  const approveSubmission = useMutation({
+    mutationFn: async (row) => (await api.post(`${REGISTRAR}/results/submissions/${row.id}/approve`)).data,
+    onSuccess: (data) => {
+      toast.success(`${data.updated} result${data.updated === 1 ? '' : 's'} approved.`);
+      setAcceptingSubmission(null);
+      invalidate();
+    },
+    onError: (err) => toast.error(errorMessage(err, 'The course submission could not be approved.')),
+  });
+
+  const declineSubmission = useMutation({
+    mutationFn: async ({ row, reason }) => (await api.post(`${REGISTRAR}/results/submissions/${row.id}/decline`, { reason })).data,
+    onSuccess: (data) => {
+      toast.success(`${data.updated} result${data.updated === 1 ? '' : 's'} returned for correction.`);
+      setDecliningSubmission(null);
+      invalidate();
+    },
+    onError: (err) => toast.error(errorMessage(err, 'The course submission could not be declined.')),
+  });
+
+  const publishSubmission = useMutation({
+    mutationFn: async (row) => (await api.post(`${REGISTRAR}/results/submissions/${row.id}/publish`)).data,
+    onSuccess: (data) => {
+      toast.success(`${data.updated} result${data.updated === 1 ? '' : 's'} published.`);
+      setPublishingSubmission(null);
+      invalidate();
+    },
+    onError: (err) => toast.error(errorMessage(err, 'The course results could not be published.')),
   });
 
   const columns = [
@@ -236,6 +281,56 @@ export default function RegistrarResults() {
         </div>
       </Card>
 
+      {submissions.isLoading || submissions.error || submissionRows.length ? (
+        <Card>
+          <CardHeader
+            title="Submission queue"
+            subtitle="Whole course sheets submitted by teachers, filtered by academic year and term. Accept to grade and approve every pending result; decline to return the sheet with a reason."
+            icon={ClipboardCheck}
+          />
+          <CardBody className="space-y-2">
+            {submissions.isLoading ? (
+              <p className="py-4 text-center text-sm text-slate-500">Loading submissions…</p>
+            ) : submissions.error ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-rose-50 px-3.5 py-3 text-sm text-rose-700">
+                <span>{errorMessage(submissions.error, 'Submissions could not be loaded.')}</span>
+                <Button size="sm" variant="secondary" onClick={() => submissions.refetch()}>Retry</Button>
+              </div>
+            ) : submissionRows.map((row) => {
+              const pending = row.counts?.pending ?? 0;
+              const approved = row.counts?.approved ?? 0;
+              return (
+                <div key={row.id} className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">
+                      {row.course?.code || 'Course'} <span className="font-normal text-slate-500">· {row.course?.title || 'Unknown course'}</span>
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {row.teacher?.name || 'No teacher assigned'} · {row.academicYear || '—'} · {row.term || '—'}
+                    </p>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px]">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">{row.counts?.submitted ?? 0} submitted</span>
+                      <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-700">{row.counts?.underReview ?? 0} under review</span>
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700">{approved} approved</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {pending ? (
+                      <>
+                        <Button size="sm" variant="ghost" onClick={() => setDecliningSubmission(row)}>Decline</Button>
+                        <Button size="sm" onClick={() => setAcceptingSubmission(row)}>Accept</Button>
+                      </>
+                    ) : approved ? (
+                      <Button size="sm" variant="secondary" onClick={() => setPublishingSubmission(row)}>Publish approved</Button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </CardBody>
+        </Card>
+      ) : null}
+
       {missing.length ? (
         <Card>
           <CardHeader title="Published results missing" subtitle="Offerings with registered students who do not yet have a published result." icon={AlertTriangle} />
@@ -287,6 +382,35 @@ export default function RegistrarResults() {
         actionPending={simpleAction.isPending}
       />
 
+      <ConfirmDialog
+        open={Boolean(acceptingSubmission)}
+        title="Accept this course submission?"
+        message={acceptingSubmission ? `${acceptingSubmission.course?.code || 'Course'} · ${acceptingSubmission.course?.title || ''}. ${acceptingSubmission.counts?.pending ?? 0} pending result(s) will be graded with the current policy and approved.` : ''}
+        confirmLabel="Accept and approve"
+        loading={approveSubmission.isPending}
+        onClose={() => setAcceptingSubmission(null)}
+        onConfirm={() => approveSubmission.mutate(acceptingSubmission)}
+      />
+      <ConfirmDialog
+        open={Boolean(decliningSubmission)}
+        title="Decline this course submission?"
+        message={decliningSubmission ? `${decliningSubmission.course?.code || 'Course'} · ${decliningSubmission.course?.title || ''}. Every submitted and approved result in this offering will be returned with your reason in its revision history.` : ''}
+        confirmLabel="Decline submission"
+        tone="danger"
+        loading={declineSubmission.isPending}
+        reason={{ label: 'Reason', minLength: 5, placeholder: 'What needs to be corrected?' }}
+        onClose={() => setDecliningSubmission(null)}
+        onConfirm={(reason) => declineSubmission.mutate({ row: decliningSubmission, reason })}
+      />
+      <ConfirmDialog
+        open={Boolean(publishingSubmission)}
+        title="Publish approved results?"
+        message={publishingSubmission ? `${publishingSubmission.course?.code || 'Course'} · ${publishingSubmission.course?.title || ''}. ${publishingSubmission.counts?.approved ?? 0} approved result(s) will become part of the academic record.` : ''}
+        confirmLabel="Publish results"
+        loading={publishSubmission.isPending}
+        onClose={() => setPublishingSubmission(null)}
+        onConfirm={() => publishSubmission.mutate(publishingSubmission)}
+      />
       <ConfirmDialog
         open={Boolean(publishing)}
         title="Publish this result?"

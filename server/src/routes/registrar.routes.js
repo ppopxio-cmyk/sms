@@ -33,6 +33,8 @@ import {
   listResultsQuerySchema,
   resultDecisionSchema,
   resultCorrectionSchema,
+  offeringIdParamSchema,
+  resultSubmissionDecisionSchema,
   listAttendanceQuerySchema,
   gpaQuerySchema,
   graduationQuerySchema,
@@ -67,9 +69,10 @@ import {
   registrationEligible, createRegistrations, listRegistrations, dropRegistration,
 } from '../controllers/registrar.academic.controller.js';
 import {
-  listAttendance, attendanceSummary, listResults, getResult, reviewResult, approveResult,
-  publishResult, rejectResult, correctResult, gpaCgpa, listGraduation, evaluateGraduation,
-  graduationStudent, resultOptions,
+  listAttendance, attendanceSummary, listResults, listResultSubmissions, getResult,
+  reviewResult, approveResult, publishResult, rejectResult, correctResult,
+  approveResultSubmission, declineResultSubmission, publishResultSubmission,
+  gpaCgpa, listGraduation, evaluateGraduation, graduationStudent, resultOptions,
 } from '../controllers/registrar.records.controller.js';
 import {
   viewPolicy, updatePolicy as updateGradingPolicy, previewPolicy, policyHistory,
@@ -169,6 +172,10 @@ r.get('/attendance', requirePermission('attendance:view'), validate(listAttendan
 
 // ---- Results review ---------------------------------------------------------
 r.get('/results/options', requirePermission('results:view'), resultOptions);
+r.get('/results/submissions', requirePermission('results:view'), validate(listResultsQuerySchema, 'query'), listResultSubmissions);
+r.post('/results/submissions/:offering/approve', requirePermission('results:review'), validate(offeringIdParamSchema, 'params'), approveResultSubmission);
+r.post('/results/submissions/:offering/decline', requirePermission('results:review'), validate(offeringIdParamSchema, 'params'), validate(resultSubmissionDecisionSchema), declineResultSubmission);
+r.post('/results/submissions/:offering/publish', requirePermission('results:publish'), validate(offeringIdParamSchema, 'params'), publishResultSubmission);
 r.get('/results', requirePermission('results:view'), validate(listResultsQuerySchema, 'query'), listResults);
 r.get('/results/:id', requirePermission('results:view'), validate(idParamSchema, 'params'), getResult);
 r.post('/results/:id/review', requirePermission('results:review'), validate(idParamSchema, 'params'), reviewResult);

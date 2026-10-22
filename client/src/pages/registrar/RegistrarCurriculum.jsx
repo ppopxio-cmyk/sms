@@ -188,7 +188,7 @@ export default function RegistrarCurriculum() {
             </div>
             <div className="max-h-[640px] space-y-1 overflow-y-auto p-2">
               {plans.isLoading ? <div className="p-3"><SkeletonCard lines={4} /></div> : plans.error ? (
-                <ErrorState message="Plans could not be loaded." onRetry={plans.refetch} />
+                <ErrorState message={errorMessage(plans.error, 'Plans could not be loaded.')} onRetry={plans.refetch} />
               ) : rows.length ? rows.map((row) => (
                 <button
                   key={row.id}

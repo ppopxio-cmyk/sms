@@ -237,6 +237,12 @@ export const resultDecisionSchema = z.object({
   reason: optionalText(500),
 });
 
+export const offeringIdParamSchema = z.object({ offering: objectId });
+
+export const resultSubmissionDecisionSchema = z.object({
+  reason: text(500).min(5, 'Explain what the teacher needs to correct.'),
+});
+
 export const resultCorrectionSchema = z
   .object({
     components: z
