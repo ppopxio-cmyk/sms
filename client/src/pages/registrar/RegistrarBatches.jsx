@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Layers3, Pencil, Plus } from 'lucide-react';
+import { Eye, Layers3, Pencil, Plus } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import {
   REGISTRAR,
   cleanPayload,
-  dateInput,
   humanStatus,
   levelLabel,
   toneForStatus,
@@ -14,7 +14,7 @@ import {
 import { useDebounced } from '../../lib/useDebounced';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
 import RegistrarTable from '../../components/registrar/RegistrarTable';
-import { FormGrid, SelectField, TextAreaField } from '../../components/registrar/Fields';
+import { FormGrid, SelectField } from '../../components/registrar/Fields';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
@@ -33,8 +33,6 @@ export default function RegistrarBatches() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [formModal, setFormModal] = useState(null);
-  const [assigning, setAssigning] = useState(null);
-  const [progressing, setProgressing] = useState(null);
 
   const options = useQuery({
     queryKey: ['registrar', 'students', 'options'],
@@ -74,6 +72,7 @@ export default function RegistrarBatches() {
         </div>
       ),
     },
+    { key: 'department', label: 'Department', render: (row) => row.department ? `${row.department.code} · ${row.department.name}` : '—' },
     { key: 'program', label: 'Programme', render: (row) => row.program ? `${row.program.code} · ${row.program.name}` : '—' },
     { key: 'category', label: 'Stream', render: (row) => <Badge tone={row.category === 'extension' ? 'warning' : 'neutral'}>{humanStatus(row.category || 'regular')}</Badge> },
     {
@@ -95,8 +94,9 @@ export default function RegistrarBatches() {
       mobileFull: true,
       render: (row) => (
         <div className="flex flex-wrap justify-end gap-1.5">
-          <Button size="sm" variant="secondary" onClick={() => setAssigning(row)}>Assign</Button>
-          <Button size="sm" variant="secondary" onClick={() => setProgressing(row)}>Progress</Button>
+          <Link to={`/registrar/batches/${row.id}`} className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-brand-700 hover:bg-brand-50">
+            <Eye className="h-3.5 w-3.5" /> View
+          </Link>
           <Button size="sm" variant="ghost" onClick={() => setFormModal({ record: row })} aria-label={`Edit ${row.code}`}>
             <Pencil className="h-3.5 w-3.5" />
           </Button>
@@ -109,7 +109,7 @@ export default function RegistrarBatches() {
     <div className="space-y-6">
       <RegistrarPageHeader
         title="Batches"
-        subtitle="A batch groups students who entered a programme together. Assignment and progression are recorded in the student's history."
+        subtitle="Create an intake for one or more programmes, then open it for the student register and Word or PDF export."
         actions={<Button onClick={() => setFormModal({ record: null })} className="gap-2"><Plus className="h-4 w-4" /> New batch</Button>}
       />
 
@@ -169,8 +169,6 @@ export default function RegistrarBatches() {
         onClose={() => setFormModal(null)}
         onSaved={() => query.refetch()}
       />
-      <AssignModal batch={assigning} onClose={() => setAssigning(null)} onSaved={() => query.refetch()} />
-      <ProgressModal batch={progressing} onClose={() => setProgressing(null)} onSaved={() => query.refetch()} />
     </div>
   );
 }
@@ -182,27 +180,40 @@ function BatchFormModal({ open, record, options, onClose, onSaved }) {
   useEffect(() => {
     if (!open) return;
     setError('');
+    const currentYear = (options?.academicYears || []).find((year) => year.isCurrent);
     setForm({
       code: record?.code || '',
       name: record?.name || '',
+      department: record?.department?.id || '',
       program: record?.program?.id || '',
+      programs: record?.program?.id ? [record.program.id] : [],
       category: record?.category || 'regular',
-      admissionAcademicYear: record?.admissionAcademicYear?.id || '',
-      expectedCompletionYear: record?.expectedCompletionYear || '',
+      admissionAcademicYear: record?.admissionAcademicYear?.id || currentYear?.id || '',
+      durationYears: record?.durationYears || '',
       currentLevel: record?.currentLevel || 1,
       status: record?.status || 'planned',
     });
-  }, [open, record]);
+  }, [open, record, options]);
 
   const save = useMutation({
     mutationFn: async () => {
-      if (!form.code.trim() || !form.name.trim() || !form.program || !form.admissionAcademicYear) {
-        throw new Error('Code, name, programme and admission year are required.');
+      if (!form.code?.trim() || !form.name?.trim() || !form.department || !form.admissionAcademicYear) {
+        throw new Error('Code, name, department and admission year are required.');
+      }
+      if (record ? !form.program : !form.programs?.length) {
+        throw new Error('Choose at least one programme.');
       }
       const payload = cleanPayload({
-        ...form,
+        code: form.code.trim(),
+        name: form.name.trim(),
+        category: form.category,
+        admissionAcademicYear: form.admissionAcademicYear,
+        durationYears: form.durationYears ? Number(form.durationYears) : undefined,
         currentLevel: Number(form.currentLevel) || 1,
-        expectedCompletionYear: form.expectedCompletionYear ? Number(form.expectedCompletionYear) : undefined,
+        status: form.status,
+        ...(record
+          ? { program: form.program }
+          : { department: form.department, programs: form.programs }),
       });
       return (
         await api.request({
@@ -212,8 +223,9 @@ function BatchFormModal({ open, record, options, onClose, onSaved }) {
         })
       ).data;
     },
-    onSuccess: () => {
-      toast.success(record ? 'Batch updated.' : 'Batch created.');
+    onSuccess: (data) => {
+      const count = data.batches?.length;
+      toast.success(record ? 'Batch updated.' : count > 1 ? `${count} batches created.` : 'Batch created.');
       onSaved?.();
       onClose?.();
     },
@@ -225,15 +237,56 @@ function BatchFormModal({ open, record, options, onClose, onSaved }) {
   });
 
   const set = (field, value) => setForm((current) => ({ ...current, [field]: value }));
-  const selectedProgram = (options?.programs || []).find((row) => row.id === form.program);
-  const availableCategories = selectedProgram?.categories?.length ? selectedProgram.categories : ['regular', 'extension'];
+  const programmes = (options?.programs || []).filter((row) => !form.department || row.department === form.department);
+  const chosen = (record
+    ? programmes.filter((row) => row.id === form.program)
+    : programmes.filter((row) => (form.programs || []).includes(row.id)));
+  const categories = chosen.length
+    ? chosen.reduce((allowed, row) => {
+        const next = row.categories?.length ? row.categories : ['regular', 'extension'];
+        return allowed.filter((category) => next.includes(category));
+      }, ['regular', 'extension'])
+    : ['regular', 'extension'];
+
+  const chooseDepartment = (department) => {
+    setForm((current) => ({
+      ...current,
+      department,
+      program: '',
+      programs: [],
+      category: 'regular',
+    }));
+  };
+
+  const toggleProgram = (programId) => {
+    const program = programmes.find((row) => row.id === programId);
+    setForm((current) => {
+      const programs = current.programs.includes(programId)
+        ? current.programs.filter((id) => id !== programId)
+        : [...current.programs, programId];
+      const allowed = programs.length
+        ? programmes
+            .filter((row) => programs.includes(row.id))
+            .reduce((values, row) => values.filter((category) => (row.categories?.length ? row.categories : ['regular', 'extension']).includes(category)), ['regular', 'extension'])
+        : ['regular', 'extension'];
+      return {
+        ...current,
+        programs,
+        category: allowed.includes(current.category) ? current.category : allowed[0] || 'regular',
+        durationYears:
+          current.durationYears || (programs.length === 1 && program?.durationYears ? Math.min(5, program.durationYears) : ''),
+      };
+    });
+  };
+
   const chooseProgram = (programId) => {
-    const next = (options?.programs || []).find((row) => row.id === programId);
-    const categories = next?.categories?.length ? next.categories : ['regular', 'extension'];
+    const program = programmes.find((row) => row.id === programId);
+    const allowed = program?.categories?.length ? program.categories : ['regular', 'extension'];
     setForm((current) => ({
       ...current,
       program: programId,
-      category: categories.includes(current.category) ? current.category : categories[0],
+      category: allowed.includes(current.category) ? current.category : allowed[0],
+      durationYears: current.durationYears || (program?.durationYears ? Math.min(5, program.durationYears) : ''),
     }));
   };
 
@@ -241,7 +294,7 @@ function BatchFormModal({ open, record, options, onClose, onSaved }) {
     <Modal
       open={open}
       title={record ? 'Edit batch' : 'New batch'}
-      subtitle="The department is taken from the programme by the server. A batch belongs to one delivery stream."
+      subtitle={record ? 'Update this intake. Its programme and department anchor student numbers and records.' : 'Choose a department, then tick every programme that shares this intake.'}
       onClose={save.isPending ? undefined : onClose}
       dismissible={!save.isPending}
       footer={<><Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending}>{record ? 'Save changes' : 'Create batch'}</Button></>}
@@ -249,218 +302,50 @@ function BatchFormModal({ open, record, options, onClose, onSaved }) {
       <div className="grid gap-4">
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
         <FormGrid>
-          <Field label="Batch code" value={form.code || ''} onChange={(event) => set('code', event.target.value)} placeholder="e.g. CS-2026-A" required />
-          <Field label="Batch name" value={form.name || ''} onChange={(event) => set('name', event.target.value)} placeholder="e.g. Computer Science intake A" required />
-          <SelectField
-            label="Programme"
-            value={form.program || ''}
-            onChange={(event) => chooseProgram(event.target.value)}
-            hint={selectedProgram ? `${selectedProgram.code} · ${selectedProgram.name}` : undefined}
-            required
-          >
-            <option value="">Choose a programme</option>
-            {(options?.programs || []).map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
+          <Field label="Batch code" value={form.code || ''} onChange={(event) => set('code', event.target.value)} placeholder="e.g. 2026-A" required />
+          <Field label="Batch name" value={form.name || ''} onChange={(event) => set('name', event.target.value)} placeholder="e.g. 2026 intake A" required />
+          <SelectField label="Department" value={form.department || ''} onChange={(event) => chooseDepartment(event.target.value)} required>
+            <option value="">Choose a department</option>
+            {(options?.departments || []).map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
           </SelectField>
+          {record ? (
+            <SelectField label="Programme" value={form.program || ''} onChange={(event) => chooseProgram(event.target.value)} disabled={!form.department} required>
+              <option value="">Choose a programme</option>
+              {programmes.map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
+            </SelectField>
+          ) : (
+            <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3 sm:col-span-2">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Programmes in this batch</p>
+              <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-100 bg-white p-2">
+                {programmes.map((row) => (
+                  <label key={row.id} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+                    <input
+                      type="checkbox"
+                      checked={(form.programs || []).includes(row.id)}
+                      onChange={() => toggleProgram(row.id)}
+                      className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                    />
+                    <span className="min-w-0 flex-1 truncate">{row.code} · {row.name}</span>
+                  </label>
+                ))}
+                {!programmes.length ? <p className="px-2 py-3 text-sm text-slate-500">Choose a department with active programmes.</p> : null}
+              </div>
+            </div>
+          )}
           <SelectField label="Delivery stream" value={form.category || 'regular'} onChange={(event) => set('category', event.target.value)} required>
-            {availableCategories.map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
+            {categories.map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
           </SelectField>
           <SelectField label="Admission academic year" value={form.admissionAcademicYear || ''} onChange={(event) => set('admissionAcademicYear', event.target.value)} required>
             <option value="">Choose a year</option>
-            {(options?.academicYears || []).map((year) => <option key={year.id} value={year.id}>{year.label}</option>)}
+            {(options?.academicYears || []).map((year) => <option key={year.id} value={year.id}>{year.label}{year.isCurrent ? ' · current' : ''}</option>)}
           </SelectField>
-          <Field label="Expected completion year" type="number" min="2000" max="2300" value={form.expectedCompletionYear || ''} onChange={(event) => set('expectedCompletionYear', event.target.value)} />
+          <Field label="Duration (years)" type="number" min="1" max="5" value={form.durationYears || ''} onChange={(event) => set('durationYears', event.target.value)} hint="Expected completion is calculated from the admission year. Maximum 5 years." />
           <Field label="Current level" type="number" min="1" max="20" value={form.currentLevel || 1} onChange={(event) => set('currentLevel', event.target.value)} />
           <SelectField label="Status" value={form.status || 'planned'} onChange={(event) => set('status', event.target.value)}>
             {['planned', 'active', 'completed', 'archived'].map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
           </SelectField>
         </FormGrid>
-      </div>
-    </Modal>
-  );
-}
-
-function AssignModal({ batch, onClose, onSaved }) {
-  const [search, setSearch] = useState('');
-  const debounced = useDebounced(search, 300);
-  const [selected, setSelected] = useState([]);
-  const [level, setLevel] = useState('');
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (batch) {
-      setSearch('');
-      setSelected([]);
-      setLevel('');
-      setError('');
-    }
-  }, [batch]);
-
-  const candidates = useQuery({
-    queryKey: ['registrar', 'batch-candidates', batch?.id, batch?.program?.id, debounced],
-    queryFn: async () => (await api.get(`${REGISTRAR}/students`, {
-      params: {
-        program: batch.program.id,
-        category: batch.category || 'regular',
-        limit: 50,
-        sort: 'fullName',
-        order: 'asc',
-        ...(debounced.trim() ? { search: debounced.trim() } : {}),
-      },
-    })).data,
-    enabled: Boolean(batch?.program?.id),
-  });
-
-  const save = useMutation({
-    mutationFn: async () => {
-      if (!selected.length) throw new Error('Choose at least one student.');
-      return (await api.post(`${REGISTRAR}/batches/${batch.id}/assign`, {
-        studentIds: selected,
-        ...(level ? { level: Number(level) } : {}),
-      })).data;
-    },
-    onSuccess: (data) => {
-      toast.success(`${data.affected ?? selected.length} student${data.affected === 1 ? '' : 's'} assigned to ${batch.code}.`);
-      onSaved?.();
-      onClose?.();
-    },
-    onError: (err) => {
-      const message = errorMessage(err, 'The students could not be assigned.');
-      setError(message);
-      toast.error(message);
-    },
-  });
-
-  return (
-    <Modal
-      open={Boolean(batch)}
-      title={`Assign students${batch ? ` · ${batch.code}` : ''}`}
-      subtitle="Only students in this programme can be assigned. Existing batch membership is changed, not duplicated."
-      onClose={save.isPending ? undefined : onClose}
-      dismissible={!save.isPending}
-      footer={<><Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending} disabled={!selected.length}>Assign {selected.length || ''}</Button></>}
-    >
-      <div className="grid gap-4">
-        {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
-        <SearchInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a student in this programme" loading={candidates.isFetching} />
-        <Field label="Set level (optional)" type="number" min="1" max="20" value={level} onChange={(event) => setLevel(event.target.value)} hint="Leave blank to keep each student's current level." />
-        <div className="max-h-64 space-y-1.5 overflow-y-auto rounded-2xl border border-slate-100 p-2">
-          {(candidates.data?.rows || []).map((row) => {
-            const checked = selected.includes(row.id);
-            return (
-              <label key={row.id} className={`flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${checked ? 'bg-brand-50 text-brand-900' : 'hover:bg-slate-50'}`}>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => setSelected((current) => checked ? current.filter((id) => id !== row.id) : [...current, row.id])}
-                  className="h-4 w-4 rounded border-slate-300 text-brand-600"
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{row.fullName}</span>
-                  <span className="block truncate text-xs text-slate-500">{row.studentId} · {levelLabel(row.level, row.program?.qualificationType)} · {row.batch?.code || 'No batch'}</span>
-                </span>
-              </label>
-            );
-          })}
-          {!candidates.isFetching && !(candidates.data?.rows || []).length ? <p className="px-3 py-5 text-sm text-slate-500">No student in this programme matches.</p> : null}
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-slate-500">{selected.length} selected</p>
-          <button type="button" className="focus-ring rounded-lg text-xs font-semibold text-brand-700 hover:underline" onClick={() => setSelected((candidates.data?.rows || []).map((row) => row.id))}>
-            Select listed students
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-function ProgressModal({ batch, onClose, onSaved }) {
-  const [form, setForm] = useState({ toLevel: '', complete: false, effectiveDate: dateInput(new Date()), reason: '' });
-  const [selected, setSelected] = useState([]);
-  const [error, setError] = useState('');
-
-  const students = useQuery({
-    queryKey: ['registrar', 'batch-students', batch?.id],
-    queryFn: async () => (await api.get(`${REGISTRAR}/students`, { params: { batch: batch.id, limit: 100, sort: 'fullName', order: 'asc' } })).data,
-    enabled: Boolean(batch?.id),
-  });
-
-  useEffect(() => {
-    if (!batch) return;
-    setForm({ toLevel: '', complete: false, effectiveDate: dateInput(new Date()), reason: '' });
-    setSelected([]);
-    setError('');
-  }, [batch]);
-
-  useEffect(() => {
-    if (students.data?.rows) setSelected(students.data.rows.map((row) => row.id));
-  }, [students.data]);
-
-  const save = useMutation({
-    mutationFn: async () => {
-      if (!selected.length) throw new Error('Choose at least one student.');
-      if (!form.complete && !form.toLevel) throw new Error('Choose the level to move to, or mark the programme complete.');
-      if (!form.reason.trim()) throw new Error('Write the reason for this progression.');
-      return (await api.post(`${REGISTRAR}/batches/${batch.id}/progress`, {
-        studentIds: selected,
-        ...(form.complete ? { complete: true } : { toLevel: Number(form.toLevel) }),
-        effectiveDate: form.effectiveDate,
-        reason: form.reason.trim(),
-      })).data;
-    },
-    onSuccess: (data) => {
-      toast.success(`${data.affected ?? selected.length} student${data.affected === 1 ? '' : 's'} progressed.`);
-      onSaved?.();
-      onClose?.();
-    },
-    onError: (err) => {
-      const message = errorMessage(err, 'Progression could not be recorded.');
-      setError(message);
-      toast.error(message);
-    },
-  });
-
-  return (
-    <Modal
-      open={Boolean(batch)}
-      title={`Progress batch${batch ? ` · ${batch.code}` : ''}`}
-      subtitle="Progression updates the student level and active enrollment and writes an immutable history record."
-      onClose={save.isPending ? undefined : onClose}
-      dismissible={!save.isPending}
-      footer={<><Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending} disabled={!selected.length}>{form.complete ? 'Mark completed' : 'Record progression'}</Button></>}
-    >
-      <div className="grid gap-4">
-        {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
-        <div className="rounded-2xl border border-slate-100 p-3">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">{selected.length} student{selected.length === 1 ? '' : 's'} selected</p>
-          <div className="max-h-32 space-y-1 overflow-y-auto">
-            {(students.data?.rows || []).map((row) => (
-              <label key={row.id} className="flex items-center gap-2 text-xs text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(row.id)}
-                  onChange={() => setSelected((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])}
-                  className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600"
-                />
-                <span className="truncate">{row.fullName} · {row.studentId} · {levelLabel(row.level, row.program?.qualificationType)}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-        <FormGrid>
-          <Field label="Move to level" type="number" min="1" max="20" value={form.toLevel} onChange={(event) => setForm((value) => ({ ...value, toLevel: event.target.value }))} disabled={form.complete} required={!form.complete} />
-          <Field label="Effective date" type="date" value={form.effectiveDate} onChange={(event) => setForm((value) => ({ ...value, effectiveDate: event.target.value }))} required />
-          <label className="flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50/70 px-3.5 py-3 text-sm text-amber-900 sm:col-span-2">
-            <input type="checkbox" checked={form.complete} onChange={(event) => setForm((value) => ({ ...value, complete: event.target.checked }))} className="h-4 w-4 rounded border-amber-300 text-amber-600" />
-            Mark the selected students as having completed the programme
-          </label>
-          <TextAreaField className="sm:col-span-2" label="Reason" rows={3} value={form.reason} onChange={(event) => setForm((value) => ({ ...value, reason: event.target.value }))} placeholder="e.g. End of 2026 academic year" required />
-        </FormGrid>
-        {form.complete ? (
-          <p className="rounded-xl bg-rose-50 px-3.5 py-3 text-xs leading-relaxed text-rose-800">
-            Completion sets each student's status to graduated and closes their active enrollment. Use it only after results and eligibility have been checked.
-          </p>
-        ) : null}
+        {!record ? <p className="text-xs leading-relaxed text-slate-500">One batch will be created for each ticked programme, sharing this code, name, stream and admission year.</p> : null}
       </div>
     </Modal>
   );

@@ -1,4 +1,5 @@
-﻿import { Student, Enrollment } from '../models/Student.js';
+﻿import mongoose from 'mongoose';
+import { Student, Enrollment } from '../models/Student.js';
 import { Department, Program, Course, AcademicYear, CalendarEvent, Batch } from '../models/AcademicStructure.js';
 import { CurriculumPlan } from '../models/Curriculum.js';
 import { CourseOffering, CourseRegistration } from '../models/Offering.js';
@@ -122,6 +123,229 @@ export const dashboard = asyncHandler(async (req, res) => {
       graduation: pipeline,
     },
     recentActivity: recent,
+  });
+});
+
+export const analytics = asyncHandler(async (req, res) => {
+  const query = req.valid.query;
+  const resultMatch = { status: 'published', totalMark: { $ne: null } };
+  if (query.academicYear) resultMatch.academicYear = new mongoose.Types.ObjectId(query.academicYear);
+  const studentMatch = {};
+  if (query.department) studentMatch['student.department'] = new mongoose.Types.ObjectId(query.department);
+  if (query.program) studentMatch['student.program'] = new mongoose.Types.ObjectId(query.program);
+  if (query.batch) studentMatch['student.batch'] = new mongoose.Types.ObjectId(query.batch);
+  if (query.category) studentMatch['student.studentCategory'] = query.category;
+
+  const [years, departments, programmes, batches, rows] = await Promise.all([
+    AcademicYear.find().sort({ startDate: -1 }).select('label isCurrent startDate').lean(),
+    Department.find({ active: true }).select('code name').sort({ name: 1 }).lean(),
+    Program.find({ active: true }).select('code name department categories').sort({ name: 1 }).lean(),
+    Batch.find({ status: { $in: ['planned', 'active'] } }).select('code name program category').sort({ createdAt: -1 }).lean(),
+    Result.aggregate([
+      { $match: resultMatch },
+      {
+        $lookup: {
+          from: 'students',
+          localField: 'student',
+          foreignField: '_id',
+          as: 'student',
+        },
+      },
+      { $unwind: '$student' },
+      ...(Object.keys(studentMatch).length ? [{ $match: studentMatch }] : []),
+      {
+        $project: {
+          studentId: '$student._id',
+          studentNumber: '$student.studentId',
+          studentName: '$student.fullName',
+          department: '$student.department',
+          program: '$student.program',
+          batch: '$student.batch',
+          category: '$student.studentCategory',
+          totalMark: 1,
+          letterGrade: 1,
+          passed: 1,
+          term: 1,
+          academicYear: 1,
+        },
+      },
+      {
+        $facet: {
+          overview: [
+            {
+              $group: {
+                _id: null,
+                resultCount: { $sum: 1 },
+                students: { $addToSet: '$studentId' },
+                averageMark: { $avg: '$totalMark' },
+                passes: { $sum: { $cond: ['$passed', 1, 0] } },
+                highestMark: { $max: '$totalMark' },
+                lowestMark: { $min: '$totalMark' },
+              },
+            },
+          ],
+          byGrade: [
+            { $match: { letterGrade: { $ne: null } } },
+            { $group: { _id: '$letterGrade', count: { $sum: 1 } } },
+            { $sort: { _id: 1 } },
+          ],
+          byTerm: [
+            { $match: { term: { $ne: '' } } },
+            {
+              $group: {
+                _id: '$term',
+                averageMark: { $avg: '$totalMark' },
+                resultCount: { $sum: 1 },
+                passes: { $sum: { $cond: ['$passed', 1, 0] } },
+              },
+            },
+            { $sort: { resultCount: -1 } },
+            { $limit: 10 },
+          ],
+          byDepartment: [
+            {
+              $group: {
+                _id: '$department',
+                averageMark: { $avg: '$totalMark' },
+                resultCount: { $sum: 1 },
+                passes: { $sum: { $cond: ['$passed', 1, 0] } },
+                students: { $addToSet: '$studentId' },
+              },
+            },
+            { $lookup: { from: 'departments', localField: '_id', foreignField: '_id', as: 'record' } },
+            { $unwind: { path: '$record', preserveNullAndEmptyArrays: true } },
+            { $sort: { averageMark: -1 } },
+          ],
+          byProgram: [
+            {
+              $group: {
+                _id: '$program',
+                averageMark: { $avg: '$totalMark' },
+                resultCount: { $sum: 1 },
+                passes: { $sum: { $cond: ['$passed', 1, 0] } },
+                students: { $addToSet: '$studentId' },
+              },
+            },
+            { $lookup: { from: 'programs', localField: '_id', foreignField: '_id', as: 'record' } },
+            { $unwind: { path: '$record', preserveNullAndEmptyArrays: true } },
+            { $sort: { averageMark: -1 } },
+            { $limit: 12 },
+          ],
+          byBatch: [
+            {
+              $group: {
+                _id: '$batch',
+                averageMark: { $avg: '$totalMark' },
+                resultCount: { $sum: 1 },
+                passes: { $sum: { $cond: ['$passed', 1, 0] } },
+                students: { $addToSet: '$studentId' },
+              },
+            },
+            { $lookup: { from: 'batches', localField: '_id', foreignField: '_id', as: 'record' } },
+            { $unwind: { path: '$record', preserveNullAndEmptyArrays: true } },
+            { $sort: { averageMark: -1 } },
+            { $limit: 12 },
+          ],
+          topStudents: [
+            {
+              $group: {
+                _id: '$studentId',
+                studentNumber: { $first: '$studentNumber' },
+                name: { $first: '$studentName' },
+                program: { $first: '$program' },
+                batch: { $first: '$batch' },
+                averageMark: { $avg: '$totalMark' },
+                resultCount: { $sum: 1 },
+              },
+            },
+            { $sort: { averageMark: -1, resultCount: -1 } },
+            { $limit: 8 },
+            { $lookup: { from: 'programs', localField: 'program', foreignField: '_id', as: 'programme' } },
+            { $unwind: { path: '$programme', preserveNullAndEmptyArrays: true } },
+            { $lookup: { from: 'batches', localField: 'batch', foreignField: '_id', as: 'intake' } },
+            { $unwind: { path: '$intake', preserveNullAndEmptyArrays: true } },
+          ],
+        },
+      },
+    ]),
+  ]);
+
+  const data = rows[0] || {};
+  const overview = data.overview?.[0];
+  const round = (value) => (value === undefined || value === null ? null : Math.round(value * 10) / 10);
+  const rate = (passed, total) => (total ? Math.round((passed / total) * 1000) / 10 : null);
+  const label = (record) => record?.name || record?.code || 'Not assigned';
+
+  res.json({
+    filters: {
+      academicYears: years.map((row) => ({ id: String(row._id), label: row.label, isCurrent: row.isCurrent })),
+      departments: departments.map((row) => ({ id: String(row._id), code: row.code, name: row.name })),
+      programs: programmes.map((row) => ({
+        id: String(row._id),
+        code: row.code,
+        name: row.name,
+        department: row.department ? String(row.department) : null,
+        categories: row.categories,
+      })),
+      batches: batches.map((row) => ({
+        id: String(row._id),
+        code: row.code,
+        name: row.name,
+        program: row.program ? String(row.program) : null,
+        category: row.category,
+      })),
+    },
+    overview: {
+      resultCount: overview?.resultCount || 0,
+      studentCount: overview?.students?.length || 0,
+      averageMark: round(overview?.averageMark),
+      passRate: rate(overview?.passes || 0, overview?.resultCount || 0),
+      highestMark: round(overview?.highestMark),
+      lowestMark: round(overview?.lowestMark),
+    },
+    byGrade: (data.byGrade || []).map((row) => ({ letter: row._id, count: row.count })),
+    byTerm: (data.byTerm || []).map((row) => ({
+      term: row._id,
+      averageMark: round(row.averageMark),
+      resultCount: row.resultCount,
+      passRate: rate(row.passes, row.resultCount),
+    })),
+    byDepartment: (data.byDepartment || []).map((row) => ({
+      id: row._id ? String(row._id) : null,
+      name: label(row.record),
+      code: row.record?.code || '',
+      averageMark: round(row.averageMark),
+      resultCount: row.resultCount,
+      studentCount: row.students?.length || 0,
+      passRate: rate(row.passes, row.resultCount),
+    })),
+    byProgram: (data.byProgram || []).map((row) => ({
+      id: row._id ? String(row._id) : null,
+      name: label(row.record),
+      code: row.record?.code || '',
+      averageMark: round(row.averageMark),
+      resultCount: row.resultCount,
+      studentCount: row.students?.length || 0,
+      passRate: rate(row.passes, row.resultCount),
+    })),
+    byBatch: (data.byBatch || []).map((row) => ({
+      id: row._id ? String(row._id) : null,
+      name: row.record?.name || row.record?.code || 'No batch',
+      code: row.record?.code || '',
+      averageMark: round(row.averageMark),
+      resultCount: row.resultCount,
+      studentCount: row.students?.length || 0,
+      passRate: rate(row.passes, row.resultCount),
+    })),
+    topStudents: (data.topStudents || []).map((row) => ({
+      id: String(row._id),
+      studentNumber: row.studentNumber,
+      name: row.name,
+      programme: row.programme?.name || 'No programme',
+      batch: row.intake?.code || 'No batch',
+      averageMark: round(row.averageMark),
+      resultCount: row.resultCount,
+    })),
   });
 });
 

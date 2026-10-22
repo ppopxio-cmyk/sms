@@ -9,6 +9,8 @@ import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { pageOf, sortOf, searchFilter, mergeFilters, paged, ownFilter } from '../services/registrar.helpers.js';
 import { planCredits } from '../services/eligibility.service.js';
+import { buildExport, EXPORT_LIMIT } from '../services/export.service.js';
+import { notifyProgramTeachers } from '../services/notification.service.js';
 
 async function recalcPlan(planId) {
   const total = await planCredits(planId);
@@ -111,6 +113,41 @@ async function requireTeachers(teacherIds = []) {
   return teachers.map((row) => row._id);
 }
 
+async function ensureTeacherProgramLimits(teacherIds = [], categories = [], { excludeProgram } = {}) {
+  if (!teacherIds.length) return;
+  const ids = new Set(teacherIds.map(String));
+  const wanted = new Set(categories?.length ? categories : ['regular', 'extension']);
+  const programs = await Program.find(
+    ownFilter({
+      teachers: { $in: teacherIds },
+      active: { $ne: false },
+      ...(excludeProgram ? { _id: { $ne: excludeProgram } } : {}),
+    }),
+  )
+    .select('name categories teachers')
+    .lean();
+
+  const conflicts = [];
+  for (const program of programs) {
+    const shared = (program.categories?.length ? program.categories : ['regular', 'extension']).filter((category) =>
+      wanted.has(category),
+    );
+    if (!shared.length) continue;
+    if (!(program.teachers || []).some((teacher) => ids.has(String(teacher)))) continue;
+    conflicts.push(`${program.name} (${shared.join(', ')})`);
+  }
+
+  if (conflicts.length) {
+    throw new AppError(
+      409,
+      'TEACHER_PROGRAM_CONFLICT',
+      `A teacher can serve at most one regular and one extension programme. Already assigned to ${conflicts
+        .slice(0, 3)
+        .join('; ')}.`,
+    );
+  }
+}
+
 export const createDepartment = asyncHandler(async (req, res) => {
   const input = req.body;
   const code = input.code.toUpperCase();
@@ -170,6 +207,7 @@ export const createProgram = asyncHandler(async (req, res) => {
   const existing = await Program.findOne({ code }).lean();
   if (existing) throw new AppError(409, 'PROGRAM_CODE_EXISTS', 'That programme code is already in use.');
   const teachers = await requireTeachers(input.teachers);
+  await ensureTeacherProgramLimits(teachers, input.categories);
   const program = await Program.create({
     ...input,
     code,
@@ -193,6 +231,13 @@ export const updateProgram = asyncHandler(async (req, res) => {
     input.code = code;
   }
   if (input.teachers) input.teachers = await requireTeachers(input.teachers);
+  if (input.teachers || input.categories) {
+    await ensureTeacherProgramLimits(
+      input.teachers || program.teachers.map(String),
+      input.categories || program.categories,
+      { excludeProgram: program._id },
+    );
+  }
   if (input.capacity !== undefined && input.capacity !== null) {
     const current = await Student.countDocuments({ program: program._id, studentStatus: 'active' });
     if (input.capacity < current) {
@@ -373,22 +418,63 @@ export const listBatches = asyncHandler(async (req, res) => {
 
 export const createBatch = asyncHandler(async (req, res) => {
   const input = req.body;
-  const program = await Program.findById(input.program).lean();
-  if (!program) throw new AppError(400, 'PROGRAM_INVALID', 'Choose a valid programme.');
-  if (!program.active) throw new AppError(409, 'PROGRAM_INACTIVE', 'That programme is inactive and cannot receive a new batch.');
-  if (!(program.categories?.length ? program.categories : ['regular', 'extension']).includes(input.category || 'regular')) {
-    throw new AppError(409, 'PROGRAM_CATEGORY', 'This programme is not offered in the selected regular/extension stream.');
+  const programIds = [...new Set((input.programs?.length ? input.programs : [input.program]).filter(Boolean).map(String))];
+  if (!programIds.length) throw new AppError(400, 'PROGRAM_REQUIRED', 'Choose at least one programme for this batch.');
+  if (input.department) await requireDepartment(input.department);
+
+  const programmes = await Program.find(ownFilter({ _id: { $in: programIds } })).lean();
+  if (programmes.length !== programIds.length) throw new AppError(400, 'PROGRAM_INVALID', 'Choose valid programmes.');
+  if (input.department && programmes.some((program) => String(program.department) !== String(input.department))) {
+    throw new AppError(400, 'PROGRAM_DEPARTMENT_MISMATCH', 'Every chosen programme must belong to the selected department.');
   }
+  const category = input.category || 'regular';
+  for (const program of programmes) {
+    if (!program.active) throw new AppError(409, 'PROGRAM_INACTIVE', 'That programme is inactive and cannot receive a new batch.');
+    if (!(program.categories?.length ? program.categories : ['regular', 'extension']).includes(category)) {
+      throw new AppError(409, 'PROGRAM_CATEGORY', 'This programme is not offered in the selected regular/extension stream.');
+    }
+  }
+
   const year = await AcademicYear.findById(input.admissionAcademicYear).lean();
   if (!year) throw new AppError(400, 'ACADEMIC_YEAR_INVALID', 'Choose a valid academic year.');
-  const batch = await Batch.create({
-    ...input,
-    department: program.department,
+  const existing = await Batch.findOne(ownFilter({
+    code: input.code.trim().toUpperCase(),
+    program: { $in: programIds },
+  })).select('program code').lean();
+  if (existing) throw new AppError(409, 'BATCH_EXISTS', 'One of the chosen programmes already has a batch with this code.');
+  const startYear = new Date(year.startDate).getFullYear();
+  const durationYears = input.durationYears ? Number(input.durationYears) : null;
+  const expectedCompletionYear = durationYears
+    ? startYear + durationYears
+    : input.expectedCompletionYear ?? null;
+  const shared = {
+    code: input.code,
+    name: input.name,
+    category,
+    admissionAcademicYear: year._id,
+    durationYears,
+    expectedCompletionYear,
+    currentLevel: input.currentLevel || 1,
+    status: input.status || 'planned',
     createdBy: req.user.id,
     updatedBy: req.user.id,
+  };
+
+  const batches = await Batch.create(
+    programmes.map((program) => ({
+      ...shared,
+      program: program._id,
+      department: program.department,
+    })),
+  );
+  audit({
+    req,
+    action: 'registrar.batch.create',
+    targetType: 'Batch',
+    targetId: batches[0]._id,
+    meta: { code: batches[0].code, count: batches.length, programs: programmes.map((program) => program.code) },
   });
-  audit({ req, action: 'registrar.batch.create', targetType: 'Batch', targetId: batch._id, meta: { code: batch.code } });
-  res.status(201).json({ batch });
+  res.status(201).json({ batch: batches[0], batches });
 });
 
 export const updateBatch = asyncHandler(async (req, res) => {
@@ -406,10 +492,111 @@ export const updateBatch = asyncHandler(async (req, res) => {
     batch.program = program._id;
     batch.department = program.department;
   }
+  if (input.durationYears) {
+    const year = await AcademicYear.findById(input.admissionAcademicYear || batch.admissionAcademicYear).lean();
+    if (year) input.expectedCompletionYear = new Date(year.startDate).getFullYear() + Number(input.durationYears);
+  }
   Object.assign(batch, input, { updatedBy: req.user.id });
   await batch.save();
   audit({ req, action: 'registrar.batch.update', targetType: 'Batch', targetId: batch._id });
   res.json({ batch });
+});
+
+export const getBatch = asyncHandler(async (req, res) => {
+  const batch = await Batch.findById(req.valid.params.id)
+    .populate('program', 'code name qualificationType durationYears')
+    .populate('department', 'code name')
+    .populate('admissionAcademicYear', 'label startDate endDate')
+    .lean();
+  if (!batch) throw new AppError(404, 'BATCH_NOT_FOUND', 'That batch was not found.');
+
+  const [students, statusCounts, total] = await Promise.all([
+    Student.find({ batch: batch._id })
+      .select('studentId fullName sex email phone level studentStatus studentCategory admissionDate')
+      .sort({ fullName: 1 })
+      .limit(EXPORT_LIMIT)
+      .lean(),
+    Student.aggregate([{ $match: { batch: batch._id } }, { $group: { _id: '$studentStatus', count: { $sum: 1 } } }]),
+    Student.countDocuments({ batch: batch._id }),
+  ]);
+  const counts = { all: total };
+  for (const row of statusCounts) counts[row._id] = row.count;
+
+  res.json({
+    batch: {
+      ...batch,
+      id: String(batch._id),
+      program: batch.program
+        ? { id: String(batch.program._id), code: batch.program.code, name: batch.program.name, qualificationType: batch.program.qualificationType }
+        : null,
+      department: batch.department
+        ? { id: String(batch.department._id), code: batch.department.code, name: batch.department.name }
+        : null,
+      admissionAcademicYear: batch.admissionAcademicYear
+        ? { id: String(batch.admissionAcademicYear._id), label: batch.admissionAcademicYear.label }
+        : null,
+      _id: undefined,
+    },
+    students: students.map((student) => ({ ...student, id: String(student._id), _id: undefined })),
+    counts,
+    total,
+    truncated: total > students.length,
+  });
+});
+
+export const exportBatch = asyncHandler(async (req, res) => {
+  const batch = await Batch.findById(req.valid.params.id)
+    .populate('program', 'code name qualificationType')
+    .populate('department', 'code name')
+    .populate('admissionAcademicYear', 'label')
+    .lean();
+  if (!batch) throw new AppError(404, 'BATCH_NOT_FOUND', 'That batch was not found.');
+  const students = await Student.find({ batch: batch._id })
+    .select('studentId fullName sex email phone level studentStatus studentCategory admissionDate')
+    .sort({ fullName: 1 })
+    .limit(EXPORT_LIMIT)
+    .lean();
+
+  const result = await buildExport({
+    format: req.valid.query.format,
+    filenamePrefix: `batch-${batch.code}`,
+    title: `${batch.code} batch register`,
+    subtitle: [batch.name, batch.program?.name, batch.department?.name, batch.admissionAcademicYear?.label].filter(Boolean).join(' · '),
+    summary: [
+      { label: 'Students', value: students.length },
+      { label: 'Stream', value: batch.category === 'extension' ? 'Extension' : 'Regular' },
+      { label: 'Level', value: batch.currentLevel },
+    ],
+    columns: [
+      { header: 'Student ID', key: 'studentId', width: 20 },
+      { header: 'Full name', key: 'fullName', width: 30 },
+      { header: 'Sex', key: 'sex', width: 10 },
+      { header: 'Level', key: 'level', width: 8 },
+      { header: 'Stream', key: 'category', width: 12 },
+      { header: 'Phone', key: 'phone', width: 18 },
+      { header: 'Email', key: 'email', width: 28 },
+      { header: 'Status', key: 'status', width: 14 },
+    ],
+    rows: students.map((student) => ({
+      studentId: student.studentId,
+      fullName: student.fullName,
+      sex: student.sex,
+      level: student.level,
+      category: student.studentCategory,
+      phone: student.phone,
+      email: student.email,
+      status: student.studentStatus,
+    })),
+  });
+
+  audit({ req, action: 'registrar.batch.export', targetType: 'Batch', targetId: batch._id, meta: { format: req.valid.query.format, rows: result.rowCount } });
+  res.status(200);
+  res.setHeader('Content-Type', result.contentType);
+  res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+  res.setHeader('Content-Length', String(result.buffer.length));
+  res.setHeader('X-Export-Rows', String(result.rowCount));
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(result.buffer);
 });
 
 export const batchAssignmentPreview = asyncHandler(async (req, res) => {
@@ -554,10 +741,11 @@ export const listPlans = asyncHandler(async (req, res) => {
 });
 
 export const planOptions = asyncHandler(async (_req, res) => {
-  const [programs, years, courses] = await Promise.all([
+  const [programs, years, courses, terms] = await Promise.all([
     Program.find({ active: true }).populate('department', 'code name').sort({ name: 1 }).lean(),
     AcademicYear.find().sort({ startDate: -1 }).lean(),
     Course.find({ active: true }).populate('department', 'code name').sort({ code: 1 }).lean(),
+    AcademicTerm.find().populate('academicYear', 'label').sort({ sequence: 1 }).lean(),
   ]);
   res.json({
     programs: programs.map((row) => ({
@@ -576,6 +764,13 @@ export const planOptions = asyncHandler(async (_req, res) => {
       title: row.title,
       creditHours: row.creditHours,
       department: row.department ? { id: String(row.department._id), code: row.department.code, name: row.department.name } : null,
+    })),
+    terms: terms.map((row) => ({
+      id: String(row._id),
+      name: row.name,
+      sequence: row.sequence,
+      type: row.type,
+      academicYear: row.academicYear ? { id: String(row.academicYear._id), label: row.academicYear.label } : null,
     })),
   });
 });
@@ -622,6 +817,14 @@ export const createPlan = asyncHandler(async (req, res) => {
     }
   }
   audit({ req, action: 'registrar.curriculum.plan.create', targetType: 'CurriculumPlan', targetId: plan._id, meta: { program: program.code, version: plan.version } });
+  void notifyProgramTeachers(program._id, {
+    type: 'curriculum_plan',
+    title: `New curriculum draft for ${program.code}`,
+    body: `${plan.title} was created. Open the curriculum page to review it.`,
+    actorId: req.user.id,
+    actorName: req.user.name || 'Registrar',
+    meta: { planId: String(plan._id), program: program.code, version: plan.version },
+  });
   res.status(201).json({ plan });
 });
 
@@ -699,6 +902,14 @@ export const addPlanCourse = asyncHandler(async (req, res) => {
   });
   const totalCredits = await recalcPlan(plan._id);
   audit({ req, action: 'registrar.curriculum.course.add', targetType: 'CurriculumPlan', targetId: plan._id, meta: { course: course.code } });
+  void notifyProgramTeachers(plan.program, {
+    type: 'curriculum_course',
+    title: `New course added to ${plan.title}`,
+    body: `${course.code} · ${course.title} was added at level ${entry.level}${entry.term ? `, ${entry.term}` : ''}.`,
+    actorId: req.user.id,
+    actorName: req.user.name || 'Registrar',
+    meta: { planId: String(plan._id), course: course.code, level: entry.level, term: entry.term },
+  });
   res.status(201).json({ entry, totalCredits });
 });
 

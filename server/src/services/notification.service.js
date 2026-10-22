@@ -1,6 +1,8 @@
 import { Notification, NOTIFICATION_TTL_MS } from '../models/Notification.js';
 import { User } from '../models/User.js';
+import { Program } from '../models/AcademicStructure.js';
 import { logger } from '../utils/logger.js';
+import { ownFilter } from './registrar.helpers.js';
 import * as stream from './stream.service.js';
 import * as push from './push.service.js';
 
@@ -46,6 +48,20 @@ export async function notifyAdmins(entry) {
     .select('_id')
     .lean();
   await Promise.all(admins.map((admin) => deliver({ ...entry, userId: admin._id })));
+}
+
+export async function notifyProgramTeachers(programId, entry) {
+  try {
+    const program = await Program.findById(programId).select('teachers').lean();
+    const ids = (program?.teachers || []).map(String);
+    if (!ids.length) return;
+    const teachers = await User.find(ownFilter({ _id: { $in: ids }, role: 'TEACHER', status: 'active', deletedAt: null }))
+      .select('_id')
+      .lean();
+    await Promise.all(teachers.map((teacher) => deliver({ ...entry, userId: teacher._id })));
+  } catch (err) {
+    logger.error({ err: err.message, programId: String(programId) }, 'programme teacher notifications could not be delivered');
+  }
 }
 
 const describe = (info) => {

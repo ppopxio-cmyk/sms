@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Camera, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../../lib/api';
-import { REGISTRAR, cleanPayload, dateInput, humanStatus, levelLabel, phoneError, toJpegFile } from '../../lib/registrar';
+import { REGISTRAR, cleanPayload, dateInput, humanStatus, levelLabel, normalizePhoneInput, phoneError, toJpegFile } from '../../lib/registrar';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import Field from '../ui/Field';
@@ -16,7 +16,7 @@ const EMPTY = {
   firstName: '',
   middleName: '',
   lastName: '',
-  sex: 'unspecified',
+  sex: '',
   dateOfBirth: '',
   email: '',
   phone: '',
@@ -31,8 +31,27 @@ const EMPTY = {
   address: { city: '', woreda: '' },
 };
 
-function fromStudent(student) {
-  if (!student) return { ...EMPTY, address: { ...EMPTY.address } };
+const todayInput = () => {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+};
+
+const phoneBody = (value) => {
+  const normalized = normalizePhoneInput(value);
+  return normalized.startsWith('+251') ? normalized.slice(4).trimStart() : normalized;
+};
+
+function fromStudent(student, options) {
+  if (!student) {
+    const currentYear = (options?.academicYears || []).find((year) => year.isCurrent);
+    return {
+      ...EMPTY,
+      admissionAcademicYear: currentYear?.id || '',
+      admissionDate: todayInput(),
+      address: { ...EMPTY.address },
+    };
+  }
   return {
     ...EMPTY,
     ...student,
@@ -60,13 +79,13 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
 
   useEffect(() => {
     if (open) {
-      setForm(fromStudent(student));
+      setForm(fromStudent(student, options));
       setError('');
       setPhotoFile(null);
       setPhotoPreview('');
       setPhotoError('');
     }
-  }, [open, student]);
+  }, [open, student, options]);
 
   useEffect(() => () => {
     if (photoPreview) URL.revokeObjectURL(photoPreview);
@@ -152,6 +171,10 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
       if (!form.firstName.trim() || !form.lastName.trim() || !form.department || !form.program) {
         throw new Error('First name, last name, department and programme are required.');
       }
+      if (!form.sex) throw new Error('Choose female or male.');
+      if (!form.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+        throw new Error('Enter a valid student email address.');
+      }
       if (form.batch) {
         const batch = (options?.batches || []).find((row) => row.id === form.batch);
         if (batch && String(batch.program) !== String(form.program)) {
@@ -181,18 +204,27 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
         completionDate: editing ? form.completionDate || undefined : undefined,
         address: form.address,
       });
+      const preparedPhoto = photoFile
+        ? toJpegFile(photoFile)
+            .then((jpeg) => jpeg.arrayBuffer())
+            .then((buffer) => ({ buffer }))
+            .catch((photoError) => ({ photoError }))
+        : null;
       const saved = editing
         ? (await api.patch(`${REGISTRAR}/students/${student.id}`, payload)).data
         : (await api.post(`${REGISTRAR}/students`, payload)).data;
-      if (photoFile) {
-        try {
-          const jpeg = await toJpegFile(photoFile);
-          const buffer = await jpeg.arrayBuffer();
-          await api.post(`${REGISTRAR}/students/${saved.student.id}/photo`, buffer, {
-            headers: { 'Content-Type': 'image/jpeg' },
-          });
-        } catch (err) {
-          toast.error(errorMessage(err, 'The record was saved, but the photo could not be uploaded.'));
+      if (preparedPhoto) {
+        const prepared = await preparedPhoto;
+        if (prepared.photoError) {
+          toast.error(errorMessage(prepared.photoError, 'The record was saved, but the photo could not be prepared.'));
+        } else {
+          try {
+            await api.post(`${REGISTRAR}/students/${saved.student.id}/photo`, prepared.buffer, {
+              headers: { 'Content-Type': 'image/jpeg' },
+            });
+          } catch (err) {
+            toast.error(errorMessage(err, 'The record was saved, but the photo could not be uploaded.'));
+          }
         }
       }
       return saved;
@@ -275,15 +307,25 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
           <Field label="First name" value={form.firstName} onChange={(event) => set('firstName', event.target.value)} required />
           <Field label="Middle name" value={form.middleName} onChange={(event) => set('middleName', event.target.value)} />
           <Field label="Last name" value={form.lastName} onChange={(event) => set('lastName', event.target.value)} required />
-          <SelectField label="Sex" value={form.sex} onChange={(event) => set('sex', event.target.value)}>
-            <option value="unspecified">Not specified</option>
+          <SelectField label="Sex" value={form.sex} onChange={(event) => set('sex', event.target.value)} required>
+            <option value="">Select sex</option>
             <option value="female">Female</option>
             <option value="male">Male</option>
-            <option value="other">Other</option>
           </SelectField>
           <Field label="Date of birth" type="date" value={form.dateOfBirth} onChange={(event) => set('dateOfBirth', event.target.value)} />
-          <Field label="Phone" value={form.phone} onChange={(event) => set('phone', event.target.value)} placeholder="+251 912 345 678" required />
-          <Field className="sm:col-span-2" label="Email" type="email" value={form.email} onChange={(event) => set('email', event.target.value)} placeholder="Optional" />
+          <Field
+            label="Phone"
+            prefix="+251"
+            value={phoneBody(form.phone)}
+            onChange={(event) => {
+              const digits = event.target.value.replace(/[^\d\s]/g, '').replace(/^0+/, '');
+              set('phone', `+251${digits}`);
+            }}
+            placeholder="912 345 678"
+            inputMode="tel"
+            required
+          />
+          <Field className="sm:col-span-2" label="Email" type="email" value={form.email} onChange={(event) => set('email', event.target.value)} placeholder="student@example.com" required />
         </FormGrid>
 
         <div className="rounded-2xl bg-slate-50/80 p-4">

@@ -173,6 +173,7 @@ const batchSchema = new Schema(
     // programme never share a register, a student number sequence, or a timetable.
     category: { type: String, enum: PROGRAM_CATEGORIES, default: 'regular', index: true },
     admissionAcademicYear: { type: Schema.Types.ObjectId, ref: 'AcademicYear', required: true, index: true },
+    durationYears: { type: Number, min: 1, max: 5, default: null },
     expectedCompletionYear: { type: Number, min: 2000, max: 2300, default: null },
     currentLevel: { type: Number, min: 1, max: 20, default: 1 },
     status: { type: String, enum: BATCH_STATUSES, default: 'planned', index: true },

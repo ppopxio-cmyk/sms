@@ -70,6 +70,60 @@ export async function uploadImage(buffer, { fileName, folder, contentType }) {
   };
 }
 
+export async function uploadDocument(buffer, { fileName, folder, contentType }) {
+  const sdk = getClient();
+  const file = await toFile(buffer, fileName, { type: contentType });
+  const response = await sdk.files.upload({
+    file,
+    fileName,
+    folder,
+    isPrivateFile: true,
+    useUniqueFileName: true,
+    tags: ['sms-course-material'],
+  });
+  if (!response?.fileId || !response?.filePath) {
+    throw new AppError(502, 'DOCUMENT_UPLOAD_INCOMPLETE', 'File storage did not confirm the upload. Please try again.');
+  }
+  return {
+    provider: 'imagekit',
+    fileId: response.fileId,
+    filePath: response.filePath,
+    url: signedImageUrl(response.filePath, { expiresIn: 21600 }),
+    contentType,
+    bytes: buffer.length,
+    uploadedAt: new Date(),
+  };
+}
+
+const DOCUMENT_TYPES = {
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  doc: 'application/msword',
+};
+
+export function validateDocument(buffer, fileName) {
+  if (!Buffer.isBuffer(buffer) || !buffer.length) {
+    throw new AppError(400, 'EMPTY_DOCUMENT', 'Choose a PDF or Word document to upload.');
+  }
+  if (buffer.length > 10 * 1024 * 1024) {
+    throw new AppError(413, 'DOCUMENT_TOO_LARGE', 'The course material must be smaller than 10 MB.');
+  }
+  const extension = String(fileName || '').split('.').pop()?.toLowerCase();
+  if (!DOCUMENT_TYPES[extension]) {
+    throw new AppError(400, 'DOCUMENT_TYPE', 'Upload a PDF, DOC or DOCX file.');
+  }
+  if (extension === 'pdf' && buffer.subarray(0, 5).toString('ascii') !== '%PDF-') {
+    throw new AppError(400, 'INVALID_DOCUMENT', 'That file is not a valid PDF.');
+  }
+  if (extension === 'docx' && buffer.subarray(0, 4).toString('hex') !== '504b0304') {
+    throw new AppError(400, 'INVALID_DOCUMENT', 'That file is not a valid DOCX document.');
+  }
+  if (extension === 'doc' && buffer.subarray(0, 8).toString('hex') !== 'd0cf11e0a1b11ae1') {
+    throw new AppError(400, 'INVALID_DOCUMENT', 'That file is not a valid Word document.');
+  }
+  return { extension, contentType: DOCUMENT_TYPES[extension] };
+}
+
 export async function deleteImage(fileId) {
   if (!fileId) return;
   try {

@@ -246,6 +246,33 @@ export function sendAnnouncementEmail({ to, name, title, body, priority = 'norma
   });
 }
 
+export function sendStudentAdmissionEmail({ to, name, studentId, program, department, batch, category, admissionDate }) {
+  const body =
+    para(`Hi ${hi(name)},<br>Your admission has been recorded. Keep this email: it contains your official student number and programme details.`) +
+    detailCard(
+      row('Student number', studentId) +
+        row('Programme', program) +
+        row('Department', department) +
+        row('Batch', batch || 'To be assigned') +
+        row('Delivery stream', category) +
+        row('Admission date', admissionDate ? formatEthiopian(admissionDate) : 'Recorded'),
+    ) +
+    para('Use your student number whenever you contact the registrar, sit an examination, or collect an official document.') +
+    note('If any detail above is not correct, contact the registrar before classes begin.');
+
+  return deliver({
+    to,
+    subject: `Your admission is confirmed · ${studentId}`,
+    html: layout({
+      preheader: `Student number ${studentId} is now active`,
+      title: 'Your admission is confirmed',
+      accent: 'Student admission',
+      body,
+    }),
+    text: `Your admission is confirmed. Student number: ${studentId}. Programme: ${program}. Department: ${department}. Batch: ${batch || 'To be assigned'}. Delivery stream: ${category}. Admission date: ${admissionDate ? formatEthiopian(admissionDate) : 'Recorded'}. If any detail is not correct, contact the registrar.`,
+  });
+}
+
 // Settings can prove the mail path works without ever returning a secret. The test
 // message goes only to the signed-in administrator's own address.
 export function sendTestEmail({ to, name, transport }) {

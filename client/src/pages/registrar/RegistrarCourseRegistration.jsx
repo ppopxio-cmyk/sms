@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ClipboardCheck, UsersRound } from 'lucide-react';
+import { ClipboardCheck, Download, FileText, Plus, Trash2, Upload, UsersRound } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import {
   REGISTRAR,
@@ -17,6 +17,7 @@ import { FormGrid, SelectField } from '../../components/registrar/Fields';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
+import Field from '../../components/ui/Field';
 import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
 import SearchInput from '../../components/ui/SearchInput';
@@ -37,6 +38,10 @@ export default function RegistrarCourseRegistration() {
   const [recordPage, setRecordPage] = useState(1);
   const [recordLimit, setRecordLimit] = useState(20);
   const [dropping, setDropping] = useState(null);
+  const [materialProgram, setMaterialProgram] = useState('');
+  const [materialSearch, setMaterialSearch] = useState('');
+  const [materialModal, setMaterialModal] = useState(false);
+  const [removingMaterial, setRemovingMaterial] = useState(null);
 
   const options = useQuery({
     queryKey: ['registrar', 'offering-options'],
@@ -81,6 +86,22 @@ export default function RegistrarCourseRegistration() {
     placeholderData: (previous) => previous,
   });
 
+  const materials = useQuery({
+    queryKey: ['registrar', 'course-materials'],
+    queryFn: async () => (await api.get(`${REGISTRAR}/course-registration/resources`)).data,
+    staleTime: 60_000,
+  });
+
+  const removeMaterial = useMutation({
+    mutationFn: async () => (await api.delete(`${REGISTRAR}/course-registration/resources/${removingMaterial.id}`)).data,
+    onSuccess: () => {
+      toast.success('Course material removed.');
+      setRemovingMaterial(null);
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'course-materials'] });
+    },
+    onError: (err) => toast.error(errorMessage(err, 'The course material could not be removed.')),
+  });
+
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['registrar', 'registrations'] });
     queryClient.invalidateQueries({ queryKey: ['registrar', 'offerings'] });
@@ -103,6 +124,65 @@ export default function RegistrarCourseRegistration() {
   const recordRows = records.data?.rows ?? [];
   const recordPagination = records.data?.pagination ?? { page: 1, pages: 1, total: 0, limit };
   const counts = records.data?.counts ?? {};
+  const allMaterials = materials.data?.resources ?? [];
+  const materialCounts = useMemo(() => {
+    const map = new Map();
+    for (const row of allMaterials) {
+      if (row.program?.id) map.set(row.program.id, (map.get(row.program.id) || 0) + 1);
+    }
+    return map;
+  }, [allMaterials]);
+  const visibleMaterials = useMemo(() => {
+    const term = materialSearch.trim().toLowerCase();
+    return allMaterials.filter((row) => (
+      (!materialProgram || row.program?.id === materialProgram)
+      && (!term || [row.courseName, row.courseCode, row.fileName].some((value) => String(value || '').toLowerCase().includes(term)))
+    ));
+  }, [allMaterials, materialProgram, materialSearch]);
+
+  const materialColumns = [
+    {
+      key: 'course',
+      label: 'Course',
+      render: (row) => (
+        <div>
+          <p className="text-sm font-semibold text-slate-900">{row.courseCode}</p>
+          <p className="text-xs text-slate-500">{row.courseName}</p>
+        </div>
+      ),
+    },
+    { key: 'program', label: 'Programme', render: (row) => row.program ? `${row.program.code} · ${row.program.name}` : '—' },
+    {
+      key: 'file',
+      label: 'Material',
+      render: (row) => (
+        <div className="flex items-center gap-2">
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-50 text-slate-500"><FileText className="h-4 w-4" /></span>
+          <div className="min-w-0">
+            <p className="truncate text-sm text-slate-700">{row.fileName}</p>
+            <p className="text-xs text-slate-400">{formatBytes(row.bytes)}</p>
+          </div>
+        </div>
+      ),
+    },
+    { key: 'uploaded', label: 'Uploaded', render: (row) => new Date(row.createdAt).toLocaleDateString() },
+    {
+      key: 'actions',
+      label: '',
+      className: 'text-right',
+      mobileFull: true,
+      render: (row) => (
+        <div className="flex justify-end gap-1.5">
+          <a href={row.url} target="_blank" rel="noreferrer" className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-brand-700 hover:bg-brand-50">
+            <Download className="h-3.5 w-3.5" /> Open
+          </a>
+          <Button size="sm" variant="ghost" onClick={() => setRemovingMaterial(row)} aria-label={`Remove ${row.fileName}`}>
+            <Trash2 className="h-3.5 w-3.5 text-rose-600" />
+          </Button>
+        </div>
+      ),
+    },
+  ];
 
   const terms = useMemo(() => {
     const list = calendar.data?.terms || [];
@@ -203,8 +283,58 @@ export default function RegistrarCourseRegistration() {
     <div className="space-y-6">
       <RegistrarPageHeader
         title="Course registration"
-        subtitle="Choose a course offering, then register its eligible students in one action. The server checks the published plan, prerequisites, opening window, programme, level and seat capacity."
+        subtitle="Register students against open offerings and keep each programme's course materials in one place."
       />
+
+      <Card>
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Course materials</h2>
+            <p className="mt-0.5 text-xs text-slate-500">Every programme is listed here. Add a course name, code and its PDF or Word material.</p>
+          </div>
+          <Button onClick={() => setMaterialModal(true)} className="gap-1.5"><Plus className="h-4 w-4" /> Add material</Button>
+        </div>
+        <div className="border-b border-slate-100 px-5 py-4">
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            <button
+              type="button"
+              onClick={() => setMaterialProgram('')}
+              className={`focus-ring shrink-0 rounded-xl border px-3 py-2 text-left transition ${!materialProgram ? 'border-brand-300 bg-brand-50 text-brand-800' : 'border-slate-100 bg-white text-slate-600 hover:border-slate-200'}`}
+            >
+              <span className="block text-xs font-semibold">All programmes</span>
+              <span className="mt-0.5 block text-[11px] opacity-70">{allMaterials.length} file{allMaterials.length === 1 ? '' : 's'}</span>
+            </button>
+            {(options.data?.programs || []).map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                onClick={() => setMaterialProgram(row.id)}
+                className={`focus-ring w-44 shrink-0 rounded-xl border px-3 py-2 text-left transition ${materialProgram === row.id ? 'border-brand-300 bg-brand-50 text-brand-800' : 'border-slate-100 bg-white text-slate-600 hover:border-slate-200'}`}
+              >
+                <span className="block truncate text-xs font-semibold">{row.code}</span>
+                <span className="mt-0.5 block truncate text-[11px] opacity-70">{row.name}</span>
+                <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wider opacity-60">{materialCounts.get(row.id) || 0} file{(materialCounts.get(row.id) || 0) === 1 ? '' : 's'}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="px-5 py-3">
+          <SearchInput value={materialSearch} onChange={(event) => setMaterialSearch(event.target.value)} placeholder="Search course name, code or file" loading={materials.isFetching} />
+        </div>
+        <RegistrarTable
+          columns={materialColumns}
+          rows={visibleMaterials}
+          loading={materials.isLoading}
+          error={materials.error ? materials.error?.response?.data?.message || 'Course materials could not be loaded.' : null}
+          onRetry={materials.refetch}
+          rowKey={(row) => row.id}
+          noResults={Boolean(materialProgram || materialSearch.trim())}
+          emptyTitle="No course materials yet"
+          emptyMessage="Use Add material to upload the first PDF or Word document."
+          noResultsTitle="No material matches"
+          noResultsMessage="Choose another programme or clear the search."
+        />
+      </Card>
 
       <Card className="p-4 sm:p-5">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -314,7 +444,106 @@ export default function RegistrarCourseRegistration() {
         onClose={() => setDropping(null)}
         onConfirm={(reason) => drop.mutate(reason)}
       />
+      <CourseMaterialModal
+        open={materialModal}
+        options={options.data}
+        initialProgram={materialProgram}
+        onClose={() => setMaterialModal(false)}
+        onSaved={() => queryClient.invalidateQueries({ queryKey: ['registrar', 'course-materials'] })}
+      />
+      <ConfirmDialog
+        open={Boolean(removingMaterial)}
+        title="Remove this course material?"
+        message={removingMaterial ? `${removingMaterial.courseCode} · ${removingMaterial.fileName}. The file is removed from storage.` : ''}
+        confirmLabel="Remove material"
+        tone="danger"
+        loading={removeMaterial.isPending}
+        onClose={() => setRemovingMaterial(null)}
+        onConfirm={() => removeMaterial.mutate()}
+      />
     </div>
+  );
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return '—';
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function CourseMaterialModal({ open, options, initialProgram, onClose, onSaved }) {
+  const [form, setForm] = useState({ program: '', courseName: '', courseCode: '' });
+  const [file, setFile] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setError('');
+    setFile(null);
+    setForm({ program: initialProgram || '', courseName: '', courseCode: '' });
+  }, [open, initialProgram]);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      if (!form.program || !form.courseName.trim() || !form.courseCode.trim()) {
+        throw new Error('Programme, course name, course code and a file are required.');
+      }
+      if (!file) throw new Error('Choose a PDF or Word document.');
+      if (file.size > 10 * 1024 * 1024) throw new Error('The course material must be smaller than 10 MB.');
+      const extension = file.name.split('.').pop()?.toLowerCase();
+      if (!['pdf', 'doc', 'docx'].includes(extension)) throw new Error('Upload a PDF, DOC or DOCX file.');
+      const contentType = file.type || {
+        pdf: 'application/pdf',
+        doc: 'application/msword',
+        docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      }[extension];
+      return (await api.post(`${REGISTRAR}/course-registration/resources`, file, {
+        params: {
+          program: form.program,
+          courseName: form.courseName.trim(),
+          courseCode: form.courseCode.trim(),
+          filename: file.name,
+        },
+        headers: { 'Content-Type': contentType },
+        timeout: 60_000,
+      })).data;
+    },
+    onSuccess: () => {
+      toast.success('Course material uploaded.');
+      onSaved?.();
+      onClose?.();
+    },
+    onError: (err) => {
+      const message = errorMessage(err, 'The course material could not be uploaded.');
+      setError(message);
+      toast.error(message);
+    },
+  });
+
+  const set = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+
+  return (
+    <Modal
+      open={open}
+      title="Add course material"
+      subtitle="Attach a PDF or Word document to a programme course."
+      onClose={save.isPending ? undefined : onClose}
+      dismissible={!save.isPending}
+      footer={<><Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending} className="gap-1.5"><Upload className="h-4 w-4" /> Upload</Button></>}
+    >
+      <div className="grid gap-4">
+        {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
+        <FormGrid>
+          <SelectField label="Programme" value={form.program} onChange={(event) => set('program', event.target.value)} required>
+            <option value="">Choose a programme</option>
+            {(options?.programs || []).map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
+          </SelectField>
+          <Field label="Course code" value={form.courseCode} onChange={(event) => set('courseCode', event.target.value)} placeholder="e.g. CS101" required />
+          <Field label="Course name" value={form.courseName} onChange={(event) => set('courseName', event.target.value)} placeholder="e.g. Introduction to Computing" required />
+          <Field label="PDF or Word document" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => setFile(event.target.files?.[0] || null)} hint="Maximum 10 MB. PDF, DOC or DOCX." required />
+        </FormGrid>
+      </div>
+    </Modal>
   );
 }
 

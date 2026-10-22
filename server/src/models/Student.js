@@ -89,6 +89,7 @@ const studentSchema = new mongoose.Schema(
 );
 
 studentSchema.index({ studentId: 1 }, { unique: true });
+studentSchema.index({ email: 1 }, { unique: true, partialFilterExpression: { email: { $gt: '' } } });
 studentSchema.index({ lastName: 1, firstName: 1 });
 studentSchema.index({ program: 1, batch: 1, studentStatus: 1 });
 

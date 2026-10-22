@@ -339,6 +339,19 @@ function CreatePlanModal({ open, options, onClose, onSaved }) {
     }
   }, [open, options?.academicYears]);
 
+  const fillFromProgramme = (field, value) => {
+    setForm((current) => {
+      const next = { ...current, [field]: value };
+      const program = (options?.programs || []).find((row) => row.id === (field === 'program' ? value : current.program));
+      const year = (options?.academicYears || []).find((row) => row.id === (field === 'academicYear' ? value : current.academicYear));
+      if (program) {
+        next.title = year ? `${program.name} — ${year.label}` : program.name;
+        next.notes = `Official curriculum for ${program.name}${program.department ? ` in the ${program.department.name} department` : ''}.${program.durationYears ? ` The programme spans ${program.durationYears} year${program.durationYears === 1 ? '' : 's'}.` : ''}`;
+      }
+      return next;
+    });
+  };
+
   const save = useMutation({
     mutationFn: async () => {
       if (!form.program || !form.academicYear) throw new Error('Programme and academic year are required.');
@@ -371,11 +384,11 @@ function CreatePlanModal({ open, options, onClose, onSaved }) {
       <div className="grid gap-4">
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
         <FormGrid>
-          <SelectField label="Programme" value={form.program} onChange={(event) => setForm((value) => ({ ...value, program: event.target.value }))} required>
+          <SelectField label="Programme" value={form.program} onChange={(event) => fillFromProgramme('program', event.target.value)} required>
             <option value="">Choose a programme</option>
             {(options?.programs || []).map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
           </SelectField>
-          <SelectField label="Academic year" value={form.academicYear} onChange={(event) => setForm((value) => ({ ...value, academicYear: event.target.value }))} required>
+          <SelectField label="Academic year" value={form.academicYear} onChange={(event) => fillFromProgramme('academicYear', event.target.value)} required>
             <option value="">Choose a year</option>
             {(options?.academicYears || []).map((row) => <option key={row.id} value={row.id}>{row.label}{row.isCurrent ? ' · current' : ''}</option>)}
           </SelectField>
@@ -433,48 +446,60 @@ function EditPlanModal({ open, plan, onClose, onSaved }) {
 }
 
 function CourseModal({ open, plan, record, options, onClose, onSaved }) {
-  const [form, setForm] = useState({ course: '', level: 1, term: '', creditHours: 3, category: 'required', prerequisites: [] });
+  const [form, setForm] = useState({ courses: [], level: 1, term: '', creditHours: 3, category: 'required', prerequisites: [] });
   const [error, setError] = useState('');
+
+  const planTerms = useMemo(() => {
+    const names = (options?.terms || [])
+      .filter((row) => !plan?.academicYear?.id || row.academicYear?.id === plan.academicYear.id)
+      .map((row) => row.name);
+    if (record?.term && !names.includes(record.term)) names.push(record.term);
+    return Array.from(new Set(names));
+  }, [options?.terms, plan?.academicYear?.id, record?.term]);
 
   useEffect(() => {
     if (!open) return;
     setError('');
     setForm(record ? {
-      course: record.course?.id || '',
+      courses: [record.course?.id].filter(Boolean),
       level: record.level || 1,
       term: record.term || '',
       creditHours: record.creditHours || 1,
       category: record.category || 'required',
       prerequisites: (record.prerequisites || []).map((item) => item.id),
     } : {
-      course: '',
+      courses: [],
       level: 1,
-      term: '',
+      term: planTerms[0] || '',
       creditHours: 3,
       category: 'required',
       prerequisites: [],
     });
-  }, [open, record]);
+  }, [open, record, planTerms]);
 
   const save = useMutation({
     mutationFn: async () => {
-      if (!form.course || !form.level || !form.creditHours) throw new Error('Course, level and credits are required.');
-      const payload = {
-        ...form,
-        level: Number(form.level),
-        creditHours: Number(form.creditHours),
-        prerequisites: form.prerequisites,
-      };
-      return (
+      if (!form.courses.length || !form.level) throw new Error('Choose at least one course and its level.');
+      if (record && !form.creditHours) throw new Error('Credits are required.');
+      for (const courseId of form.courses) {
+        const course = (options?.courses || []).find((row) => row.id === courseId);
         await api.request({
           url: `${REGISTRAR}/curriculum/${plan.id}/courses${record ? `/${record.id}` : ''}`,
           method: record ? 'patch' : 'post',
-          data: payload,
-        })
-      ).data;
+          data: {
+            course: courseId,
+            level: Number(form.level),
+            term: form.term,
+            creditHours: record ? Number(form.creditHours) : course?.creditHours || 3,
+            category: form.category,
+            prerequisites: form.prerequisites,
+          },
+        });
+      }
+      return form.courses.length;
     },
-    onSuccess: () => {
-      toast.success(record ? 'Course updated in the draft.' : 'Course added to the draft.');
+    onSuccess: (count) => {
+      toast.success(record ? 'Course updated in the draft.' : `${count} course${count === 1 ? '' : 's'} added to the draft.`);
       onSaved?.();
       onClose?.();
     },
@@ -485,35 +510,59 @@ function CourseModal({ open, plan, record, options, onClose, onSaved }) {
     },
   });
 
+  const set = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+  const toggleCourse = (courseId) => setForm((current) => ({
+    ...current,
+    courses: current.courses.includes(courseId)
+      ? current.courses.filter((id) => id !== courseId)
+      : [...current.courses, courseId],
+  }));
+  const availableCourses = (options?.courses || []).filter((row) => record ? row.id === record.course?.id : true);
+
   return (
     <Modal
       open={open}
-      title={record ? 'Edit plan course' : 'Add course to plan'}
-      subtitle="Each course appears once per level and term in a plan."
+      title={record ? 'Edit plan course' : 'Add courses to plan'}
+      subtitle="Tick every course for the selected level and term. Each keeps its catalogue credit hours."
       onClose={save.isPending ? undefined : onClose}
       dismissible={!save.isPending}
-      footer={<><Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending}>{record ? 'Save course' : 'Add course'}</Button></>}
+      footer={<><Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending}>{record ? 'Save course' : form.courses.length ? `Add ${form.courses.length} course${form.courses.length === 1 ? '' : 's'}` : 'Add courses'}</Button></>}
     >
       <div className="grid gap-4">
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
-        <FormGrid>
-          <SelectField
-            label="Course"
-            value={form.course}
-            onChange={(event) => {
-              const course = (options?.courses || []).find((row) => row.id === event.target.value);
-              setForm((value) => ({ ...value, course: event.target.value, creditHours: course?.creditHours || value.creditHours }));
-            }}
-            disabled={Boolean(record)}
-            required
-          >
-            <option value="">Choose a course</option>
-            {(options?.courses || []).map((row) => <option key={row.id} value={row.id}>{row.code} · {row.title} ({row.creditHours} cr)</option>)}
+        {record ? (
+          <SelectField label="Course" value={form.courses[0] || ''} disabled>
+            <option value={record.course?.id || ''}>{record.course?.code} · {record.course?.title}</option>
           </SelectField>
-          <Field label="Level / year" type="number" min="1" max="20" value={form.level} onChange={(event) => setForm((value) => ({ ...value, level: event.target.value }))} required />
-          <Field label="Term" value={form.term} onChange={(event) => setForm((value) => ({ ...value, term: event.target.value }))} placeholder="e.g. Semester I" />
-          <Field label="Credit hours" type="number" min="0.5" step="0.5" value={form.creditHours} onChange={(event) => setForm((value) => ({ ...value, creditHours: event.target.value }))} required />
-          <SelectField label="Category" value={form.category} onChange={(event) => setForm((value) => ({ ...value, category: event.target.value }))}>
+        ) : (
+          <div>
+            <span className="mb-1.5 block text-sm font-medium text-slate-700">Courses</span>
+            <div className="max-h-64 space-y-1 overflow-y-auto rounded-xl border border-slate-100 p-2">
+              {availableCourses.map((row) => (
+                <label key={row.id} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+                  <input
+                    type="checkbox"
+                    checked={form.courses.includes(row.id)}
+                    onChange={() => toggleCourse(row.id)}
+                    className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                  />
+                  <span className="min-w-0 flex-1 truncate">{row.code} · {row.title}</span>
+                  <span className="text-xs text-slate-400">{row.creditHours} cr</span>
+                </label>
+              ))}
+              {!availableCourses.length ? <p className="px-2 py-3 text-sm text-slate-500">No active courses available.</p> : null}
+            </div>
+            <p className="mt-1.5 text-xs text-slate-500">{form.courses.length} selected.</p>
+          </div>
+        )}
+        <FormGrid>
+          <Field label="Level / year" type="number" min="1" max="20" value={form.level} onChange={(event) => set('level', event.target.value)} required />
+          <SelectField label="Term" value={form.term} onChange={(event) => set('term', event.target.value)}>
+            <option value="">No term</option>
+            {planTerms.map((name) => <option key={name} value={name}>{name}</option>)}
+          </SelectField>
+          {record ? <Field label="Credit hours" type="number" min="0.5" step="0.5" value={form.creditHours} onChange={(event) => set('creditHours', event.target.value)} required /> : null}
+          <SelectField label="Category" value={form.category} onChange={(event) => set('category', event.target.value)}>
             <option value="required">Required</option>
             <option value="elective">Elective</option>
           </SelectField>
@@ -523,10 +572,10 @@ function CourseModal({ open, plan, record, options, onClose, onSaved }) {
           <select
             multiple
             value={form.prerequisites}
-            onChange={(event) => setForm((value) => ({ ...value, prerequisites: Array.from(event.target.selectedOptions, (option) => option.value) }))}
+            onChange={(event) => set('prerequisites', Array.from(event.target.selectedOptions, (option) => option.value))}
             className="focus-ring min-h-28 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
           >
-            {(options?.courses || []).filter((row) => row.id !== form.course).map((row) => (
+            {(options?.courses || []).filter((row) => !form.courses.includes(row.id)).map((row) => (
               <option key={row.id} value={row.id}>{row.code} · {row.title}</option>
             ))}
           </select>

@@ -47,8 +47,8 @@ const blankProgram = () => ({
   active: true,
 });
 
-function programToForm(row) {
-  if (!row) return blankProgram();
+function programToForm(row, departmentId = '') {
+  if (!row) return { ...blankProgram(), department: departmentId };
   return {
     ...blankProgram(),
     code: row.code || '',
@@ -217,6 +217,9 @@ export default function RegistrarAcademicStructure() {
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Badge tone={row.active ? 'success' : 'neutral'}>{row.active ? 'Active' : 'Inactive'}</Badge>
+                      <button type="button" aria-label={`Add programme to ${row.name}`} title="Add programme" className="focus-ring rounded-lg p-1.5 text-slate-400 hover:bg-brand-50 hover:text-brand-700" onClick={() => setProgramModal({ row: null, departmentId: row.id })}>
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
                       <button type="button" aria-label={`Edit ${row.name}`} className="focus-ring rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" onClick={() => setDepartmentModal({ row })}>
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
@@ -319,6 +322,7 @@ export default function RegistrarAcademicStructure() {
       <ProgramModal
         open={Boolean(programModal)}
         row={programModal?.row}
+        departmentId={programModal?.departmentId}
         departments={query.data?.departments || []}
         teachers={query.data?.teachers || []}
         onClose={() => setProgramModal(null)}
@@ -342,53 +346,29 @@ export default function RegistrarAcademicStructure() {
 
 function DepartmentModal({ open, row, onClose, onSaved }) {
   const [form, setForm] = useState(blankDepartment);
-  const [program, setProgram] = useState(blankProgram);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!open) return;
     setError('');
     setForm(row ? { code: row.code || '', name: row.name || '', description: row.description || '' } : blankDepartment());
-    setProgram(blankProgram());
   }, [open, row]);
 
   const save = useMutation({
     mutationFn: async () => {
       if (!form.code.trim() || !form.name.trim()) throw new Error('Code and name are required.');
-      if (!row) {
-        const wantsProgram = Boolean(program.code.trim() || program.name.trim());
-        if (wantsProgram && (!program.code.trim() || !program.name.trim())) {
-          throw new Error('Enter both the programme code and programme name, or leave both blank.');
-        }
-        if (wantsProgram && !program.categories.length) {
-          throw new Error('Choose at least one regular/extension stream for the programme.');
-        }
-        const department = (await api.post(`${REGISTRAR}/academic-structure/departments`, {
+      return (await api.request({
+        url: `${REGISTRAR}/academic-structure/departments${row ? `/${row.id}` : ''}`,
+        method: row ? 'patch' : 'post',
+        data: {
           code: form.code.trim(),
           name: form.name.trim(),
           description: form.description.trim(),
-        })).data;
-        if (!wantsProgram) return department;
-        const departmentId = department.department._id || department.department.id;
-        try {
-          await api.post(`${REGISTRAR}/academic-structure/programs`, {
-            ...programPayload(program),
-            department: departmentId,
-          });
-          return department;
-        } catch (err) {
-          await api.delete(`${REGISTRAR}/academic-structure/departments/${departmentId}`).catch(() => {});
-          throw err;
-        }
-      }
-      return (await api.patch(`${REGISTRAR}/academic-structure/departments/${row.id}`, {
-        code: form.code.trim(),
-        name: form.name.trim(),
-        description: form.description.trim(),
+        },
       })).data;
     },
     onSuccess: () => {
-      toast.success(row ? 'Department updated.' : program.code.trim() ? 'Department and initial programme created.' : 'Department created.');
+      toast.success(row ? 'Department updated.' : 'Department created. Add its first programme from the department card.');
       onSaved?.();
       onClose?.();
     },
@@ -400,25 +380,12 @@ function DepartmentModal({ open, row, onClose, onSaved }) {
   });
 
   const set = (field, value) => setForm((current) => ({ ...current, [field]: value }));
-  const setProgramField = (field, value) => setProgram((current) => ({ ...current, [field]: value }));
-  const toggleProgramCategory = (category) => setProgram((current) => ({
-    ...current,
-    categories: current.categories.includes(category)
-      ? current.categories.filter((value) => value !== category)
-      : [...current.categories, category],
-  }));
-  const toggleProgramLevel = (level) => setProgram((current) => ({
-    ...current,
-    levels: current.levels.includes(level)
-      ? current.levels.filter((value) => value !== level)
-      : [...current.levels, level].sort((a, b) => a - b),
-  }));
 
   return (
     <Modal
       open={open}
       title={row ? 'Edit department' : 'New department'}
-      subtitle="The code is used on official student numbers and reports. A new department can also start with its first programme."
+      subtitle="The code is used on official student numbers and reports. Programmes are added from the department card after it is created."
       size="lg"
       onClose={save.isPending ? undefined : onClose}
       dismissible={!save.isPending}
@@ -431,77 +398,20 @@ function DepartmentModal({ open, row, onClose, onSaved }) {
           <Field label="Department name" value={form.name} onChange={(event) => set('name', event.target.value)} placeholder="e.g. Computer Science" required />
           <TextAreaField className="sm:col-span-2" label="Description" rows={3} value={form.description} onChange={(event) => set('description', event.target.value)} />
         </FormGrid>
-
-        {!row ? (
-          <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
-            <div className="mb-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Initial programme</p>
-              <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                Optional. Fill both programme fields to create the department and its first programme together. Choose the regular and/or extension streams it offers.
-              </p>
-            </div>
-            <FormGrid>
-              <Field label="Programme code" value={program.code} onChange={(event) => setProgramField('code', event.target.value)} placeholder="e.g. CS-BSC" />
-              <Field label="Programme name" value={program.name} onChange={(event) => setProgramField('name', event.target.value)} placeholder="e.g. BSc Computer Science" />
-              <SelectField label="Qualification" value={program.qualificationType} onChange={(event) => setProgramField('qualificationType', event.target.value)}>
-                {QUALIFICATIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-              </SelectField>
-              <Field label="Student capacity" type="number" min="1" max="10000" value={program.capacity} onChange={(event) => setProgramField('capacity', event.target.value)} hint="Leave blank for no cap." />
-              {program.qualificationType === 'degree' ? (
-                <Field label="Duration (years)" type="number" min="1" max="10" value={program.durationYears} onChange={(event) => setProgramField('durationYears', event.target.value)} />
-              ) : null}
-              {program.qualificationType === 'short-term' ? (
-                <>
-                  <Field label="Duration" type="number" min="1" max="520" value={program.shortTerm.duration} onChange={(event) => setProgram((current) => ({ ...current, shortTerm: { ...current.shortTerm, duration: event.target.value } }))} />
-                  <SelectField label="Duration unit" value={program.shortTerm.unit} onChange={(event) => setProgram((current) => ({ ...current, shortTerm: { ...current.shortTerm, unit: event.target.value } }))}>
-                    <option value="weeks">Weeks</option>
-                    <option value="months">Months</option>
-                  </SelectField>
-                </>
-              ) : null}
-            </FormGrid>
-
-            <div className="mt-4 rounded-2xl bg-white p-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Regular / extension streams</p>
-              <div className="flex flex-wrap gap-2">
-                {['regular', 'extension'].map((category) => (
-                  <label key={category} className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${program.categories.includes(category) ? 'border-brand-200 bg-brand-50 text-brand-900' : 'border-slate-200 bg-white text-slate-700'}`}>
-                    <input type="checkbox" checked={program.categories.includes(category)} onChange={() => toggleProgramCategory(category)} className="h-4 w-4 rounded border-slate-300 text-brand-600" />
-                    {category === 'regular' ? 'Regular' : 'Extension'}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {program.qualificationType === 'diploma' ? (
-              <div className="mt-3 rounded-2xl bg-white p-3">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Diploma levels</p>
-                <div className="flex flex-wrap gap-2">
-                  {[1, 2, 3, 4].map((level) => (
-                    <label key={level} className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${program.levels.includes(level) ? 'border-brand-200 bg-brand-50 text-brand-900' : 'border-slate-200 bg-white text-slate-700'}`}>
-                      <input type="checkbox" checked={program.levels.includes(level)} onChange={() => toggleProgramLevel(level)} className="h-4 w-4 rounded border-slate-300 text-brand-600" />
-                      Level {level}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
       </div>
     </Modal>
   );
 }
 
-function ProgramModal({ open, row, departments, teachers, onClose, onSaved }) {
+function ProgramModal({ open, row, departmentId, departments, teachers, onClose, onSaved }) {
   const [form, setForm] = useState(blankProgram);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!open) return;
     setError('');
-    setForm(programToForm(row));
-  }, [open, row]);
+    setForm(programToForm(row, departmentId));
+  }, [open, row, departmentId]);
 
   const save = useMutation({
     mutationFn: async () => {

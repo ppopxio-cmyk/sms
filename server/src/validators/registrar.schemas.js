@@ -53,9 +53,9 @@ export const createStudentSchema = z.object({
   firstName: text(80).min(1),
   middleName: optionalText(80),
   lastName: text(80).min(1),
-  sex: z.enum(['female', 'male', 'other', 'unspecified']).optional().default('unspecified'),
+  sex: z.enum(['female', 'male']),
   dateOfBirth: date.nullish(),
-  email: z.union([z.literal(''), z.email()]).optional().default(''),
+  email: z.email('Enter a valid email address.').transform((value) => value.trim().toLowerCase()),
   phone: ethiopianPhone,
   address: z
     .object({
@@ -164,12 +164,33 @@ export const calendarEventSchema = z.object({
 export const batchSchema = z.object({
   code: text(30).min(1),
   name: text(120).min(1),
-  program: objectId,
+  department: objectId.optional(),
+  program: objectId.optional(),
+  programs: z.array(objectId).min(1).max(50).optional(),
   category: z.enum(['regular', 'extension']).optional().default('regular'),
   admissionAcademicYear: objectId,
+  durationYears: z.coerce.number().int().min(1).max(5).nullish(),
   expectedCompletionYear: z.coerce.number().int().min(2000).max(2300).nullish(),
   currentLevel: z.coerce.number().int().min(1).max(20).optional().default(1),
   status: z.enum(['planned', 'active', 'completed', 'archived']).optional().default('planned'),
+});
+
+export const batchUpdateSchema = z.object({
+  code: text(30).min(1).optional(),
+  name: text(120).min(1).optional(),
+  department: objectId.optional(),
+  program: objectId.optional(),
+  programs: z.array(objectId).min(1).max(50).optional(),
+  category: z.enum(['regular', 'extension']).optional(),
+  admissionAcademicYear: objectId.optional(),
+  durationYears: z.coerce.number().int().min(1).max(5).nullish(),
+  expectedCompletionYear: z.coerce.number().int().min(2000).max(2300).nullish(),
+  currentLevel: z.coerce.number().int().min(1).max(20).optional(),
+  status: z.enum(['planned', 'active', 'completed', 'archived']).optional(),
+});
+
+export const batchExportQuerySchema = z.object({
+  format: z.enum(['docx', 'pdf']).optional().default('pdf'),
 });
 
 export const batchAssignSchema = z.object({
@@ -266,6 +287,18 @@ export const listRegistrationsQuerySchema = paginationSchema.extend({
   term: text(60).optional(),
   student: objectId.optional(),
   status: z.enum(['all', 'registered', 'dropped', 'withdrawn', 'completed', 'cancelled']).optional().default('all'),
+});
+
+export const listCourseResourcesQuerySchema = z.object({
+  program: objectId.optional(),
+  search: text(120).optional(),
+});
+
+export const courseResourceUploadSchema = z.object({
+  program: objectId,
+  courseName: text(160).min(1),
+  courseCode: text(40).min(1),
+  filename: text(255).min(1),
 });
 
 export const listResultsQuerySchema = paginationSchema.extend({
@@ -448,6 +481,14 @@ export const listBatchesQuerySchema = paginationSchema.extend({
   department: objectId.optional(),
   category: z.enum(['regular', 'extension']).optional(),
   status: z.enum(['all', 'planned', 'active', 'completed', 'archived']).optional().default('all'),
+});
+
+export const analyticsQuerySchema = z.object({
+  academicYear: objectId.optional(),
+  department: objectId.optional(),
+  program: objectId.optional(),
+  batch: objectId.optional(),
+  category: z.enum(['regular', 'extension']).optional(),
 });
 
 export const listPlansQuerySchema = paginationSchema.extend({

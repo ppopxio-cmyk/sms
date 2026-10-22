@@ -12,6 +12,7 @@ import { signedImageUrl, uploadImage, deleteImage, validateImage } from '../serv
 import { sendCode } from '../services/codeDelivery.js';
 import { checkCode } from '../services/code.service.js';
 import { notifyAdmins } from '../services/notification.service.js';
+import { sendStudentAdmissionEmail } from '../services/mail.service.js';
 import { buildStudentProfileExport } from '../services/studentExport.service.js';
 import { logger } from '../utils/logger.js';
 import { pageOf, sortOf, searchFilter, mergeFilters, paged, ownFilter } from '../services/registrar.helpers.js';
@@ -125,6 +126,24 @@ async function assertCapacity(program) {
   }
 }
 
+async function assertEmailAvailable(email, excludeId) {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) throw new AppError(400, 'EMAIL_REQUIRED', 'A student email address is required.');
+  const duplicate = await Student.findOne(
+    ownFilter({ email: normalized, ...(excludeId ? { _id: { $ne: excludeId } } : {}) }),
+  )
+    .select('studentId')
+    .lean();
+  if (duplicate) {
+    throw new AppError(
+      409,
+      'STUDENT_EMAIL_EXISTS',
+      `That email address already belongs to student ${duplicate.studentId}.`,
+    );
+  }
+  return normalized;
+}
+
 export const listStudents = asyncHandler(async (req, res) => {
   const query = req.valid.query;
   const { page, limit, skip } = pageOf(query);
@@ -215,6 +234,7 @@ export const createStudent = asyncHandler(async (req, res) => {
   const { program, department, batch } = await loadOptions(input.program, input.department, input.batch, category);
   await assertCapacity(program);
   validateLevel(program, input.level || 1);
+  const email = await assertEmailAvailable(input.email);
 
   let academicYear = null;
   const yearId = input.admissionAcademicYear || batch?.admissionAcademicYear;
@@ -226,6 +246,7 @@ export const createStudent = asyncHandler(async (req, res) => {
   const studentId = await nextStudentId({ program, batch, category });
   const student = await Student.create({
     ...input,
+    email,
     studentId,
     studentCategory: category,
     department: department._id,
@@ -265,6 +286,16 @@ export const createStudent = asyncHandler(async (req, res) => {
     targetId: student._id,
     meta: { studentId: student.studentId, program: program.code, category, batch: batch?.code ?? null },
   });
+  void sendStudentAdmissionEmail({
+    to: email,
+    name: student.fullName,
+    studentId: student.studentId,
+    program: program.name,
+    department: department.name,
+    batch: batch?.name || batch?.code || '',
+    category: category === 'extension' ? 'Extension' : 'Regular',
+    admissionDate: student.admissionDate,
+  }).catch((err) => logger.error({ err: err?.message, studentId: student.studentId }, 'admission email failed'));
   res.status(201).json({ student: studentView(student.toObject()) });
 });
 
@@ -279,6 +310,7 @@ export const updateStudent = asyncHandler(async (req, res) => {
   const { program, department, batch } = await loadOptions(programId, departmentId, batchId, category);
   const level = input.level !== undefined ? Number(input.level) : student.level;
   validateLevel(program, level);
+  if (input.email !== undefined) input.email = await assertEmailAvailable(input.email, student._id);
 
   const placementChanged =
     input.program !== undefined || input.batch !== undefined || input.studentCategory !== undefined;

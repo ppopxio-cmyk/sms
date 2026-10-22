@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
+  BarChart3,
   Bell,
   BookOpen,
   CalendarDays,
@@ -145,6 +146,25 @@ export default function RegistrarNav({ onNavigate }) {
           <>
             <LayoutDashboard className={`h-4 w-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-brand-500'}`} />
             Dashboard
+          </>
+        )}
+      </NavLink>
+
+      <NavLink
+        to="/registrar/analytics"
+        onClick={onNavigate}
+        className={({ isActive }) =>
+          `focus-ring group flex items-center gap-3 rounded-2xl px-3.5 py-2.5 text-sm font-semibold transition ${
+            isActive
+              ? 'bg-brand-50 text-brand-800 ring-1 ring-brand-100'
+              : 'text-slate-600 hover:bg-white hover:text-slate-900 hover:shadow-sm'
+          }`
+        }
+      >
+        {({ isActive }) => (
+          <>
+            <BarChart3 className={`h-4 w-4 shrink-0 ${isActive ? 'text-brand-600' : 'text-slate-400 group-hover:text-brand-500'}`} />
+            Analytics
           </>
         )}
       </NavLink>

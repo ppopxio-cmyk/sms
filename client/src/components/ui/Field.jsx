@@ -5,7 +5,7 @@ import { CircleAlert, CircleCheck, Eye, EyeOff } from 'lucide-react';
 // password fields, where the toggle button takes that spot and PasswordMeter
 // below the field does the reporting.
 const Field = forwardRef(function Field(
-  { label, error, hint, icon: Icon, status, type = 'text', className = '', children, autoComplete, ...rest },
+  { label, error, hint, icon: Icon, prefix, status, type = 'text', className = '', children, autoComplete, ...rest },
   ref,
 ) {
   const id = useId();
@@ -29,6 +29,11 @@ const Field = forwardRef(function Field(
 
       <div className="relative">
         {Icon ? <Icon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /> : null}
+        {prefix ? (
+          <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-500">
+            {prefix}
+          </span>
+        ) : null}
 
         <input
           id={id}
@@ -37,7 +42,7 @@ const Field = forwardRef(function Field(
           autoComplete={autoComplete}
           aria-invalid={error ? 'true' : 'false'}
           className={`focus-ring h-11 w-full rounded-xl border bg-white/85 text-sm text-slate-900 transition placeholder:text-slate-400 ${
-            Icon ? 'pl-10' : 'pl-3.5'
+            Icon ? 'pl-10' : prefix ? 'pl-16' : 'pl-3.5'
           } ${isPassword || status ? 'pr-11' : 'pr-3.5'} ${border}`}
           {...rest}
         />

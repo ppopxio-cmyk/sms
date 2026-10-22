@@ -19,6 +19,8 @@ import {
   academicTermSchema,
   calendarEventSchema,
   batchSchema,
+  batchUpdateSchema,
+  batchExportQuerySchema,
   batchAssignSchema,
   progressionSchema,
   curriculumPlanCreateSchema,
@@ -32,6 +34,8 @@ import {
   registrationEligibleQuerySchema,
   registrationCreateSchema,
   registrationDropSchema,
+  listCourseResourcesQuerySchema,
+  courseResourceUploadSchema,
   offeringCandidatesQuerySchema,
   offeringBulkRegistrationSchema,
   listRegistrationsQuerySchema,
@@ -53,6 +57,7 @@ import {
   registrarAnnouncementSchema,
   audiencePreviewSchema,
   listBatchesQuerySchema,
+  analyticsQuerySchema,
   listPlansQuerySchema,
   planCourseParamSchema,
   listCertificatesQuerySchema,
@@ -68,13 +73,16 @@ import {
   structure, createDepartment, updateDepartment, deleteDepartment, createProgram, updateProgram, deleteProgram,
   calendar, createAcademicYear, updateAcademicYear, createTerm, updateTerm,
   createCalendarEvent, updateCalendarEvent, deleteCalendarEvent,
-  listBatches, createBatch, updateBatch, batchAssignmentPreview, assignBatch, progressBatch,
+  listBatches, getBatch, exportBatch, createBatch, updateBatch, batchAssignmentPreview, assignBatch, progressBatch,
   listPlans, planOptions, createPlan, getPlan, updatePlan, addPlanCourse, updatePlanCourse,
   removePlanCourse, reorderPlanCourses, publishPlan, archivePlan, clonePlan,
   listOfferings, offeringOptions, planOfferings, createOffering, updateOffering,
   registrationEligible, createRegistrations, offeringCandidates, registerOfferingStudents,
   listRegistrations, dropRegistration,
 } from '../controllers/registrar.academic.controller.js';
+import {
+  listCourseResources, uploadCourseResource, removeCourseResource,
+} from '../controllers/registrar.courseResources.controller.js';
 import {
   listAttendance, attendanceSummary, listResults, listResultSubmissions, getResult,
   reviewResult, approveResult, publishResult, rejectResult, correctResult,
@@ -88,7 +96,7 @@ import {
   listCertificates, getCertificate, preview, issue, downloadCertificate, revokeCertificate,
   reissueCertificate, listTranscripts, createTranscript, downloadTranscript, revokeTranscript, certificateMeta,
 } from '../controllers/registrar.documents.controller.js';
-import { dashboard, search } from '../controllers/registrar.dashboard.controller.js';
+import { dashboard, analytics, search } from '../controllers/registrar.dashboard.controller.js';
 import { reportOverview, exportReport } from '../controllers/registrar.reports.controller.js';
 import {
   previewAudience, listNotices, getNotice, createNotice, updateNotice, publishNotice,
@@ -104,6 +112,7 @@ const r = Router();
 r.use(authenticate, requirePasswordChanged, requireRole('REGISTRAR'));
 
 r.get('/dashboard', requirePermission('registrar:dashboard'), dashboard);
+r.get('/analytics', requirePermission('registrar:dashboard'), validate(analyticsQuerySchema, 'query'), analytics);
 r.get('/search', requirePermission('registrar:search'), search);
 
 // ---- Students ---------------------------------------------------------------
@@ -151,8 +160,17 @@ r.delete('/academic-calendar/events/:id', requirePermission('calendar:manage'), 
 
 // ---- Batches and progression ------------------------------------------------
 r.get('/batches', requirePermission('batches:view'), validate(listBatchesQuerySchema, 'query'), listBatches);
+r.get('/batches/:id', requirePermission('batches:view'), validate(idParamSchema, 'params'), getBatch);
+r.get(
+  '/batches/:id/export',
+  exportLimiter,
+  requirePermission('batches:view'),
+  validate(idParamSchema, 'params'),
+  validate(batchExportQuerySchema, 'query'),
+  exportBatch,
+);
 r.post('/batches', requirePermission('batches:manage'), validate(batchSchema), createBatch);
-r.patch('/batches/:id', requirePermission('batches:manage'), validate(idParamSchema, 'params'), validate(batchSchema.partial()), updateBatch);
+r.patch('/batches/:id', requirePermission('batches:manage'), validate(idParamSchema, 'params'), validate(batchUpdateSchema), updateBatch);
 r.post('/batches/:id/assignment-preview', requirePermission('batches:manage'), validate(idParamSchema, 'params'), validate(batchAssignSchema), batchAssignmentPreview);
 r.post('/batches/:id/assign', requirePermission('batches:manage'), validate(idParamSchema, 'params'), validate(batchAssignSchema), assignBatch);
 r.post('/batches/:id/progress', requirePermission('batches:manage'), validate(idParamSchema, 'params'), validate(progressionSchema), progressBatch);
@@ -197,6 +215,34 @@ r.post(
 r.get('/course-registration', requirePermission('registration:view'), validate(listRegistrationsQuerySchema, 'query'), listRegistrations);
 r.post('/course-registration', requirePermission('registration:manage'), validate(registrationCreateSchema), createRegistrations);
 r.patch('/course-registration/:id/drop', requirePermission('registration:manage'), validate(idParamSchema, 'params'), validate(registrationDropSchema), dropRegistration);
+r.get(
+  '/course-registration/resources',
+  requirePermission('registration:view'),
+  validate(listCourseResourcesQuerySchema, 'query'),
+  listCourseResources,
+);
+r.post(
+  '/course-registration/resources',
+  uploadLimiter,
+  requirePermission('registration:manage'),
+  validate(courseResourceUploadSchema, 'query'),
+  express.raw({
+    type: [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/octet-stream',
+    ],
+    limit: '10mb',
+  }),
+  uploadCourseResource,
+);
+r.delete(
+  '/course-registration/resources/:id',
+  requirePermission('registration:manage'),
+  validate(idParamSchema, 'params'),
+  removeCourseResource,
+);
 
 // ---- Attendance (read-only for the Registrar) -------------------------------
 r.get('/attendance/summary', requirePermission('attendance:view'), validate(listAttendanceQuerySchema, 'query'), attendanceSummary);

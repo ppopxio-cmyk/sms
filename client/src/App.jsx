@@ -44,11 +44,13 @@ const TeacherAssessment = lazy(() => import('./pages/teacher/TeacherAssessment.j
 const TeacherMaterials = lazy(() => import('./pages/teacher/TeacherMaterials.jsx'));
 const TeacherReports = lazy(() => import('./pages/teacher/TeacherReports.jsx'));
 const RegistrarDashboard = lazy(() => import('./pages/registrar/RegistrarDashboard.jsx'));
+const RegistrarAnalytics = lazy(() => import('./pages/registrar/RegistrarAnalytics.jsx'));
 const RegistrarStudents = lazy(() => import('./pages/registrar/RegistrarStudents.jsx'));
 const RegistrarStudent = lazy(() => import('./pages/registrar/RegistrarStudent.jsx'));
 const RegistrarAcademicStructure = lazy(() => import('./pages/registrar/RegistrarAcademicStructure.jsx'));
 const RegistrarCalendar = lazy(() => import('./pages/registrar/RegistrarCalendar.jsx'));
 const RegistrarBatches = lazy(() => import('./pages/registrar/RegistrarBatches.jsx'));
+const RegistrarBatch = lazy(() => import('./pages/registrar/RegistrarBatch.jsx'));
 const RegistrarCurriculum = lazy(() => import('./pages/registrar/RegistrarCurriculum.jsx'));
 const RegistrarCourseRegistration = lazy(() => import('./pages/registrar/RegistrarCourseRegistration.jsx'));
 const RegistrarAttendance = lazy(() => import('./pages/registrar/RegistrarAttendance.jsx'));
@@ -153,11 +155,13 @@ export default function App() {
             <Route element={<RequireRole roles={['REGISTRAR']} />}>
               <Route path="/registrar" element={<Navigate to="/registrar/dashboard" replace />} />
               <Route path="/registrar/dashboard" element={<RegistrarDashboard />} />
+              <Route path="/registrar/analytics" element={<RegistrarAnalytics />} />
               <Route path="/registrar/students" element={<RegistrarStudents />} />
               <Route path="/registrar/students/:studentId" element={<RegistrarStudent />} />
               <Route path="/registrar/academic-structure" element={<RegistrarAcademicStructure />} />
               <Route path="/registrar/academic-calendar" element={<RegistrarCalendar />} />
               <Route path="/registrar/batches" element={<RegistrarBatches />} />
+            <Route path="/registrar/batches/:batchId" element={<RegistrarBatch />} />
               <Route path="/registrar/curriculum" element={<RegistrarCurriculum />} />
               <Route path="/registrar/course-registration" element={<RegistrarCourseRegistration />} />
               <Route path="/registrar/attendance" element={<RegistrarAttendance />} />
