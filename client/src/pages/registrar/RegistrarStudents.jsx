@@ -38,6 +38,7 @@ export default function RegistrarStudents() {
   const [status, setStatus] = useState('all');
   const [program, setProgram] = useState('');
   const [department, setDepartment] = useState('');
+  const [category, setCategory] = useState('all');
   const [sort, setSort] = useState('fullName');
   const [order, setOrder] = useState('asc');
   const [page, setPage] = useState(1);
@@ -59,10 +60,11 @@ export default function RegistrarStudents() {
       ...(status !== 'all' ? { status } : {}),
       ...(program ? { program } : {}),
       ...(department ? { department } : {}),
+      ...(category !== 'all' ? { category } : {}),
       sort,
       order,
     }),
-    [page, limit, debounced, status, program, department, sort, order],
+    [page, limit, debounced, status, program, department, category, sort, order],
   );
 
   const students = useQuery({
@@ -74,7 +76,7 @@ export default function RegistrarStudents() {
   const rows = students.data?.rows ?? [];
   const pagination = students.data?.pagination ?? { page: 1, pages: 1, total: 0, limit };
   const counts = students.data?.counts ?? {};
-  const filtered = Boolean(debounced.trim() || status !== 'all' || program || department);
+  const filtered = Boolean(debounced.trim() || status !== 'all' || program || department || category !== 'all');
 
   const columns = [
     {
@@ -104,6 +106,15 @@ export default function RegistrarStudents() {
           <p className="text-sm text-slate-700">{row.program?.code || '—'}</p>
           <p className="text-xs text-slate-400">{qualificationLabel(row.program?.qualificationType)}</p>
         </div>
+      ),
+    },
+    {
+      key: 'category',
+      label: 'Category',
+      render: (row) => (
+        <Badge tone={row.studentCategory === 'extension' ? 'warning' : 'neutral'}>
+          {humanStatus(row.studentCategory || 'regular')}
+        </Badge>
       ),
     },
     {
@@ -174,7 +185,7 @@ export default function RegistrarStudents() {
             placeholder="Search by name, student ID, email or phone"
             loading={students.isFetching}
           />
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <SelectField
               label="Status"
               value={status}
@@ -197,6 +208,15 @@ export default function RegistrarStudents() {
               {(options.data?.departments || []).map((row) => (
                 <option key={row.id} value={row.id}>{row.code} · {row.name}</option>
               ))}
+            </SelectField>
+            <SelectField
+              label="Category"
+              value={category}
+              onChange={(event) => { setCategory(event.target.value); setPage(1); }}
+            >
+              <option value="all">All categories</option>
+              <option value="regular">Regular</option>
+              <option value="extension">Extension</option>
             </SelectField>
             <SelectField
               label="Programme"

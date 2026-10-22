@@ -7,6 +7,7 @@ import {
   assignmentIdsForTeacher,
   materialForTeacher,
 } from './teacherScope.service.js';
+import { ownFilter } from './registrar.helpers.js';
 
 function materialDto(row) {
   const assignment = row.offering && typeof row.offering === 'object' ? row.offering : null;
@@ -49,9 +50,10 @@ export async function listMaterials(teacherId, query) {
     match.$or = [{ title: rx }, { description: rx }];
   }
 
+  const filter = ownFilter(match);
   const [total, rows] = await Promise.all([
-    Material.countDocuments(match),
-    Material.find(match)
+    Material.countDocuments(filter),
+    Material.find(filter)
       .populate({ path: 'offering', populate: ASSIGNMENT_POPULATE })
       .sort({ updatedAt: -1 })
       .skip((query.page - 1) * query.limit)

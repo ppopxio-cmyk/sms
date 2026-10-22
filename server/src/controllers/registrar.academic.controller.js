@@ -972,15 +972,18 @@ export const listRegistrations = asyncHandler(async (req, res) => {
       .lean();
     studentIds = students.map((row) => row._id);
   }
-  const filter = mergeFilters(
+  const countFilter = mergeFilters(
     studentIds ? { student: { $in: studentIds } } : query.student ? { student: query.student } : null,
     query.academicYear ? { academicYear: query.academicYear } : null,
     query.term ? { term: query.term } : null,
+  );
+  const filter = mergeFilters(
+    countFilter,
     query.status && query.status !== 'all' ? { status: query.status } : null,
   );
-  const [rows, total] = await Promise.all([
+  const [rows, total, statusGroups] = await Promise.all([
     CourseRegistration.find(filter)
-      .populate('student', 'studentId fullName level')
+      .populate('student', 'studentId fullName level studentCategory')
       .populate({ path: 'offering', populate: { path: 'course', select: 'code title' } })
       .populate('academicYear', 'label')
       .sort(sortOf(query, ['createdAt', 'status', 'term'], 'createdAt'))
@@ -988,13 +991,30 @@ export const listRegistrations = asyncHandler(async (req, res) => {
       .limit(limit)
       .lean(),
     CourseRegistration.countDocuments(filter),
+    CourseRegistration.aggregate([
+      { $match: countFilter },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]),
   ]);
+  const counts = { all: 0 };
+  for (const row of statusGroups) {
+    counts[row._id] = row.count;
+    counts.all += row.count;
+  }
   res.json({
     ...paged(
       rows.map((row) => ({
         ...row,
         id: String(row._id),
-        student: row.student ? { id: String(row.student._id), studentId: row.student.studentId, fullName: row.student.fullName, level: row.student.level } : null,
+        student: row.student
+          ? {
+              id: String(row.student._id),
+              studentId: row.student.studentId,
+              fullName: row.student.fullName,
+              level: row.student.level,
+              studentCategory: row.student.studentCategory || 'regular',
+            }
+          : null,
         course: row.offering?.course ? { id: String(row.offering.course._id), code: row.offering.course.code, title: row.offering.course.title } : null,
         academicYear: row.academicYear ? { id: String(row.academicYear._id), label: row.academicYear.label } : null,
         _id: undefined,
@@ -1003,6 +1023,7 @@ export const listRegistrations = asyncHandler(async (req, res) => {
       page,
       limit,
     ),
+    counts,
   });
 });
 

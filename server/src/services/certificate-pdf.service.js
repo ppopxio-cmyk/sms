@@ -11,9 +11,38 @@ const ETHIOPIC_REGULAR = path.join(FONT_DIR, 'NotoSansEthiopic-Regular.ttf');
 const ETHIOPIC_BOLD = path.join(FONT_DIR, 'NotoSansEthiopic-Bold.ttf');
 
 const PAGE = { width: 595.28, height: 841.89 };
+const CERT_PAGE = { width: 841.89, height: 595.28 };
 const MARGIN = 46;
 const BOTTOM = PAGE.height - 54;
 const ETHIOPIC = /[\u1200-\u137f]/;
+
+// The supplied graduation certificate is a 1200x896 mock-up. The bottom 60
+// pixels are the backdrop the certificate was photographed on, so the useful
+// artwork is 1200x836. It is scaled to fill an A4 landscape page, cropping a
+// few pixels from each side rather than showing the backdrop.
+const TEMPLATE = { width: 1200, height: 896, cropHeight: 836 };
+const TEMPLATE_SCALE = CERT_PAGE.height / TEMPLATE.cropHeight;
+const TEMPLATE_X = (CERT_PAGE.width - TEMPLATE.width * TEMPLATE_SCALE) / 2;
+const TEMPLATE_PATH = path.resolve(HERE, '../assets/certificate-template-clean.png');
+// A plain patch of the same paper, used to erase the sample fields without
+// introducing flat rectangles that would not match the certificate texture.
+const TEMPLATE_BLANK = { x: 900, y: 300, width: 150, height: 45 };
+
+const tplX = (value) => TEMPLATE_X + value * TEMPLATE_SCALE;
+const tplY = (value) => value * TEMPLATE_SCALE;
+const tplSize = (value) => value * TEMPLATE_SCALE;
+
+let templateCache;
+
+function templateBackground() {
+  if (templateCache !== undefined) return templateCache;
+  try {
+    templateCache = fs.readFileSync(TEMPLATE_PATH);
+  } catch {
+    templateCache = null;
+  }
+  return templateCache;
+}
 
 const safeColor = (value, fallback) => (/^#[0-9a-f]{6}$/i.test(String(value || '')) ? value : fallback);
 
@@ -21,12 +50,77 @@ function isEthiopic(value) {
   return ETHIOPIC.test(String(value || ''));
 }
 
+function fontNameFor(value, { bold = false } = {}) {
+  if (isEthiopic(value)) return bold ? 'NotoEthiopicBold' : 'NotoEthiopic';
+  return bold ? 'Times-Bold' : 'Times-Roman';
+}
+
 function fontFor(doc, value, { bold = false } = {}) {
-  if (isEthiopic(value)) {
-    doc.font(bold ? 'NotoEthiopicBold' : 'NotoEthiopic');
-  } else {
-    doc.font(bold ? 'Times-Bold' : 'Times-Roman');
+  doc.font(fontNameFor(value, { bold }));
+}
+
+function paperPatch(doc, background, x, y, width, height) {
+  if (!background) return;
+  const dx = tplX(x);
+  const dy = tplY(y);
+  const dw = tplSize(width);
+  const dh = tplSize(height);
+  const scaleX = dw / TEMPLATE_BLANK.width;
+  const scaleY = dh / TEMPLATE_BLANK.height;
+  doc.save();
+  doc.rect(dx, dy, dw, dh).clip();
+  doc.image(background, dx - TEMPLATE_BLANK.x * scaleX, dy - TEMPLATE_BLANK.y * scaleY, {
+    width: TEMPLATE.width * scaleX,
+    height: TEMPLATE.height * scaleY,
+  });
+  doc.restore();
+}
+
+function drawFittedText(doc, value, { x, y, width, color, bold = false, maxSize = 12, minSize = 7, align = 'left', characterSpacing = 0 } = {}) {
+  const text = String(value ?? '').trim();
+  if (!text) return;
+  const font = fontNameFor(text, { bold });
+  const box = tplSize(width);
+  let size = maxSize;
+  while (size > minSize) {
+    doc.font(font).fontSize(size);
+    const measured = doc.widthOfString(text) + characterSpacing * Math.max(0, text.length - 1);
+    if (measured <= box) break;
+    size -= 0.5;
   }
+  doc.font(font).fontSize(size).fillColor(color);
+  doc.text(text, tplX(x), tplY(y), {
+    width: box,
+    align,
+    lineBreak: false,
+    ellipsis: true,
+    characterSpacing,
+  });
+}
+
+function drawTemplatePhoto(doc, buffer, x, y, size) {
+  const dx = tplX(x);
+  const dy = tplY(y);
+  const extent = tplSize(size);
+  doc.save();
+  doc.rect(dx, dy, extent, extent).fill('#fffdf7');
+  doc.lineWidth(1).strokeColor('#b08d57').rect(dx - 1, dy - 1, extent + 2, extent + 2).stroke();
+  if (buffer) {
+    try {
+      doc.image(buffer, dx, dy, { cover: [extent, extent], align: 'center', valign: 'center' });
+    } catch {
+      doc.fillColor('#6b7280').fontSize(7).font('Helvetica').text('Photo unavailable', dx, dy + extent / 2 - 4, {
+        width: extent,
+        align: 'center',
+      });
+    }
+  } else {
+    doc.fillColor('#6b7280').fontSize(7).font('Helvetica').text('Photo not supplied', dx, dy + extent / 2 - 4, {
+      width: extent,
+      align: 'center',
+    });
+  }
+  doc.restore();
 }
 
 function drawInstitution(doc, template, { compact = false } = {}) {
@@ -83,23 +177,27 @@ function border(doc, primary, accent) {
   doc.restore();
 }
 
-function watermark(doc, text = 'PREVIEW') {
+function watermark(doc, text = 'PREVIEW', page = PAGE) {
   doc.save();
-  doc.rotate(-34, { origin: [PAGE.width / 2, PAGE.height / 2] });
+  doc.rotate(-34, { origin: [page.width / 2, page.height / 2] });
   doc
     .font('Helvetica-Bold')
     .fontSize(96)
     .fillColor('#8f1d1d')
     .opacity(0.09)
-    .text(text, 0, PAGE.height / 2 - 52, { width: PAGE.width, align: 'center' });
+    .text(text, 0, page.height / 2 - 52, { width: page.width, align: 'center' });
   doc.restore();
 }
 
 function addPageFooter(doc, template) {
   const range = doc.bufferedPageRange();
   const total = range.count;
-  for (let index = 0; index < total; index += 1) {
+  // The certificate itself carries its number and verification details. Only
+  // the continuation pages of the academic record need the small footer.
+  for (let index = 1; index < total; index += 1) {
     doc.switchToPage(range.start + index);
+    const width = doc.page.width;
+    const height = doc.page.height;
     const oldBottom = doc.page.margins.bottom;
     doc.page.margins.bottom = 0;
     doc
@@ -109,8 +207,8 @@ function addPageFooter(doc, template) {
       .text(
         `${template.institutionName}  •  Certificate ${doc._certificateNumber || ''}  •  Page ${index + 1} of ${total}`,
         MARGIN,
-        PAGE.height - 38,
-        { width: PAGE.width - MARGIN * 2, align: 'center' },
+        height - 38,
+        { width: width - MARGIN * 2, align: 'center' },
       );
     doc.page.margins.bottom = oldBottom;
   }
@@ -167,7 +265,197 @@ function certificateDate(value) {
   return formatEthiopian(value);
 }
 
-function drawCertificatePage(doc, { certificate, template, photoBuffer, sealBuffer, signatureBuffer, preview }) {
+function qualificationLabel(value) {
+  const text = String(value || '').trim();
+  if (!text) return '—';
+  return text.charAt(0).toUpperCase() + text.slice(1).replaceAll('-', ' ');
+}
+
+function graduationYear(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : String(date.getFullYear());
+}
+
+function drawTemplateCertificatePage(doc, { certificate, template, photoBuffer, sealBuffer, signatureBuffer, preview, background }) {
+  doc.rect(0, 0, CERT_PAGE.width, CERT_PAGE.height).fill('#fdfcf1');
+  doc.save();
+  doc.rect(0, 0, CERT_PAGE.width, CERT_PAGE.height).clip();
+  doc.image(background, TEMPLATE_X, 0, {
+    width: TEMPLATE.width * TEMPLATE_SCALE,
+    height: TEMPLATE.height * TEMPLATE_SCALE,
+  });
+  doc.restore();
+
+  const snapshot = certificate.studentSnapshot || {};
+  const program = certificate.programSnapshot || {};
+
+  // The template already contains the ornate frame and the static ceremony
+  // wording. Replace only the sample-specific lines with the official record.
+  paperPatch(doc, background, 245, 138, 710, 70);
+  drawFittedText(doc, template.institutionName || 'Institution', {
+    x: 245,
+    y: 144,
+    width: 710,
+    color: '#0f2747',
+    bold: true,
+    maxSize: 24,
+    minSize: 12,
+    align: 'center',
+  });
+
+  paperPatch(doc, background, 255, 242, 690, 60);
+  drawFittedText(doc, template.certificateTitle || 'Certificate of Graduation', {
+    x: 255,
+    y: 250,
+    width: 690,
+    color: '#0f2747',
+    bold: true,
+    maxSize: 26,
+    minSize: 14,
+    align: 'center',
+  });
+
+  paperPatch(doc, background, 370, 334, 460, 60);
+  drawFittedText(doc, String(snapshot.fullName || 'Student name').toUpperCase(), {
+    x: 370,
+    y: 340,
+    width: 460,
+    color: '#b08d57',
+    bold: true,
+    maxSize: 30,
+    minSize: 14,
+    align: 'center',
+    characterSpacing: 1.1,
+  });
+
+  paperPatch(doc, background, 326, 458, 156, 168);
+  drawTemplatePhoto(doc, photoBuffer, 340, 472, 132);
+
+  paperPatch(doc, background, 650, 470, 310, 140);
+  const detailRows = [
+    [snapshot.studentId || '—', 474],
+    [certificate.departmentSnapshot?.name || '—', 502],
+    [program.name || '—', 530],
+    [qualificationLabel(program.qualificationType), 558],
+    [graduationYear(certificate.completionDate), 586],
+  ];
+  for (const [value, y] of detailRows) {
+    drawFittedText(doc, value, {
+      x: 655,
+      y,
+      width: 300,
+      color: '#1b2a23',
+      maxSize: 11,
+      minSize: 8,
+      align: 'left',
+    });
+  }
+
+  paperPatch(doc, background, 435, 640, 335, 38);
+  const cgpa = certificate.cgpa === null || certificate.cgpa === undefined ? '—' : Number(certificate.cgpa).toFixed(2);
+  drawFittedText(doc, `CUMULATIVE GPA ${cgpa} / 4.00`, {
+    x: 435,
+    y: 644,
+    width: 335,
+    color: '#0f2747',
+    bold: true,
+    maxSize: 18,
+    minSize: 11,
+    align: 'center',
+  });
+
+  paperPatch(doc, background, 225, 685, 140, 125);
+  if (sealBuffer) {
+    try {
+      doc.image(sealBuffer, tplX(240), tplY(695), {
+        fit: [tplSize(140), tplSize(140)],
+        align: 'center',
+        valign: 'center',
+      });
+    } catch {
+      // The configuration check already guarantees a readable seal; a render
+      // failure here should not hide the rest of the certificate.
+    }
+  }
+
+  paperPatch(doc, background, 480, 695, 220, 82);
+  if (signatureBuffer) {
+    try {
+      doc.image(signatureBuffer, tplX(500), tplY(700), {
+        fit: [tplSize(170), tplSize(60)],
+        align: 'center',
+        valign: 'center',
+      });
+    } catch {
+      // Same reasoning as the seal above.
+    }
+  }
+  doc
+    .moveTo(tplX(500), tplY(752))
+    .lineTo(tplX(675), tplY(752))
+    .lineWidth(0.6)
+    .strokeColor('#8c9a92')
+    .stroke();
+  drawFittedText(doc, 'AUTHORIZED SIGNATURE', {
+    x: 500,
+    y: 758,
+    width: 175,
+    color: '#52645c',
+    maxSize: 8,
+    minSize: 6,
+    align: 'center',
+  });
+
+  paperPatch(doc, background, 780, 748, 200, 50);
+  drawFittedText(doc, template.signatoryName || '', {
+    x: 780,
+    y: 754,
+    width: 200,
+    color: '#0f2747',
+    bold: true,
+    maxSize: 9,
+    minSize: 7,
+    align: 'center',
+  });
+  drawFittedText(doc, template.signatoryTitle || '', {
+    x: 780,
+    y: 770,
+    width: 200,
+    color: '#52645c',
+    maxSize: 8,
+    minSize: 6,
+    align: 'center',
+  });
+
+  paperPatch(doc, background, 1012, 680, 106, 130);
+  const verification = template.verificationBaseUrl
+    ? `${template.verificationBaseUrl.replace(/\/+$/, '')}/${certificate.verificationId}`
+    : certificate.verificationId;
+  doc.font('Helvetica-Bold').fontSize(6).fillColor('#0f2747').text('VERIFY', tplX(1012), tplY(690), {
+    width: tplSize(106),
+    align: 'center',
+  });
+  doc.font('Helvetica').fontSize(5.5).fillColor('#52645c').text(verification || '', tplX(1012), tplY(704), {
+    width: tplSize(106),
+    align: 'center',
+  });
+
+  paperPatch(doc, background, 525, 802, 150, 28);
+  drawFittedText(doc, certificate.certificateNumber || 'PREVIEW', {
+    x: 525,
+    y: 808,
+    width: 150,
+    color: '#0f2747',
+    maxSize: 9,
+    minSize: 7,
+    align: 'center',
+  });
+
+  if (preview) watermark(doc, 'PREVIEW', CERT_PAGE);
+}
+
+function drawCustomCertificatePage(doc, { certificate, template, photoBuffer, sealBuffer, signatureBuffer, preview }) {
   const primary = safeColor(template.theme?.primary, '#123b2d');
   const accent = safeColor(template.theme?.accent, '#b38b4d');
   const paper = safeColor(template.theme?.paper, '#fffdf7');
@@ -300,7 +588,7 @@ function tableHeader(doc, y) {
 
 function ensureSpace(doc, y, needed, template, continuationTitle) {
   if (y + needed <= BOTTOM) return y;
-  doc.addPage();
+  doc.addPage({ size: 'A4', layout: 'portrait' });
   doc.rect(0, 0, PAGE.width, PAGE.height).fill('#fffdf7');
   drawInstitution(doc, template, { compact: true });
   let next = 52;
@@ -310,7 +598,7 @@ function ensureSpace(doc, y, needed, template, continuationTitle) {
 }
 
 function drawAcademicRecord(doc, { certificate, template, preview }) {
-  doc.addPage();
+  doc.addPage({ size: 'A4', layout: 'portrait' });
   doc.rect(0, 0, PAGE.width, PAGE.height).fill('#fffdf7');
   drawInstitution(doc, template, { compact: true });
   let y = sectionTitle(doc, 'Detailed Academic Record', 56);
@@ -407,8 +695,9 @@ export function renderCertificatePdf({
       return reject(new AppError(500, 'FONT_MISSING', 'The Amharic font is missing from the server assets.'));
     }
 
+    const background = templateBackground();
     const doc = new PDFDocument({
-      size: 'A4',
+      ...(background ? { size: 'A4', layout: 'landscape' } : { size: 'A4' }),
       margin: 0,
       bufferPages: true,
       info: {
@@ -429,14 +718,26 @@ export function renderCertificatePdf({
       ...template,
       _logoBuffer: logoBuffer,
     };
-    drawCertificatePage(doc, {
-      certificate,
-      template: merged,
-      photoBuffer,
-      sealBuffer,
-      signatureBuffer,
-      preview,
-    });
+    if (background) {
+      drawTemplateCertificatePage(doc, {
+        certificate,
+        template: merged,
+        photoBuffer,
+        sealBuffer,
+        signatureBuffer,
+        preview,
+        background,
+      });
+    } else {
+      drawCustomCertificatePage(doc, {
+        certificate,
+        template: merged,
+        photoBuffer,
+        sealBuffer,
+        signatureBuffer,
+        preview,
+      });
+    }
     drawAcademicRecord(doc, { certificate, template, preview });
     addPageFooter(doc, template);
     doc.end();

@@ -12,6 +12,7 @@ import {
   dayKey,
   studentDto,
 } from './teacherScope.service.js';
+import { ownFilter } from './registrar.helpers.js';
 
 const OFFERING_POPULATE = { path: 'offering', populate: ASSIGNMENT_POPULATE };
 
@@ -25,14 +26,16 @@ export async function listTeacherStudents(teacherId, query) {
     ? assignmentIds.filter((id) => String(id) === query.assignmentId)
     : assignmentIds;
 
-  const rows = await CourseRegistration.find({
-    offering: { $in: offeringIds },
-    status: query.status === 'all'
-      ? { $in: ['registered', 'dropped', 'withdrawn', 'completed', 'cancelled'] }
-      : query.status === 'active'
-        ? 'registered'
-        : query.status,
-  })
+  const rows = await CourseRegistration.find(
+    ownFilter({
+      offering: { $in: offeringIds },
+      status: query.status === 'all'
+        ? { $in: ['registered', 'dropped', 'withdrawn', 'completed', 'cancelled'] }
+        : query.status === 'active'
+          ? 'registered'
+          : query.status,
+    }),
+  )
     .populate(STUDENT_POPULATE)
     .populate(OFFERING_POPULATE)
     .sort({ createdAt: -1 })
@@ -96,7 +99,7 @@ export async function teacherStudentDetail(teacherId, studentId) {
   const assignmentIds = await assignmentIdsForTeacher(teacherId);
   if (!assignmentIds.length) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student was not found in your classes.');
 
-  const rows = await CourseRegistration.find({ offering: { $in: assignmentIds }, student: studentId })
+  const rows = await CourseRegistration.find(ownFilter({ offering: { $in: assignmentIds }, student: studentId }))
     .populate(STUDENT_POPULATE)
     .populate(OFFERING_POPULATE)
     .lean();
@@ -114,15 +117,21 @@ export async function teacherStudentDetail(teacherId, studentId) {
 
   const [sheets, attendanceRecords, assessments, results] = await Promise.all([
     offeringIds.length
-      ? AttendanceSheet.find({ offering: { $in: offeringIds } }).select('_id offering dateKey period status').lean()
+      ? AttendanceSheet.find(ownFilter({ offering: { $in: offeringIds } }))
+          .select('_id offering dateKey period status')
+          .lean()
       : [],
     offeringIds.length
-      ? AttendanceRecord.find({ offering: { $in: offeringIds }, student: student._id }).lean()
+      ? AttendanceRecord.find(ownFilter({ offering: { $in: offeringIds }, student: student._id })).lean()
       : [],
     offeringIds.length
-      ? Assessment.find({ offering: { $in: offeringIds }, status: { $in: ['published', 'closed', 'submitted'] } }).lean()
+      ? Assessment.find(
+          ownFilter({ offering: { $in: offeringIds }, status: { $in: ['published', 'closed', 'submitted'] } }),
+        ).lean()
       : [],
-    offeringIds.length ? Result.find({ offering: { $in: offeringIds }, student: student._id }).lean() : [],
+    offeringIds.length
+      ? Result.find(ownFilter({ offering: { $in: offeringIds }, student: student._id })).lean()
+      : [],
   ]);
 
   const sheetByKey = new Map(

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -35,7 +35,6 @@ import { SkeletonCard } from '../../components/ui/Skeleton';
 
 export default function RegistrarCurriculum() {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [status, setStatus] = useState('all');
   const [program, setProgram] = useState('');
@@ -257,7 +256,6 @@ export default function RegistrarCurriculum() {
                     {plan.status !== 'archived' ? (
                       <Button size="sm" variant="ghost" onClick={() => setConfirm({ kind: 'archive', record: plan, title: 'Archive curriculum?', message: 'Archived plans remain available as history and can no longer be published.', confirmLabel: 'Archive plan', tone: 'danger' })} className="gap-1.5"><Archive className="h-3.5 w-3.5" /> Archive</Button>
                     ) : null}
-                    <Button size="sm" variant="ghost" onClick={() => navigate(`/registrar/course-offerings?plan=${plan.id}`)} className="gap-1.5"><BookOpen className="h-3.5 w-3.5" /> View offerings</Button>
                   </div>
                 </CardBody>
               </Card>

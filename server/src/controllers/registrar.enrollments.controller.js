@@ -9,8 +9,12 @@ export const listEnrollments = asyncHandler(async (req, res) => {
   const query = req.valid.query;
   const { page, limit, skip } = pageOf(query);
   let studentIds = null;
-  if (query.search) {
-    const students = await Student.find(searchFilter(query.search, ['studentId', 'fullName', 'email']))
+  if (query.search || query.category) {
+    const studentFilter = mergeFilters(
+      searchFilter(query.search, ['studentId', 'fullName', 'email']),
+      query.category ? { studentCategory: query.category } : null,
+    );
+    const students = await Student.find(studentFilter)
       .select('_id')
       .limit(2000)
       .lean();
@@ -20,12 +24,13 @@ export const listEnrollments = asyncHandler(async (req, res) => {
     query.status && query.status !== 'all' ? { status: query.status } : null,
     query.academicYear ? { academicYear: query.academicYear } : null,
     query.program ? { program: query.program } : null,
+    query.department ? { department: query.department } : null,
     query.student ? { student: query.student } : null,
     studentIds ? { student: { $in: studentIds } } : null,
   );
   const [rows, total] = await Promise.all([
     Enrollment.find(filter)
-      .populate('student', 'studentId fullName level studentStatus photo')
+      .populate('student', 'studentId fullName level studentStatus studentCategory photo')
       .populate('program', 'code name qualificationType')
       .populate('department', 'code name')
       .populate('academicYear', 'label')
@@ -42,7 +47,15 @@ export const listEnrollments = asyncHandler(async (req, res) => {
         ...row,
         id: String(row._id),
         student: row.student
-          ? { id: String(row.student._id), studentId: row.student.studentId, fullName: row.student.fullName, level: row.student.level, studentStatus: row.student.studentStatus }
+          ? {
+              id: String(row.student._id),
+              studentId: row.student.studentId,
+              fullName: row.student.fullName,
+              level: row.student.level,
+              studentStatus: row.student.studentStatus,
+              studentCategory: row.student.studentCategory || 'regular',
+              photo: row.student.photo ?? null,
+            }
           : null,
         program: row.program ? { id: String(row.program._id), code: row.program.code, name: row.program.name, qualificationType: row.program.qualificationType } : null,
         department: row.department ? { id: String(row.department._id), code: row.department.code, name: row.department.name } : null,

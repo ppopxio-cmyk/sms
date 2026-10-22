@@ -9,6 +9,7 @@ import {
   assignmentDto,
   dayKey,
 } from './teacherScope.service.js';
+import { ownFilter } from './registrar.helpers.js';
 
 const countBy = (rows) =>
   rows.reduce((acc, row) => {
@@ -17,7 +18,7 @@ const countBy = (rows) =>
   }, {});
 
 export async function teacherDashboard(teacherId) {
-  const assignments = await CourseOffering.find({ teacher: teacherId, status: { $in: WRITE_STATUSES } })
+  const assignments = await CourseOffering.find(ownFilter({ teacher: teacherId, status: { $in: WRITE_STATUSES } }))
     .populate(ASSIGNMENT_POPULATE)
     .sort({ createdAt: -1 })
     .lean();
@@ -38,7 +39,7 @@ export async function teacherDashboard(teacherId) {
       { $match: { offering: { $in: ids }, status: 'draft' } },
       { $group: { _id: '$offering', count: { $sum: 1 } } },
     ]),
-    AttendanceSheet.find({ offering: { $in: ids } })
+    AttendanceSheet.find(ownFilter({ offering: { $in: ids } }))
       .sort({ date: -1, createdAt: -1 })
       .limit(6)
       .lean(),
@@ -46,10 +47,12 @@ export async function teacherDashboard(teacherId) {
   ]);
 
   const records = recentSheets.length
-    ? await AttendanceRecord.find({
-        offering: { $in: recentSheets.map((row) => row.offering) },
-        date: { $in: recentSheets.map((row) => row.date) },
-      })
+    ? await AttendanceRecord.find(
+        ownFilter({
+          offering: { $in: recentSheets.map((row) => row.offering) },
+          date: { $in: recentSheets.map((row) => row.date) },
+        }),
+      )
         .select('offering date period status')
         .lean()
     : [];

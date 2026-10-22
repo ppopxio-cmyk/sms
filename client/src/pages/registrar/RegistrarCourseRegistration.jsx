@@ -56,7 +56,7 @@ export default function RegistrarCourseRegistration() {
 
   const query = useQuery({
     queryKey: ['registrar', 'registrations', params],
-    queryFn: async () => (await api.get(`${REGISTRAR}/registrations`, { params })).data,
+    queryFn: async () => (await api.get(`${REGISTRAR}/course-registration`, { params })).data,
     placeholderData: (previous) => previous,
   });
 
@@ -72,7 +72,7 @@ export default function RegistrarCourseRegistration() {
   };
 
   const drop = useMutation({
-    mutationFn: async (reason) => (await api.delete(`${REGISTRAR}/registrations/${dropping.id}`, { data: { reason } })).data,
+    mutationFn: async (reason) => (await api.patch(`${REGISTRAR}/course-registration/${dropping.id}/drop`, { reason })).data,
     onSuccess: () => {
       toast.success('Registration dropped and the seat released.');
       setDropping(null);
@@ -232,7 +232,7 @@ function RegisterModal({ open, options, terms, onClose, onSaved }) {
 
   const eligibility = useQuery({
     queryKey: ['registrar', 'registration-eligible', student?.id, academicYear, term],
-    queryFn: async () => (await api.get(`${REGISTRAR}/registration/eligible`, {
+    queryFn: async () => (await api.get(`${REGISTRAR}/course-registration/eligible`, {
       params: { student: student.id, academicYear, term },
     })).data,
     enabled: Boolean(student?.id && academicYear && term),
@@ -243,7 +243,7 @@ function RegisterModal({ open, options, terms, onClose, onSaved }) {
     mutationFn: async () => {
       if (!student || !academicYear || !term) throw new Error('Choose the student, academic year and term.');
       if (!selected.length) throw new Error('Choose at least one eligible course.');
-      return (await api.post(`${REGISTRAR}/registrations`, { student: student.id, offeringIds: selected })).data;
+      return (await api.post(`${REGISTRAR}/course-registration`, { student: student.id, offeringIds: selected })).data;
     },
     onSuccess: (data) => {
       toast.success(`${data.registrations?.length || selected.length} course registration${selected.length === 1 ? '' : 's'} created.`);

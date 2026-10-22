@@ -4,6 +4,7 @@ import { CourseRegistration } from '../models/Offering.js';
 import { Assessment } from '../models/Assessment.js';
 import { Material } from '../models/Material.js';
 import { AppError } from '../utils/AppError.js';
+import { ownFilter } from './registrar.helpers.js';
 
 export const TZ = 'Africa/Addis_Ababa';
 export const READ_STATUSES = ['open', 'in_progress', 'completed'];
@@ -52,13 +53,17 @@ export const objectId = (value) => new mongoose.Types.ObjectId(String(value));
 
 export async function assignmentIdsForTeacher(teacherId, { includeCompleted = true } = {}) {
   const statuses = includeCompleted ? READ_STATUSES : WRITE_STATUSES;
-  const rows = await CourseOffering.find({ teacher: teacherId, status: { $in: statuses } }).select('_id').lean();
+  const rows = await CourseOffering.find(ownFilter({ teacher: teacherId, status: { $in: statuses } }))
+    .select('_id')
+    .lean();
   return rows.map((row) => row._id);
 }
 
 export async function assignmentForTeacher(teacherId, assignmentId, { write = false, populate = true } = {}) {
   const statuses = write ? WRITE_STATUSES : READ_STATUSES;
-  let query = CourseOffering.findOne({ _id: assignmentId, teacher: teacherId, status: { $in: statuses } });
+  let query = CourseOffering.findOne(
+    ownFilter({ _id: assignmentId, teacher: teacherId, status: { $in: statuses } }),
+  );
   if (populate) query = query.populate(ASSIGNMENT_POPULATE);
   const assignment = await query.lean();
   if (!assignment) {

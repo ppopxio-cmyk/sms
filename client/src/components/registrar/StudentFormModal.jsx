@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../../lib/api';
-import { REGISTRAR, cleanPayload, dateInput, levelLabel } from '../../lib/registrar';
+import { REGISTRAR, cleanPayload, dateInput, levelLabel, phoneError } from '../../lib/registrar';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import Field from '../ui/Field';
@@ -22,6 +22,7 @@ const EMPTY = {
   batch: '',
   admissionAcademicYear: '',
   level: 1,
+  studentCategory: 'regular',
   enrollmentStatus: 'pending',
   studentStatus: 'active',
   admissionDate: '',
@@ -80,6 +81,8 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
         throw new Error('Student ID, first name, last name, department and programme are required.');
       }
       if (!editing && !form.studentId.trim()) throw new Error('Student ID is required.');
+      const phoneIssue = phoneError(form.phone);
+      if (phoneIssue) throw new Error(phoneIssue);
       const payload = cleanPayload({
         ...form,
         studentId: editing ? undefined : form.studentId.trim(),
@@ -150,7 +153,7 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
           <Field label="Last name" value={form.lastName} onChange={(event) => set('lastName', event.target.value)} required />
           <Field label="Date of birth" type="date" value={form.dateOfBirth} onChange={(event) => set('dateOfBirth', event.target.value)} />
           <Field label="Email" type="email" value={form.email} onChange={(event) => set('email', event.target.value)} placeholder="Optional" />
-          <Field label="Phone" value={form.phone} onChange={(event) => set('phone', event.target.value)} placeholder="Optional" />
+          <Field label="Phone" value={form.phone} onChange={(event) => set('phone', event.target.value)} placeholder="+251 912 345 678" required />
         </FormGrid>
 
         <div className="rounded-2xl bg-slate-50/80 p-4">
@@ -203,6 +206,10 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
               {levels.map((level) => (
                 <option key={level} value={level}>{levelLabel(level, selectedProgram?.qualificationType)}</option>
               ))}
+            </SelectField>
+            <SelectField label="Category" value={form.studentCategory} onChange={(event) => set('studentCategory', event.target.value)} required>
+              <option value="regular">Regular</option>
+              <option value="extension">Extension</option>
             </SelectField>
             <SelectField label="Enrollment status" value={form.enrollmentStatus} onChange={(event) => set('enrollmentStatus', event.target.value)}>
               {['pending', 'active', 'completed', 'withdrawn', 'cancelled'].map((status) => (

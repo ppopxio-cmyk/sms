@@ -10,7 +10,6 @@ const LABELS = {
   'academic-calendar': 'Academic calendar',
   batches: 'Batches',
   curriculum: 'Curriculum',
-  'course-offerings': 'Course offerings',
   'course-registration': 'Course registration',
   attendance: 'Attendance',
   results: 'Results',

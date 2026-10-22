@@ -7,6 +7,7 @@ import {
   WRITE_STATUSES,
   assignmentDto,
 } from './teacherScope.service.js';
+import { ownFilter } from './registrar.helpers.js';
 
 const matches = (row, term) => {
   if (!term) return true;
@@ -29,7 +30,7 @@ export async function listTeacherAssignments(teacherId, query) {
   const filter = { teacher: teacherId, status: { $in: statuses } };
   if (query.program) filter.program = query.program;
 
-  const rows = await CourseOffering.find(filter)
+  const rows = await CourseOffering.find(ownFilter(filter))
     .populate(ASSIGNMENT_POPULATE)
     .sort({ createdAt: -1 })
     .lean();
@@ -83,11 +84,13 @@ export async function listTeacherAssignments(teacherId, query) {
 }
 
 export async function teacherAssignmentDetail(teacherId, assignmentId) {
-  const row = await CourseOffering.findOne({
-    _id: assignmentId,
-    teacher: teacherId,
-    status: { $in: READ_STATUSES },
-  })
+  const row = await CourseOffering.findOne(
+    ownFilter({
+      _id: assignmentId,
+      teacher: teacherId,
+      status: { $in: READ_STATUSES },
+    }),
+  )
     .populate(ASSIGNMENT_POPULATE)
     .lean();
   if (!row) return null;

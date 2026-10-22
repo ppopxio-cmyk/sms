@@ -13,6 +13,7 @@ import {
   dateFromKey,
   studentDto,
 } from './teacherScope.service.js';
+import { ownFilter } from './registrar.helpers.js';
 
 const sameTitle = (left, right) =>
   String(left || '').trim().toLowerCase().replace(/\s+/g, ' ') ===
@@ -37,7 +38,7 @@ function classSubtitle(assignment) {
 
 export async function reportOptions(teacherId, query) {
   const ids = await assignmentIdsForTeacher(teacherId);
-  const rows = await CourseOffering.find({ _id: { $in: ids } })
+  const rows = await CourseOffering.find(ownFilter({ _id: { $in: ids } }))
     .populate(ASSIGNMENT_POPULATE)
     .sort({ createdAt: -1 })
     .lean();
@@ -46,7 +47,7 @@ export async function reportOptions(teacherId, query) {
   const selectedId = query.assignmentId || assignments[0]?.id;
   const selected = assignments.find((row) => row.id === selectedId) || null;
   const assessments = selectedId
-    ? await Assessment.find({ offering: selectedId, status: { $ne: 'draft' } })
+    ? await Assessment.find(ownFilter({ offering: selectedId, status: { $ne: 'draft' } }))
         .select('_id title type maxScore status weight')
         .sort({ createdAt: 1 })
         .lean()
@@ -85,7 +86,7 @@ export async function gradeSheetData(teacherId, query) {
   if (query.assessmentId) assessmentFilter._id = query.assessmentId;
 
   const [assessments, enrollments, results] = await Promise.all([
-    Assessment.find(assessmentFilter).sort({ createdAt: 1 }).lean(),
+    Assessment.find(ownFilter(assessmentFilter)).sort({ createdAt: 1 }).lean(),
     activeEnrollments(assignment._id),
     Result.find({ offering: assignment._id }).lean(),
   ]);
@@ -175,15 +176,17 @@ export async function attendanceReportData(teacherId, query) {
   }
 
   const [sheets, enrollments] = await Promise.all([
-    AttendanceSheet.find(sheetFilter).select('dateKey date period').sort({ dateKey: 1 }).lean(),
+    AttendanceSheet.find(ownFilter(sheetFilter)).select('dateKey date period').sort({ dateKey: 1 }).lean(),
     activeEnrollments(assignment._id),
   ]);
 
   const records = sheets.length
-    ? await AttendanceRecord.find({
-        offering: assignment._id,
-        date: { $in: sheets.map((row) => row.date) },
-      }).lean()
+    ? await AttendanceRecord.find(
+        ownFilter({
+          offering: assignment._id,
+          date: { $in: sheets.map((row) => row.date) },
+        }),
+      ).lean()
     : [];
   const sheetKeys = new Set(sheets.map((sheet) => `${sheet.dateKey}:${sheet.period}`));
   const relevant = records.filter((record) => {

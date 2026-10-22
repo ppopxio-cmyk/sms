@@ -23,7 +23,6 @@ import StatCard from '../../components/ui/StatCard';
 const quickLinks = [
   { to: '/registrar/students', label: 'Student register', icon: Users, hint: 'Profiles, photos, enrolment' },
   { to: '/registrar/curriculum', label: 'Curriculum', icon: ScrollText, hint: 'Plan, version and publish' },
-  { to: '/registrar/course-offerings', label: 'Offerings', icon: BookOpen, hint: 'Classes and teachers' },
   { to: '/registrar/results', label: 'Results review', icon: ClipboardCheck, hint: 'Approve and publish' },
   { to: '/registrar/graduation-eligibility', label: 'Graduation', icon: GraduationCap, hint: 'Evaluate eligibility' },
   { to: '/registrar/certificates', label: 'Certificates', icon: FileBadge2, hint: 'Issue and verify' },

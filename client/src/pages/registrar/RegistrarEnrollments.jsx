@@ -24,6 +24,7 @@ import Field from '../../components/ui/Field';
 import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
 import SearchInput from '../../components/ui/SearchInput';
+import FilterTabs from '../../components/ui/FilterTabs';
 
 export default function RegistrarEnrollments() {
   const queryClient = useQueryClient();
@@ -32,6 +33,8 @@ export default function RegistrarEnrollments() {
   const [status, setStatus] = useState('all');
   const [academicYear, setAcademicYear] = useState('');
   const [program, setProgram] = useState('');
+  const [department, setDepartment] = useState('');
+  const [category, setCategory] = useState('all');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [creating, setCreating] = useState(false);
@@ -51,8 +54,10 @@ export default function RegistrarEnrollments() {
       ...(status !== 'all' ? { status } : {}),
       ...(academicYear ? { academicYear } : {}),
       ...(program ? { program } : {}),
+      ...(department ? { department } : {}),
+      ...(category !== 'all' ? { category } : {}),
     }),
-    [page, limit, debounced, status, academicYear, program],
+    [page, limit, debounced, status, academicYear, program, department, category],
   );
 
   const query = useQuery({
@@ -63,7 +68,7 @@ export default function RegistrarEnrollments() {
 
   const rows = query.data?.rows ?? [];
   const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0, limit };
-  const filtered = Boolean(debounced.trim() || status !== 'all' || academicYear || program);
+  const filtered = Boolean(debounced.trim() || status !== 'all' || academicYear || program || department || category !== 'all');
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['registrar', 'enrollments'] });
@@ -78,7 +83,9 @@ export default function RegistrarEnrollments() {
       render: (row) => (
         <div>
           <p className="text-sm font-semibold text-slate-900">{row.student?.fullName || 'Unknown student'}</p>
-          <p className="text-xs text-slate-500">{row.student?.studentId || '—'}</p>
+          <p className="text-xs text-slate-500">
+            {row.student?.studentId || '�?"'} A� {humanStatus(row.student?.studentCategory || 'regular')}
+          </p>
         </div>
       ),
     },
@@ -133,7 +140,17 @@ export default function RegistrarEnrollments() {
             placeholder="Search by student name, ID or email"
             loading={query.isFetching}
           />
-          <div className="grid gap-3 sm:grid-cols-3">
+          <FilterTabs
+            label="Student category"
+            value={category}
+            onChange={(value) => { setCategory(value); setPage(1); }}
+            tabs={[
+              { key: 'all', label: 'All students' },
+              { key: 'regular', label: 'Regular' },
+              { key: 'extension', label: 'Extension' },
+            ]}
+          />
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <SelectField label="Status" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
               <option value="all">All statuses</option>
               {['pending', 'active', 'completed', 'withdrawn', 'cancelled'].map((value) => (
@@ -146,11 +163,19 @@ export default function RegistrarEnrollments() {
                 <option key={year.id} value={year.id}>{year.label}</option>
               ))}
             </SelectField>
+            <SelectField label="Department" value={department} onChange={(event) => { setDepartment(event.target.value); setProgram(''); setPage(1); }}>
+              <option value="">All departments</option>
+              {(options.data?.departments || []).map((row) => (
+                <option key={row.id} value={row.id}>{row.code} A� {row.name}</option>
+              ))}
+            </SelectField>
             <SelectField label="Programme" value={program} onChange={(event) => { setProgram(event.target.value); setPage(1); }}>
               <option value="">All programmes</option>
-              {(options.data?.programs || []).map((row) => (
-                <option key={row.id} value={row.id}>{row.code} · {row.name}</option>
-              ))}
+              {(options.data?.programs || [])
+                .filter((row) => !department || row.department === department)
+                .map((row) => (
+                  <option key={row.id} value={row.id}>{row.code} A� {row.name}</option>
+                ))}
             </SelectField>
           </div>
         </div>

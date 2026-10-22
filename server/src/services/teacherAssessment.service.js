@@ -10,6 +10,7 @@ import {
   assignmentIdsForTeacher,
   enrollmentDto,
 } from './teacherScope.service.js';
+import { ownFilter } from './registrar.helpers.js';
 
 const titleKey = (title) => String(title || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const sameTitle = (left, right) => titleKey(left) === titleKey(right);
@@ -82,8 +83,8 @@ export async function listAssessments(teacherId, query) {
   if (query.status !== 'all') match.status = query.status;
 
   const [total, rows] = await Promise.all([
-    Assessment.countDocuments(match),
-    Assessment.find(match)
+    Assessment.countDocuments(ownFilter(match)),
+    Assessment.find(ownFilter(match))
       .populate({ path: 'offering', populate: ASSIGNMENT_POPULATE })
       .sort({ createdAt: -1 })
       .skip((query.page - 1) * query.limit)
@@ -98,7 +99,11 @@ export async function listAssessments(teacherId, query) {
       { $group: { _id: '$offering', count: { $sum: 1 } } },
     ]),
     offeringIds.length
-      ? Result.find({ offering: { $in: rows.map((row) => row.offering?._id ?? row.offering) } }).select('offering components').lean()
+      ? Result.find(
+          ownFilter({ offering: { $in: rows.map((row) => row.offering?._id ?? row.offering) } }),
+        )
+          .select('offering components')
+          .lean()
       : [],
   ]);
 
@@ -192,11 +197,13 @@ export async function updateAssessment(teacherId, assessmentId, payload) {
       throw new AppError(409, 'ASSESSMENT_IN_USE', 'Marks have already been entered under this title, so it cannot be renamed without losing their meaning.');
     }
     const key = titleKey(payload.title);
-    const duplicate = await Assessment.findOne({
-      offering: assessment.offering,
-      titleKey: key,
-      _id: { $ne: assessment._id },
-    })
+    const duplicate = await Assessment.findOne(
+      ownFilter({
+        offering: assessment.offering,
+        titleKey: key,
+        _id: { $ne: assessment._id },
+      }),
+    )
       .select('_id')
       .lean();
     if (duplicate) throw new AppError(409, 'ASSESSMENT_EXISTS', 'An assessment with that title already exists in this class.');
@@ -211,7 +218,7 @@ export async function updateAssessment(teacherId, assessmentId, payload) {
   }
 
   const updated = await Assessment.findOneAndUpdate(
-    { _id: assessment._id, status: { $ne: 'submitted' } },
+    ownFilter({ _id: assessment._id, status: { $ne: 'submitted' } }),
     { $set: { ...payload, updatedBy: teacherId } },
     { new: true, runValidators: true },
   )
@@ -331,10 +338,12 @@ export async function saveGrades(teacherId, assessmentId, payload) {
     }
   }
 
-  const existingResults = await Result.find({
-    offering: assignment._id,
-    student: { $in: payload.results.map((row) => row.studentId) },
-  }).lean();
+  const existingResults = await Result.find(
+    ownFilter({
+      offering: assignment._id,
+      student: { $in: payload.results.map((row) => row.studentId) },
+    }),
+  ).lean();
   const byStudent = new Map(existingResults.map((row) => [String(row.student), row]));
 
   const operations = payload.results.map((row) => {
@@ -395,10 +404,12 @@ export async function submitAssessment(teacherId, assessmentId) {
   if (!registrations.length) {
     throw new AppError(400, 'NO_STUDENTS', 'There are no registered students in this class to submit marks for.');
   }
-  const results = await Result.find({
-    offering: assignment._id,
-    student: { $in: registrations.map((row) => row.student) },
-  }).lean();
+  const results = await Result.find(
+    ownFilter({
+      offering: assignment._id,
+      student: { $in: registrations.map((row) => row.student) },
+    }),
+  ).lean();
   const byStudent = new Map(results.map((row) => [String(row.student), row]));
   const missing = registrations.filter((row) => {
     const result = byStudent.get(String(row.student));
@@ -413,7 +424,7 @@ export async function submitAssessment(teacherId, assessmentId) {
 
   const now = new Date();
   const updated = await Assessment.findOneAndUpdate(
-    { _id: assessment._id, status: { $in: ['published', 'closed'] } },
+    ownFilter({ _id: assessment._id, status: { $in: ['published', 'closed'] } }),
     { $set: { status: 'submitted', submittedAt: now, submittedBy: teacherId, updatedBy: teacherId } },
     { new: true },
   )
@@ -421,10 +432,12 @@ export async function submitAssessment(teacherId, assessmentId) {
     .lean();
   if (!updated) throw new AppError(409, 'ASSESSMENT_STATE', 'This assessment changed. Reload it and try again.');
 
-  const remaining = await Assessment.countDocuments({
-    offering: assignment._id,
-    status: { $ne: 'submitted' },
-  });
+  const remaining = await Assessment.countDocuments(
+    ownFilter({
+      offering: assignment._id,
+      status: { $ne: 'submitted' },
+    }),
+  );
   if (remaining === 0) {
     await Result.updateMany(
       { offering: assignment._id, status: 'draft' },

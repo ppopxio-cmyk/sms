@@ -12,6 +12,7 @@ import {
   enrollmentDto,
 } from './teacherScope.service.js';
 import { AppError } from '../utils/AppError.js';
+import { ownFilter } from './registrar.helpers.js';
 
 function assertNotFuture(dateKey) {
   if (dateKey > dayKey()) {
@@ -45,10 +46,12 @@ function sheetSummary(sheet, records, assignment = null) {
 
 async function loadRecords(sheets) {
   if (!sheets.length) return [];
-  return AttendanceRecord.find({
-    offering: { $in: sheets.map((row) => row.offering) },
-    date: { $in: sheets.map((row) => row.date) },
-  })
+  return AttendanceRecord.find(
+    ownFilter({
+      offering: { $in: sheets.map((row) => row.offering) },
+      date: { $in: sheets.map((row) => row.date) },
+    }),
+  )
     .select('offering date period status')
     .lean();
 }
@@ -58,10 +61,11 @@ export async function attendanceOverview(teacherId, query) {
   const match = { offering: { $in: assignmentIds } };
   if (query.assignmentId) match.offering = { $in: assignmentIds.filter((id) => String(id) === query.assignmentId) };
   if (query.status !== 'all') match.status = query.status;
+  const filter = ownFilter(match);
 
   const [total, rows] = await Promise.all([
-    AttendanceSheet.countDocuments(match),
-    AttendanceSheet.find(match)
+    AttendanceSheet.countDocuments(filter),
+    AttendanceSheet.find(filter)
       .sort({ date: -1, createdAt: -1 })
       .skip((query.page - 1) * query.limit)
       .limit(query.limit)
@@ -69,10 +73,10 @@ export async function attendanceOverview(teacherId, query) {
   ]);
 
   const [draftCount, records, assignments] = await Promise.all([
-    AttendanceSheet.countDocuments({ offering: match.offering, status: 'draft' }),
+    AttendanceSheet.countDocuments(ownFilter({ offering: match.offering, status: 'draft' })),
     loadRecords(rows),
     assignmentIds.length
-      ? CourseOffering.find({ _id: { $in: assignmentIds } })
+      ? CourseOffering.find(ownFilter({ _id: { $in: assignmentIds } }))
           .populate(ASSIGNMENT_POPULATE)
           .lean()
       : [],
@@ -200,12 +204,14 @@ export async function saveAttendance(teacherId, assignmentId, payload) {
 
   // The registrar's AttendanceRecord table holds the rows. Saving replaces the set for
   // this meeting so a draft can never keep a status the teacher has cleared.
-  await AttendanceRecord.deleteMany({
-    offering: assignmentId,
-    date,
-    period,
-    student: { $nin: payload.records.map((record) => record.studentId) },
-  });
+  await AttendanceRecord.deleteMany(
+    ownFilter({
+      offering: assignmentId,
+      date,
+      period,
+      student: { $nin: payload.records.map((record) => record.studentId) },
+    }),
+  );
 
   if (payload.records.length) {
     await AttendanceRecord.bulkWrite(

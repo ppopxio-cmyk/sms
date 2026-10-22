@@ -73,6 +73,7 @@ export const listStudents = asyncHandler(async (req, res) => {
     query.batch ? { batch: query.batch } : null,
     query.level ? { level: query.level } : null,
     query.qualificationType ? { qualificationType: query.qualificationType } : null,
+    query.category ? { studentCategory: query.category } : null,
     searchFilter(query.search, ['studentId', 'fullName', 'email', 'phone']),
   );
 

@@ -43,6 +43,7 @@ export const listStudentsQuerySchema = paginationSchema.extend({
   batch: objectId.optional(),
   level: z.coerce.number().int().min(1).max(20).optional(),
   qualificationType: z.enum(['degree', 'diploma', 'short-term']).optional(),
+  category: z.enum(['regular', 'extension']).optional(),
 });
 
 export const createStudentSchema = z.object({
@@ -95,6 +96,8 @@ export const listEnrollmentsQuerySchema = paginationSchema.extend({
   status: z.enum(['all', 'pending', 'active', 'completed', 'withdrawn', 'cancelled']).optional().default('all'),
   academicYear: objectId.optional(),
   program: objectId.optional(),
+  department: objectId.optional(),
+  category: z.enum(['regular', 'extension']).optional(),
   student: objectId.optional(),
 });
 
