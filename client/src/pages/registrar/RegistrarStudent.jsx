@@ -31,6 +31,9 @@ import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import { ErrorState } from '../../components/ui/StatePanel';
 import { SkeletonCard } from '../../components/ui/Skeleton';
+import CodeInput from '../../components/ui/CodeInput';
+import Modal from '../../components/ui/Modal';
+import ExportMenu from '../../components/ui/ExportMenu';
 
 const MAX_PHOTO = 5 * 1024 * 1024;
 const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp'];
@@ -51,6 +54,9 @@ export default function RegistrarStudent() {
   const fileInput = useRef(null);
   const [editing, setEditing] = useState(false);
   const [removeOpen, setRemoveOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteCode, setDeleteCode] = useState('');
+  const [shake, setShake] = useState(0);
 
   const student = useQuery({
     queryKey: ['registrar', 'student', studentId],
@@ -89,6 +95,36 @@ export default function RegistrarStudent() {
       queryClient.invalidateQueries({ queryKey: ['registrar', 'students'] });
     },
     onError: (err) => toast.error(errorMessage(err, 'The photo could not be removed.')),
+  });
+
+  const requestDelete = useMutation({
+    mutationFn: async () => (await api.post(`${REGISTRAR}/students/${studentId}/delete-code`)).data,
+    onSuccess: (data) => {
+      setDeleteCode('');
+      setDeleteOpen(true);
+      toast.success(data?.message || 'A confirmation code was emailed to your Registrar account.');
+    },
+    onError: (err) => toast.error(errorMessage(err, 'The confirmation code could not be sent.')),
+  });
+
+  const destroy = useMutation({
+    mutationFn: async () => (
+      await api.request({
+        url: `${REGISTRAR}/students/${studentId}`,
+        method: 'delete',
+        data: { code: deleteCode },
+      })
+    ).data,
+    onSuccess: () => {
+      toast.success('The student record was permanently deleted.');
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'students'] });
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'dashboard'] });
+      navigate('/registrar/students');
+    },
+    onError: (err) => {
+      setShake((value) => value + 1);
+      toast.error(errorMessage(err, 'The student record could not be deleted.'));
+    },
   });
 
   const record = student.data?.student;
@@ -142,8 +178,24 @@ export default function RegistrarStudent() {
             <Button variant="secondary" onClick={() => navigate('/registrar/students')}>
               <ArrowLeft className="h-4 w-4" /> Students
             </Button>
+            <ExportMenu
+              basePath={`${REGISTRAR}/students/${studentId}/export`}
+              filenamePrefix={`${record?.studentId || 'student'}-record`}
+              formats={['docx', 'pdf']}
+              label="Export profile"
+              disabled={!record}
+            />
             <Button onClick={() => setEditing(true)} disabled={!record} className="gap-2">
               <Pencil className="h-4 w-4" /> Edit record
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => requestDelete.mutate()}
+              loading={requestDelete.isPending}
+              disabled={!record}
+              className="gap-2 text-rose-600 hover:bg-rose-50"
+            >
+              <Trash2 className="h-4 w-4" /> Delete record
             </Button>
           </>
         }
@@ -207,6 +259,7 @@ export default function RegistrarStudent() {
                   <DetailRow label="Department" value={record.department ? `${record.department.code} · ${record.department.name}` : null} />
                   <DetailRow label="Programme" value={record.program ? `${record.program.code} · ${record.program.name}` : null} />
                   <DetailRow label="Qualification" value={qualificationLabel(record.qualificationType)} />
+                  <DetailRow label="Delivery stream" value={humanStatus(record.studentCategory || 'regular')} />
                   <DetailRow label="Level / year" value={levelLabel(record.level, record.qualificationType)} />
                   <DetailRow label="Batch" value={record.batch ? `${record.batch.code} · ${record.batch.name}` : null} />
                   <DetailRow label="Admission year" value={record.admissionAcademicYear?.label} />
@@ -238,10 +291,9 @@ export default function RegistrarStudent() {
                 {record.address && Object.values(record.address).some(Boolean) ? (
                   <p className="mt-4 flex items-start gap-2 text-xs text-slate-500">
                     <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    {[record.address.line, record.address.woreda, record.address.city, record.address.region].filter(Boolean).join(', ')}
+                    {[record.address.woreda, record.address.city].filter(Boolean).join(', ')}
                   </p>
                 ) : null}
-                {record.notes ? <p className="mt-4 rounded-xl bg-amber-50 px-3.5 py-3 text-sm text-amber-900">{record.notes}</p> : null}
               </CardBody>
             </Card>
           </div>
@@ -250,16 +302,15 @@ export default function RegistrarStudent() {
             <Card>
               <CardHeader
                 title="Enrollment history"
-                subtitle="Every academic year recorded for this student."
+                subtitle="Every academic year recorded for this student. New admissions create the active enrollment automatically."
                 icon={CalendarDays}
-                action={<Link to="/registrar/enrollments" className="text-xs font-semibold text-brand-700 hover:underline">Manage</Link>}
               />
               <RegistrarTable
                 columns={enrollmentColumns}
                 rows={enrollments}
                 rowKey={(row) => row.id}
                 emptyTitle="No enrollments"
-                emptyMessage="Create an enrollment for this student from the enrollments page."
+                emptyMessage="An admission with an academic year creates the first enrollment automatically."
               />
             </Card>
 
@@ -318,6 +369,36 @@ export default function RegistrarStudent() {
         onClose={() => setRemoveOpen(false)}
         onConfirm={() => remove.mutate()}
       />
+      <Modal
+        open={deleteOpen}
+        title="Delete this student permanently?"
+        subtitle={`${record?.fullName || 'The student'} · ${record?.studentId || ''}`}
+        onClose={destroy.isPending ? undefined : () => setDeleteOpen(false)}
+        dismissible={!destroy.isPending}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeleteOpen(false)} disabled={destroy.isPending}>Cancel</Button>
+            <Button
+              variant="danger"
+              onClick={() => destroy.mutate()}
+              loading={destroy.isPending}
+              disabled={deleteCode.length !== 6}
+            >
+              Delete permanently
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm leading-relaxed text-slate-600">
+            A 6-digit code was emailed to your Registrar account. Enter it to confirm. The record, photo,
+            enrollment history, course registrations, attendance, results, certificates and transcripts will be removed.
+          </p>
+          <CodeInput value={deleteCode} onChange={setDeleteCode} disabled={destroy.isPending} shake={shake} />
+          <p className="text-xs text-slate-500">This cannot be undone or recovered from the Registrar workspace.</p>
+        </div>
+      </Modal>
     </div>
   );
 }

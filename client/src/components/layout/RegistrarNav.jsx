@@ -12,7 +12,6 @@ import {
   FileText,
   Fingerprint,
   GraduationCap,
-  Layers3,
   LayoutDashboard,
   Megaphone,
   ScrollText,
@@ -28,7 +27,6 @@ const GROUPS = [
     icon: Users,
     items: [
       { to: '/registrar/students', label: 'Students', icon: Users },
-      { to: '/registrar/enrollments', label: 'Enrollments', icon: Layers3 },
       { to: '/registrar/batches', label: 'Batches', icon: UserSquare2 },
       { to: '/registrar/grading-policy', label: 'Grading policy', icon: FileBarChart },
     ],

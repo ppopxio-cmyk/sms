@@ -47,7 +47,9 @@ export const listStudentsQuerySchema = paginationSchema.extend({
 });
 
 export const createStudentSchema = z.object({
-  studentId: text(40).min(2),
+  // The Registrar no longer types a number: the server derives it from the programme,
+  // batch and regular/extension stream when the admission is recorded.
+  studentId: text(40).min(2).optional(),
   firstName: text(80).min(1),
   middleName: optionalText(80),
   lastName: text(80).min(1),
@@ -57,10 +59,8 @@ export const createStudentSchema = z.object({
   phone: ethiopianPhone,
   address: z
     .object({
-      region: optionalText(80),
       city: optionalText(80),
       woreda: optionalText(80),
-      line: optionalText(220),
     })
     .optional()
     .default({}),
@@ -69,37 +69,70 @@ export const createStudentSchema = z.object({
   batch: objectId.nullish(),
   admissionAcademicYear: objectId.nullish(),
   level: z.coerce.number().int().min(1).max(20).optional().default(1),
-  enrollmentStatus: z.enum(['pending', 'active', 'completed', 'withdrawn', 'cancelled']).optional().default('pending'),
+  enrollmentStatus: z.enum(['pending', 'active', 'completed', 'withdrawn', 'cancelled']).optional().default('active'),
   studentStatus: z.enum(['active', 'suspended', 'graduated', 'withdrawn', 'archived']).optional().default('active'),
   studentCategory: z.enum(['regular', 'extension']).optional().default('regular'),
   admissionDate: date.nullish(),
-  notes: optionalText(2000),
 });
 
 export const updateStudentSchema = createStudentSchema.partial().omit({ studentId: true });
 
-export const enrollmentCreateSchema = z.object({
-  student: objectId,
-  academicYear: objectId,
-  batch: objectId.nullish(),
-  level: z.coerce.number().int().min(1).max(20),
-  enrollmentDate: date,
-  status: z.enum(['pending', 'active', 'completed', 'withdrawn', 'cancelled']).optional().default('active'),
+export const studentDeleteSchema = z.object({
+  code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code sent to your email.'),
 });
 
-export const enrollmentStatusSchema = z.object({
-  status: z.enum(['pending', 'active', 'completed', 'withdrawn', 'cancelled']),
-  reason: optionalText(500),
+export const studentProfileExportQuerySchema = z.object({
+  format: z.enum(['docx', 'pdf']).optional().default('pdf'),
 });
 
-export const listEnrollmentsQuerySchema = paginationSchema.extend({
-  status: z.enum(['all', 'pending', 'active', 'completed', 'withdrawn', 'cancelled']).optional().default('all'),
-  academicYear: objectId.optional(),
-  program: objectId.optional(),
-  department: objectId.optional(),
-  category: z.enum(['regular', 'extension']).optional(),
-  student: objectId.optional(),
+export const departmentSchema = z.object({
+  code: text(20).min(1),
+  name: text(120).min(1),
+  description: optionalText(1000),
 });
+
+export const departmentUpdateSchema = departmentSchema.partial();
+
+const shortTermSchema = z.object({
+  duration: z.coerce.number().int().min(1).max(520),
+  unit: z.enum(['weeks', 'months']).default('weeks'),
+});
+
+const programFields = z.object({
+  code: text(20).min(1),
+  name: text(160).min(1),
+  department: objectId,
+  qualificationType: z.enum(['degree', 'diploma', 'short-term']),
+  categories: z.array(z.enum(['regular', 'extension'])).min(1).optional(),
+  durationYears: z.coerce.number().int().min(1).max(10).nullish(),
+  levels: z.array(z.coerce.number().int().min(1).max(4)).max(4).optional(),
+  shortTerm: shortTermSchema.nullish(),
+  capacity: z.coerce.number().int().min(1).max(10000).nullish(),
+  teachers: z.array(objectId).max(100).optional(),
+  description: optionalText(1000),
+  active: z.boolean().optional(),
+});
+
+export const programSchema = programFields.superRefine((value, ctx) => {
+  if (value.qualificationType === 'degree' && !value.durationYears) {
+    ctx.addIssue({ code: 'custom', path: ['durationYears'], message: 'A degree programme needs a duration in years.' });
+  }
+  if (value.qualificationType === 'diploma') {
+    const levels = value.levels?.length ? value.levels : [1, 2, 3, 4];
+    if (levels.some((level) => level < 1 || level > 4)) {
+      ctx.addIssue({ code: 'custom', path: ['levels'], message: 'Diploma levels must be between 1 and 4.' });
+    }
+  }
+  if (value.qualificationType === 'short-term' && !value.shortTerm?.duration) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['shortTerm', 'duration'],
+      message: 'A short-term programme needs a duration in weeks or months.',
+    });
+  }
+});
+
+export const programUpdateSchema = programFields.partial();
 
 export const academicYearSchema = z.object({
   label: text(40).min(2),
@@ -132,6 +165,7 @@ export const batchSchema = z.object({
   code: text(30).min(1),
   name: text(120).min(1),
   program: objectId,
+  category: z.enum(['regular', 'extension']).optional().default('regular'),
   admissionAcademicYear: objectId,
   expectedCompletionYear: z.coerce.number().int().min(2000).max(2300).nullish(),
   currentLevel: z.coerce.number().int().min(1).max(20).optional().default(1),
@@ -216,6 +250,15 @@ export const registrationCreateSchema = z.object({
 
 export const registrationDropSchema = z.object({
   reason: optionalText(500),
+});
+
+export const offeringCandidatesQuerySchema = paginationSchema.extend({
+  category: z.enum(['regular', 'extension']).optional(),
+  batch: objectId.optional(),
+});
+
+export const offeringBulkRegistrationSchema = z.object({
+  studentIds: z.array(objectId).min(1).max(500),
 });
 
 export const listRegistrationsQuerySchema = paginationSchema.extend({
@@ -352,6 +395,8 @@ export const registrarReportQuerySchema = z.object({
   academicYear: objectId.optional(),
   program: objectId.optional(),
   department: objectId.optional(),
+  batch: objectId.optional(),
+  category: z.enum(['regular', 'extension']).optional(),
   status: text(40).optional().default(''),
 });
 
@@ -400,6 +445,8 @@ export const courseEntryListSchema = z.object({
 
 export const listBatchesQuerySchema = paginationSchema.extend({
   program: objectId.optional(),
+  department: objectId.optional(),
+  category: z.enum(['regular', 'extension']).optional(),
   status: z.enum(['all', 'planned', 'active', 'completed', 'archived']).optional().default('all'),
 });
 
@@ -438,8 +485,8 @@ export const noticeListSchema = paginationSchema.extend({
 });
 
 const gradeBandSchema = z.object({
-  min: z.coerce.number().min(0).max(100),
-  max: z.coerce.number().min(0).max(100),
+  min: z.coerce.number().int().min(0).max(100),
+  max: z.coerce.number().int().min(0).max(100),
   letter: text(10).min(1),
   points: z.coerce.number().min(0).max(4),
   pass: z.boolean().default(true),

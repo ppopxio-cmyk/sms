@@ -26,14 +26,18 @@ export async function requirePolicy() {
   return policy;
 }
 
-// The bands are contiguous, cover 0 to 100 and never overlap. This is the same invariant
-// the academic setup script enforces, repeated here so an HTTP request cannot break it.
+// The bands are contiguous, cover 0 to 100 and never overlap. They are entered the way
+// the college publishes them: 0–30, 31–40, 41–50. A shared boundary such as 0–30 and
+// 30–40 is therefore rejected rather than silently double-counting mark 30.
 export function validateBands(bands) {
   if (!Array.isArray(bands) || !bands.length) {
     throw new AppError(400, 'BANDS_EMPTY', 'At least one grade band is required.');
   }
   const sorted = [...bands].sort((a, b) => a.min - b.min);
   for (const band of sorted) {
+    if (!Number.isInteger(band.min) || !Number.isInteger(band.max)) {
+      throw new AppError(400, 'BAND_INTEGER', 'Grade band boundaries must be whole numbers.');
+    }
     if (band.max < band.min) {
       throw new AppError(400, 'BAND_RANGE', 'A grade band maximum cannot be below its minimum.');
     }
@@ -43,11 +47,11 @@ export function validateBands(bands) {
     throw new AppError(400, 'BANDS_END', 'The last grade band must end at 100.');
   }
   for (let index = 1; index < sorted.length; index += 1) {
-    if (sorted[index].min !== sorted[index - 1].max) {
+    if (sorted[index].min !== sorted[index - 1].max + 1) {
       throw new AppError(
         400,
         'BANDS_CONTIGUOUS',
-        'Grade bands must be contiguous: each band must start where the previous one ends.',
+        'Grade bands must be contiguous: the next band must start one mark after the previous band ends (for example 0–30, then 31–40).',
       );
     }
   }
@@ -56,13 +60,17 @@ export function validateBands(bands) {
 
 export function previewMarks(policy, marks) {
   const results = [];
+  const bands = [...(policy.bands || [])].sort((a, b) => a.min - b.min);
   for (const mark of marks) {
     const value = Number(mark);
     if (!Number.isFinite(value) || value < 0 || value > 100) {
       results.push({ mark, error: 'A mark must be a number between 0 and 100.' });
       continue;
     }
-    const band = policy.bands.find((entry) => value >= entry.min && value <= entry.max);
+    const index = bands.findIndex((entry, position) =>
+      value >= entry.min && (bands[position + 1] ? value < bands[position + 1].min : value <= entry.max),
+    );
+    const band = bands[index];
     results.push({
       mark: value,
       letter: band?.letter ?? null,

@@ -103,25 +103,28 @@ gradingPolicySchema.pre('validate', function validateBands() {
   for (let index = 0; index < sorted.length; index += 1) {
     const band = sorted[index];
     if (band.max < band.min) throw new Error('A grade band maximum cannot be below its minimum.');
-    // Bands must meet exactly: each band starts where the previous one ends. This is the
-    // same rule the service and the academic setup script apply, so a band can never be
-    // written that overlaps its neighbour or leaves a mark with no grade at all.
-    if (index > 0 && band.min !== sorted[index - 1].max) {
-      throw new Error('Grade bands must be contiguous: each band must start where the previous one ends.');
+    // Bands are written the way they are published: 0–30, then 31–40, not 0–30 and
+    // 30–40. Integer boundaries keep every mark in exactly one band.
+    if (!Number.isInteger(band.min) || !Number.isInteger(band.max)) {
+      throw new Error('Grade band boundaries must be whole numbers.');
+    }
+    if (index > 0 && band.min !== sorted[index - 1].max + 1) {
+      throw new Error('Grade bands must be contiguous: the next band must start one mark after the previous band ends.');
     }
   }
   this.bands = sorted;
 });
 
-// The single place a mark is turned into a grade. Bands cover 0 to 100 and meet exactly,
-// so the boundary between two bands belongs to both. The first matching band in
-// ascending order wins, which puts the shared boundary in the lower band and leaves
-// every mark from 0 to 100 with exactly one grade.
+// The single place a mark is turned into a grade. A decimal mark inside the one-mark
+// space between published integer boundaries (for example 30.5 between 0–30 and
+// 31–40) stays in the lower band rather than becoming ungradeable.
 export function findBand(policy, mark) {
   if (!policy?.bands?.length || typeof mark !== 'number' || Number.isNaN(mark)) return null;
   const sorted = [...policy.bands].sort((a, b) => a.min - b.min);
-  for (const band of sorted) {
-    if (mark >= band.min && mark <= band.max) return band;
+  for (let index = 0; index < sorted.length; index += 1) {
+    const band = sorted[index];
+    const next = sorted[index + 1];
+    if (mark >= band.min && (next ? mark < next.min : mark <= band.max)) return band;
   }
   return null;
 }

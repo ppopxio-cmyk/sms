@@ -19,7 +19,7 @@ const REPEAT_POLICIES = [
   { value: 'latest', label: 'Latest attempt counts' },
 ];
 
-const blankBand = () => ({ min: 0, max: 0, letter: '', points: 0, pass: true });
+const blankBand = () => ({ min: 0, max: 100, letter: '', points: 0, pass: true });
 
 export default function RegistrarGradingPolicy() {
   const queryClient = useQueryClient();
@@ -59,9 +59,12 @@ export default function RegistrarGradingPolicy() {
     if (Number(sorted[sorted.length - 1].max) !== 100) found.push('The last band must end at 100.');
     sorted.forEach((band, index) => {
       if (!String(band.letter || '').trim()) found.push(`Band ${index + 1} needs a grade label.`);
+      if (!Number.isInteger(Number(band.min)) || !Number.isInteger(Number(band.max))) {
+        found.push(`Band ${index + 1} boundaries must be whole numbers.`);
+      }
       if (Number(band.max) < Number(band.min)) found.push(`Band ${index + 1} has a maximum below its minimum.`);
-      if (index > 0 && Number(band.min) !== Number(sorted[index - 1].max)) {
-        found.push(`Band ${index + 1} must start where the previous band ends.`);
+      if (index > 0 && Number(band.min) !== Number(sorted[index - 1].max) + 1) {
+        found.push(`Band ${index + 1} must start one mark after band ${index} ends.`);
       }
     });
     return found;
@@ -115,8 +118,8 @@ export default function RegistrarGradingPolicy() {
   const addBand = () => {
     setBands((current) => {
       const last = current[current.length - 1];
-      const start = last ? Number(last.max) : 0;
-      return [...current, { ...blankBand(), min: start, max: start }];
+      const start = last ? Math.min(100, Number(last.max) + 1) : 0;
+      return [...current, { ...blankBand(), min: start, max: 100 }];
     });
   };
 
@@ -181,7 +184,7 @@ export default function RegistrarGradingPolicy() {
       <Card>
         <CardHeader
           title="Grade bands"
-          subtitle="Bands must cover 0 to 100 with no gaps and no overlaps."
+          subtitle="Enter published boundaries as 0–30, 31–40, 41–50 and so on. Bands must cover 0 to 100 with no gaps and no overlaps."
           icon={CheckCircle2}
           action={
             <div className="flex gap-2">

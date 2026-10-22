@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, SlidersHorizontal, UserPlus } from 'lucide-react';
+import { SlidersHorizontal, UserPlus } from 'lucide-react';
 import { api } from '../../lib/api';
 import {
   REGISTRAR,
@@ -20,6 +20,7 @@ import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Pagination from '../../components/ui/Pagination';
 import SearchInput from '../../components/ui/SearchInput';
+import ExportMenu from '../../components/ui/ExportMenu';
 import { SelectField } from '../../components/registrar/Fields';
 
 const initials = (value) =>
@@ -38,6 +39,7 @@ export default function RegistrarStudents() {
   const [status, setStatus] = useState('all');
   const [program, setProgram] = useState('');
   const [department, setDepartment] = useState('');
+  const [batch, setBatch] = useState('');
   const [category, setCategory] = useState('all');
   const [sort, setSort] = useState('fullName');
   const [order, setOrder] = useState('asc');
@@ -60,11 +62,12 @@ export default function RegistrarStudents() {
       ...(status !== 'all' ? { status } : {}),
       ...(program ? { program } : {}),
       ...(department ? { department } : {}),
+      ...(batch ? { batch } : {}),
       ...(category !== 'all' ? { category } : {}),
       sort,
       order,
     }),
-    [page, limit, debounced, status, program, department, category, sort, order],
+    [page, limit, debounced, status, program, department, batch, category, sort, order],
   );
 
   const students = useQuery({
@@ -76,7 +79,19 @@ export default function RegistrarStudents() {
   const rows = students.data?.rows ?? [];
   const pagination = students.data?.pagination ?? { page: 1, pages: 1, total: 0, limit };
   const counts = students.data?.counts ?? {};
-  const filtered = Boolean(debounced.trim() || status !== 'all' || program || department || category !== 'all');
+  const filtered = Boolean(debounced.trim() || status !== 'all' || program || department || batch || category !== 'all');
+  const availableBatches = (options.data?.batches || []).filter((row) =>
+    (!program || row.program === program)
+    && (category === 'all' || (row.category || 'regular') === category),
+  );
+  const exportParams = {
+    type: 'students',
+    ...(status !== 'all' ? { status } : {}),
+    ...(program ? { program } : {}),
+    ...(department ? { department } : {}),
+    ...(batch ? { batch } : {}),
+    ...(category !== 'all' ? { category } : {}),
+  };
 
   const columns = [
     {
@@ -171,9 +186,18 @@ export default function RegistrarStudents() {
         title="Students"
         subtitle="The official student register, with programme placement, status and photos. The server enforces every permission."
         actions={
-          <Button onClick={() => setCreating(true)} className="gap-2">
-            <UserPlus className="h-4 w-4" /> Admit student
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <ExportMenu
+              basePath={`${REGISTRAR}/reports/export`}
+              params={exportParams}
+              filenamePrefix="student-register"
+              label="Export register"
+              disabled={students.isLoading}
+            />
+            <Button onClick={() => setCreating(true)} className="gap-2">
+              <UserPlus className="h-4 w-4" /> Admit student
+            </Button>
+          </div>
         }
       />
 
@@ -185,7 +209,7 @@ export default function RegistrarStudents() {
             placeholder="Search by name, student ID, email or phone"
             loading={students.isFetching}
           />
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <SelectField
               label="Status"
               value={status}
@@ -202,7 +226,7 @@ export default function RegistrarStudents() {
             <SelectField
               label="Department"
               value={department}
-              onChange={(event) => { setDepartment(event.target.value); setProgram(''); setPage(1); }}
+              onChange={(event) => { setDepartment(event.target.value); setProgram(''); setBatch(''); setPage(1); }}
             >
               <option value="">All departments</option>
               {(options.data?.departments || []).map((row) => (
@@ -212,7 +236,7 @@ export default function RegistrarStudents() {
             <SelectField
               label="Category"
               value={category}
-              onChange={(event) => { setCategory(event.target.value); setPage(1); }}
+              onChange={(event) => { setCategory(event.target.value); setBatch(''); setPage(1); }}
             >
               <option value="all">All categories</option>
               <option value="regular">Regular</option>
@@ -221,7 +245,7 @@ export default function RegistrarStudents() {
             <SelectField
               label="Programme"
               value={program}
-              onChange={(event) => { setProgram(event.target.value); setPage(1); }}
+              onChange={(event) => { setProgram(event.target.value); setBatch(''); setPage(1); }}
             >
               <option value="">All programmes</option>
               {(options.data?.programs || [])
@@ -229,6 +253,16 @@ export default function RegistrarStudents() {
                 .map((row) => (
                   <option key={row.id} value={row.id}>{row.code} · {row.name}</option>
                 ))}
+            </SelectField>
+            <SelectField
+              label="Batch"
+              value={batch}
+              onChange={(event) => { setBatch(event.target.value); setPage(1); }}
+            >
+              <option value="">All batches</option>
+              {availableBatches.map((row) => (
+                <option key={row.id} value={row.id}>{row.code} · {row.name}</option>
+              ))}
             </SelectField>
             <div>
               <span className="mb-1.5 block text-sm font-medium text-slate-700">Sort</span>
@@ -268,9 +302,7 @@ export default function RegistrarStudents() {
               {students.isFetching ? 'Updating…' : `${pagination.total ?? 0} record${pagination.total === 1 ? '' : 's'}`}
             </p>
           </div>
-          <Link to="/registrar/enrollments" className="focus-ring inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold text-brand-700 hover:underline">
-            <Plus className="h-3.5 w-3.5" /> Manage enrollments
-          </Link>
+          <p className="text-xs text-slate-400">Admissions are recorded here; there is no separate enrollment step.</p>
         </div>
         <RegistrarTable
           columns={columns}

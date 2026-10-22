@@ -9,9 +9,12 @@ import {
   listStudentsQuerySchema,
   createStudentSchema,
   updateStudentSchema,
-  listEnrollmentsQuerySchema,
-  enrollmentCreateSchema,
-  enrollmentStatusSchema,
+  studentDeleteSchema,
+  studentProfileExportQuerySchema,
+  departmentSchema,
+  departmentUpdateSchema,
+  programSchema,
+  programUpdateSchema,
   academicYearSchema,
   academicTermSchema,
   calendarEventSchema,
@@ -29,6 +32,8 @@ import {
   registrationEligibleQuerySchema,
   registrationCreateSchema,
   registrationDropSchema,
+  offeringCandidatesQuerySchema,
+  offeringBulkRegistrationSchema,
   listRegistrationsQuerySchema,
   listResultsQuerySchema,
   resultDecisionSchema,
@@ -56,17 +61,19 @@ import {
   gradingPolicyPreviewSchema,
 } from '../validators/registrar.schemas.js';
 import {
-  listStudents, getStudent, createStudent, updateStudent, uploadStudentPhoto, removeStudentPhoto, studentOptions,
+  listStudents, getStudent, createStudent, updateStudent, uploadStudentPhoto, removeStudentPhoto,
+  requestStudentDeleteCode, deleteStudent, exportStudentProfile, studentOptions,
 } from '../controllers/registrar.students.controller.js';
-import { listEnrollments, createEnrollment, updateEnrollmentStatus } from '../controllers/registrar.enrollments.controller.js';
 import {
-  structure, calendar, createAcademicYear, updateAcademicYear, createTerm, updateTerm,
+  structure, createDepartment, updateDepartment, deleteDepartment, createProgram, updateProgram, deleteProgram,
+  calendar, createAcademicYear, updateAcademicYear, createTerm, updateTerm,
   createCalendarEvent, updateCalendarEvent, deleteCalendarEvent,
   listBatches, createBatch, updateBatch, batchAssignmentPreview, assignBatch, progressBatch,
   listPlans, planOptions, createPlan, getPlan, updatePlan, addPlanCourse, updatePlanCourse,
   removePlanCourse, reorderPlanCourses, publishPlan, archivePlan, clonePlan,
   listOfferings, offeringOptions, planOfferings, createOffering, updateOffering,
-  registrationEligible, createRegistrations, listRegistrations, dropRegistration,
+  registrationEligible, createRegistrations, offeringCandidates, registerOfferingStudents,
+  listRegistrations, dropRegistration,
 } from '../controllers/registrar.academic.controller.js';
 import {
   listAttendance, attendanceSummary, listResults, listResultSubmissions, getResult,
@@ -104,6 +111,14 @@ r.get('/students/options', requirePermission('students:view'), studentOptions);
 r.get('/students', requirePermission('students:view'), validate(listStudentsQuerySchema, 'query'), listStudents);
 r.post('/students', requirePermission('students:manage'), validate(createStudentSchema), createStudent);
 r.get('/students/:studentId', requirePermission('students:view'), validate(studentIdParamSchema, 'params'), getStudent);
+r.get(
+  '/students/:studentId/export',
+  exportLimiter,
+  requirePermission('students:view'),
+  validate(studentIdParamSchema, 'params'),
+  validate(studentProfileExportQuerySchema, 'query'),
+  exportStudentProfile,
+);
 r.patch('/students/:studentId', requirePermission('students:manage'), validate(studentIdParamSchema, 'params'), validate(updateStudentSchema), updateStudent);
 r.post(
   '/students/:studentId/photo',
@@ -114,14 +129,17 @@ r.post(
   uploadStudentPhoto,
 );
 r.delete('/students/:studentId/photo', requirePermission('students:photo'), validate(studentIdParamSchema, 'params'), removeStudentPhoto);
-
-// ---- Enrollments ------------------------------------------------------------
-r.get('/enrollments', requirePermission('enrollments:view'), validate(listEnrollmentsQuerySchema, 'query'), listEnrollments);
-r.post('/enrollments', requirePermission('enrollments:manage'), validate(enrollmentCreateSchema), createEnrollment);
-r.patch('/enrollments/:id/status', requirePermission('enrollments:manage'), validate(idParamSchema, 'params'), validate(enrollmentStatusSchema), updateEnrollmentStatus);
+r.post('/students/:studentId/delete-code', requirePermission('students:manage'), validate(studentIdParamSchema, 'params'), requestStudentDeleteCode);
+r.delete('/students/:studentId', requirePermission('students:manage'), validate(studentIdParamSchema, 'params'), validate(studentDeleteSchema), deleteStudent);
 
 // ---- Academic structure and calendar ---------------------------------------
 r.get('/academic-structure', requirePermission('structure:view'), structure);
+r.post('/academic-structure/departments', requirePermission('structure:manage'), validate(departmentSchema), createDepartment);
+r.patch('/academic-structure/departments/:id', requirePermission('structure:manage'), validate(idParamSchema, 'params'), validate(departmentUpdateSchema), updateDepartment);
+r.delete('/academic-structure/departments/:id', requirePermission('structure:manage'), validate(idParamSchema, 'params'), deleteDepartment);
+r.post('/academic-structure/programs', requirePermission('structure:manage'), validate(programSchema), createProgram);
+r.patch('/academic-structure/programs/:id', requirePermission('structure:manage'), validate(idParamSchema, 'params'), validate(programUpdateSchema), updateProgram);
+r.delete('/academic-structure/programs/:id', requirePermission('structure:manage'), validate(idParamSchema, 'params'), deleteProgram);
 r.get('/academic-calendar', requirePermission('calendar:view'), calendar);
 r.post('/academic-calendar/years', requirePermission('calendar:manage'), validate(academicYearSchema), createAcademicYear);
 r.patch('/academic-calendar/years/:id', requirePermission('calendar:manage'), validate(idParamSchema, 'params'), validate(academicYearSchema.partial()), updateAcademicYear);
@@ -162,6 +180,20 @@ r.patch('/offerings/:id', requirePermission('offerings:manage'), validate(idPara
 
 // ---- Registration -----------------------------------------------------------
 r.get('/course-registration/eligible', requirePermission('registration:view'), validate(registrationEligibleQuerySchema, 'query'), registrationEligible);
+r.get(
+  '/course-registration/offerings/:offering',
+  requirePermission('registration:view'),
+  validate(offeringIdParamSchema, 'params'),
+  validate(offeringCandidatesQuerySchema, 'query'),
+  offeringCandidates,
+);
+r.post(
+  '/course-registration/offerings/:offering',
+  requirePermission('registration:manage'),
+  validate(offeringIdParamSchema, 'params'),
+  validate(offeringBulkRegistrationSchema),
+  registerOfferingStudents,
+);
 r.get('/course-registration', requirePermission('registration:view'), validate(listRegistrationsQuerySchema, 'query'), listRegistrations);
 r.post('/course-registration', requirePermission('registration:manage'), validate(registrationCreateSchema), createRegistrations);
 r.patch('/course-registration/:id/drop', requirePermission('registration:manage'), validate(idParamSchema, 'params'), validate(registrationDropSchema), dropRegistration);

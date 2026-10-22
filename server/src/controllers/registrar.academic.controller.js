@@ -26,15 +26,20 @@ async function requirePlan(planId, { status } = {}) {
 }
 
 export const structure = asyncHandler(async (_req, res) => {
-  const [departments, programs, courses, plans] = await Promise.all([
+  const [departments, programs, courses, plans, teachers] = await Promise.all([
     Department.find().sort({ name: 1 }).lean(),
-    Program.find().populate('department', 'code name').sort({ name: 1 }).lean(),
+    Program.find()
+      .populate('department', 'code name')
+      .populate('teachers', 'name email')
+      .sort({ name: 1 })
+      .lean(),
     Course.find().populate('department', 'code name').sort({ code: 1 }).lean(),
     CurriculumPlan.find({ status: 'published' })
       .populate('program', 'code name qualificationType')
       .populate('academicYear', 'label')
       .sort({ createdAt: -1 })
       .lean(),
+    User.find({ role: 'TEACHER', status: 'active', deletedAt: null }).select('name email').sort({ name: 1 }).lean(),
   ]);
   const [programCounts, courseCounts] = await Promise.all([
     Program.aggregate([{ $group: { _id: '$department', count: { $sum: 1 } } }]),
@@ -53,9 +58,15 @@ export const structure = asyncHandler(async (_req, res) => {
     programs: programs.map((row) => ({
       ...row,
       id: String(row._id),
+      categories: row.categories?.length ? row.categories : ['regular', 'extension'],
       department: row.department
         ? { id: String(row.department._id), code: row.department.code, name: row.department.name }
         : null,
+      teachers: (row.teachers || []).filter(Boolean).map((teacher) => ({
+        id: String(teacher._id),
+        name: teacher.name || teacher.email,
+        email: teacher.email,
+      })),
       _id: undefined,
     })),
     courses: courses.map((row) => ({
@@ -75,7 +86,144 @@ export const structure = asyncHandler(async (_req, res) => {
       academicYear: row.academicYear ? { id: String(row.academicYear._id), label: row.academicYear.label } : null,
       _id: undefined,
     })),
+    teachers: teachers.map((row) => ({
+      id: String(row._id),
+      name: row.name || row.email,
+      email: row.email,
+    })),
   });
+});
+
+async function requireDepartment(departmentId) {
+  const department = await Department.findById(departmentId).lean();
+  if (!department) throw new AppError(400, 'DEPARTMENT_INVALID', 'Choose a valid department.');
+  return department;
+}
+
+async function requireTeachers(teacherIds = []) {
+  if (!teacherIds.length) return [];
+  const teachers = await User.find(
+    ownFilter({ _id: { $in: [...new Set(teacherIds)] }, role: 'TEACHER', status: 'active', deletedAt: null }),
+  ).select('_id').lean();
+  if (teachers.length !== new Set(teacherIds).size) {
+    throw new AppError(400, 'TEACHER_INVALID', 'Choose teachers with an active teacher account.');
+  }
+  return teachers.map((row) => row._id);
+}
+
+export const createDepartment = asyncHandler(async (req, res) => {
+  const input = req.body;
+  const code = input.code.toUpperCase();
+  const existing = await Department.findOne({ code }).lean();
+  if (existing) throw new AppError(409, 'DEPARTMENT_CODE_EXISTS', 'That department code is already in use.');
+  const department = await Department.create({
+    ...input,
+    code,
+    createdBy: req.user.id,
+    updatedBy: req.user.id,
+  });
+  audit({ req, action: 'registrar.department.create', targetType: 'Department', targetId: department._id, meta: { code } });
+  res.status(201).json({ department });
+});
+
+export const updateDepartment = asyncHandler(async (req, res) => {
+  const department = await Department.findById(req.valid.params.id);
+  if (!department) throw new AppError(404, 'DEPARTMENT_NOT_FOUND', 'That department was not found.');
+  const input = req.body;
+  if (input.code) {
+    const code = input.code.toUpperCase();
+    const duplicate = await Department.findOne(ownFilter({ code, _id: { $ne: department._id } })).lean();
+    if (duplicate) throw new AppError(409, 'DEPARTMENT_CODE_EXISTS', 'That department code is already in use.');
+    input.code = code;
+  }
+  Object.assign(department, input, { updatedBy: req.user.id });
+  await department.save();
+  audit({ req, action: 'registrar.department.update', targetType: 'Department', targetId: department._id });
+  res.json({ department });
+});
+
+export const deleteDepartment = asyncHandler(async (req, res) => {
+  const department = await Department.findById(req.valid.params.id).lean();
+  if (!department) throw new AppError(404, 'DEPARTMENT_NOT_FOUND', 'That department was not found.');
+  const [programs, courses, batches, students] = await Promise.all([
+    Program.countDocuments({ department: department._id }),
+    Course.countDocuments({ department: department._id }),
+    Batch.countDocuments({ department: department._id }),
+    Student.countDocuments({ department: department._id }),
+  ]);
+  if (programs || courses || batches || students) {
+    throw new AppError(
+      409,
+      'DEPARTMENT_IN_USE',
+      'This department still has programmes, courses, batches or students. Remove them before deleting the department.',
+    );
+  }
+  await Department.deleteOne({ _id: department._id });
+  audit({ req, action: 'registrar.department.delete', targetType: 'Department', targetId: department._id, meta: { code: department.code } });
+  res.status(204).end();
+});
+
+export const createProgram = asyncHandler(async (req, res) => {
+  const input = req.body;
+  await requireDepartment(input.department);
+  const code = input.code.toUpperCase();
+  const existing = await Program.findOne({ code }).lean();
+  if (existing) throw new AppError(409, 'PROGRAM_CODE_EXISTS', 'That programme code is already in use.');
+  const teachers = await requireTeachers(input.teachers);
+  const program = await Program.create({
+    ...input,
+    code,
+    teachers,
+    createdBy: req.user.id,
+    updatedBy: req.user.id,
+  });
+  audit({ req, action: 'registrar.program.create', targetType: 'Program', targetId: program._id, meta: { code } });
+  res.status(201).json({ program });
+});
+
+export const updateProgram = asyncHandler(async (req, res) => {
+  const program = await Program.findById(req.valid.params.id);
+  if (!program) throw new AppError(404, 'PROGRAM_NOT_FOUND', 'That programme was not found.');
+  const input = req.body;
+  if (input.department) await requireDepartment(input.department);
+  if (input.code) {
+    const code = input.code.toUpperCase();
+    const duplicate = await Program.findOne(ownFilter({ code, _id: { $ne: program._id } })).lean();
+    if (duplicate) throw new AppError(409, 'PROGRAM_CODE_EXISTS', 'That programme code is already in use.');
+    input.code = code;
+  }
+  if (input.teachers) input.teachers = await requireTeachers(input.teachers);
+  if (input.capacity !== undefined && input.capacity !== null) {
+    const current = await Student.countDocuments({ program: program._id, studentStatus: 'active' });
+    if (input.capacity < current) {
+      throw new AppError(409, 'CAPACITY_BELOW_ENROLMENT', `This programme already has ${current} active students.`);
+    }
+  }
+  Object.assign(program, input, { updatedBy: req.user.id });
+  await program.save();
+  audit({ req, action: 'registrar.program.update', targetType: 'Program', targetId: program._id, meta: { active: program.active } });
+  res.json({ program });
+});
+
+export const deleteProgram = asyncHandler(async (req, res) => {
+  const program = await Program.findById(req.valid.params.id).lean();
+  if (!program) throw new AppError(404, 'PROGRAM_NOT_FOUND', 'That programme was not found.');
+  const [batches, students, plans, offerings] = await Promise.all([
+    Batch.countDocuments({ program: program._id }),
+    Student.countDocuments({ program: program._id }),
+    CurriculumPlan.countDocuments({ program: program._id }),
+    CourseOffering.countDocuments({ program: program._id }),
+  ]);
+  if (batches || students || plans || offerings) {
+    throw new AppError(
+      409,
+      'PROGRAM_IN_USE',
+      'This programme still has batches, students, curriculum plans or course offerings. Inactivate it instead of deleting it.',
+    );
+  }
+  await Program.deleteOne({ _id: program._id });
+  audit({ req, action: 'registrar.program.delete', targetType: 'Program', targetId: program._id, meta: { code: program.code } });
+  res.status(204).end();
 });
 
 export const calendar = asyncHandler(async (_req, res) => {
@@ -183,6 +331,8 @@ export const listBatches = asyncHandler(async (req, res) => {
   const { page, limit, skip } = pageOf(query);
   const filter = mergeFilters(
     query.program ? { program: query.program } : null,
+    query.department ? { department: query.department } : null,
+    query.category ? { category: query.category } : null,
     query.status && query.status !== 'all' ? { status: query.status } : null,
     searchFilter(query.search, ['code', 'name']),
   );
@@ -225,6 +375,10 @@ export const createBatch = asyncHandler(async (req, res) => {
   const input = req.body;
   const program = await Program.findById(input.program).lean();
   if (!program) throw new AppError(400, 'PROGRAM_INVALID', 'Choose a valid programme.');
+  if (!program.active) throw new AppError(409, 'PROGRAM_INACTIVE', 'That programme is inactive and cannot receive a new batch.');
+  if (!(program.categories?.length ? program.categories : ['regular', 'extension']).includes(input.category || 'regular')) {
+    throw new AppError(409, 'PROGRAM_CATEGORY', 'This programme is not offered in the selected regular/extension stream.');
+  }
   const year = await AcademicYear.findById(input.admissionAcademicYear).lean();
   if (!year) throw new AppError(400, 'ACADEMIC_YEAR_INVALID', 'Choose a valid academic year.');
   const batch = await Batch.create({
@@ -241,9 +395,14 @@ export const updateBatch = asyncHandler(async (req, res) => {
   const batch = await Batch.findById(req.valid.params.id);
   if (!batch) throw new AppError(404, 'BATCH_NOT_FOUND', 'That batch was not found.');
   const input = req.body;
-  if (input.program && String(input.program) !== String(batch.program)) {
-    const program = await Program.findById(input.program).lean();
+  if ((input.program && String(input.program) !== String(batch.program)) || input.category) {
+    const programId = input.program || batch.program;
+    const program = await Program.findById(programId).lean();
     if (!program) throw new AppError(400, 'PROGRAM_INVALID', 'Choose a valid programme.');
+    const category = input.category || batch.category || 'regular';
+    if (!(program.categories?.length ? program.categories : ['regular', 'extension']).includes(category)) {
+      throw new AppError(409, 'PROGRAM_CATEGORY', 'This programme is not offered in the selected regular/extension stream.');
+    }
     batch.program = program._id;
     batch.department = program.department;
   }
@@ -692,7 +851,9 @@ export const listOfferings = asyncHandler(async (req, res) => {
         ...row,
         id: String(row._id),
         course: row.course ? { id: String(row.course._id), code: row.course.code, title: row.course.title } : null,
-        program: row.program ? { id: String(row.program._id), code: row.program.code, name: row.program.name } : null,
+        program: row.program
+          ? { id: String(row.program._id), code: row.program.code, name: row.program.name, qualificationType: row.program.qualificationType }
+          : null,
         academicYear: row.academicYear ? { id: String(row.academicYear._id), label: row.academicYear.label } : null,
         teacher: row.teacher ? { id: String(row.teacher._id), name: row.teacher.name, email: row.teacher.email } : null,
         _id: undefined,
@@ -705,7 +866,7 @@ export const listOfferings = asyncHandler(async (req, res) => {
 });
 
 export const offeringOptions = asyncHandler(async (_req, res) => {
-  const [programs, years, teachers, plans] = await Promise.all([
+  const [programs, years, teachers, plans, batches] = await Promise.all([
     Program.find({ active: true }).sort({ name: 1 }).lean(),
     AcademicYear.find().sort({ startDate: -1 }).lean(),
     User.find({ role: 'TEACHER', status: 'active', deletedAt: null }).select('name email').sort({ name: 1 }).lean(),
@@ -714,6 +875,7 @@ export const offeringOptions = asyncHandler(async (_req, res) => {
       .populate('academicYear', 'label')
       .sort({ createdAt: -1 })
       .lean(),
+    Batch.find({ active: true }).sort({ code: 1 }).lean(),
   ]);
   res.json({
     programs: programs.map((row) => ({ id: String(row._id), code: row.code, name: row.name })),
@@ -724,6 +886,13 @@ export const offeringOptions = asyncHandler(async (_req, res) => {
       title: row.title,
       program: row.program ? { id: String(row.program._id), code: row.program.code, name: row.program.name } : null,
       academicYear: row.academicYear ? { id: String(row.academicYear._id), label: row.academicYear.label } : null,
+    })),
+    batches: batches.map((row) => ({
+      id: String(row._id),
+      code: row.code,
+      name: row.name,
+      program: String(row.program),
+      category: row.category || 'regular',
     })),
   });
 });
@@ -842,7 +1011,7 @@ export const registrationEligible = asyncHandler(async (req, res) => {
   const passed = new Set(results.filter((row) => row.passed).map((row) => String(row.course?._id ?? row.course)));
   const registered = new Set(registrations.map((row) => String(row.offering)));
   const entryByCourse = new Map(entries.map((row) => [String(row.course?._id ?? row.course), row]));
-  const rows = offerings.map((offering) => {
+  const rows = offerings.filter((offering) => offering.course).map((offering) => {
     const entry = entryByCourse.get(String(offering.course?._id ?? offering.course));
     const prerequisites = entry?.prerequisites || [];
     const missingPrerequisites = prerequisites.filter((course) => !passed.has(String(course)));
@@ -899,7 +1068,11 @@ export const createRegistrations = asyncHandler(async (req, res) => {
   }
   const plan = await CurriculumPlan.findById(offerings[0].curriculumPlan).lean();
   if (!plan || plan.status !== 'published') throw new AppError(409, 'PLAN_NOT_PUBLISHED', 'The curriculum plan is not published.');
-  const entries = await CurriculumCourse.find(ownFilter({ plan: plan._id, course: { $in: offerings.map((row) => row.course._id) } })).lean();
+  const courseIds = offerings.map((row) => row.course?._id).filter(Boolean);
+  if (courseIds.length !== offerings.length) {
+    throw new AppError(409, 'COURSE_UNAVAILABLE', 'One or more offerings no longer have a course and cannot be registered.');
+  }
+  const entries = await CurriculumCourse.find(ownFilter({ plan: plan._id, course: { $in: courseIds } })).lean();
   const entryByCourse = new Map(entries.map((row) => [String(row.course), row]));
   const results = await Result.find({ student: studentId, status: 'published' }).populate('course', 'code').lean();
   const passed = new Set(results.filter((row) => row.passed).map((row) => String(row.course?._id ?? row.course)));
@@ -961,6 +1134,245 @@ export const createRegistrations = asyncHandler(async (req, res) => {
   }
   audit({ req, action: 'registrar.registration.create', targetType: 'Student', targetId: studentId, meta: { count: created.length, term } });
   res.status(201).json({ registrations: created.map((row) => ({ id: String(row._id), offering: String(row.offering), status: row.status })) });
+});
+
+export const offeringCandidates = asyncHandler(async (req, res) => {
+  const query = req.valid.query;
+  const { page, limit, skip } = pageOf(query);
+  const offering = await CourseOffering.findById(req.valid.params.offering)
+    .populate('course', 'code title creditHours')
+    .populate('program', 'code name qualificationType')
+    .populate('academicYear', 'label')
+    .populate('teacher', 'name email')
+    .lean();
+  if (!offering) throw new AppError(404, 'OFFERING_NOT_FOUND', 'That course offering was not found.');
+  if (!offering.course) throw new AppError(409, 'COURSE_UNAVAILABLE', 'This offering no longer has a course.');
+  const plan = await CurriculumPlan.findOne({
+    program: offering.program?._id ?? offering.program,
+    academicYear: offering.academicYear?._id ?? offering.academicYear,
+    status: 'published',
+  }).lean();
+  if (!plan) throw new AppError(409, 'PLAN_NOT_PUBLISHED', 'No published curriculum plan applies to this offering.');
+  const entry = await CurriculumCourse.findOne({ plan: plan._id, course: offering.course._id, active: true }).lean();
+  const prerequisites = entry?.prerequisites || [];
+  const filter = mergeFilters(
+    {
+      program: offering.program?._id ?? offering.program,
+      level: offering.level,
+      enrollmentStatus: { $in: ['active', 'pending'] },
+    },
+    query.category ? { studentCategory: query.category } : null,
+    query.batch ? { batch: query.batch } : null,
+    searchFilter(query.search, ['studentId', 'fullName', 'email', 'phone']),
+  );
+  const [students, total] = await Promise.all([
+    Student.find(filter)
+      .populate('batch', 'code name')
+      .sort({ fullName: 1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Student.countDocuments(filter),
+  ]);
+  const studentIds = students.map((row) => row._id);
+  const [registrations, passed, windowOpen] = await Promise.all([
+    studentIds.length
+      ? CourseRegistration.find(ownFilter({ student: { $in: studentIds }, offering: offering._id, status: 'registered' }))
+          .select('student')
+          .lean()
+      : [],
+    studentIds.length && prerequisites.length
+      ? Result.find(ownFilter({
+          student: { $in: studentIds },
+          course: { $in: prerequisites },
+          status: 'published',
+          passed: true,
+        })).select('student course').lean()
+      : [],
+    registrationWindow(offering.academicYear?._id ?? offering.academicYear, offering.term),
+  ]);
+  const registered = new Set(registrations.map((row) => String(row.student)));
+  const passedByStudent = new Map();
+  for (const row of passed) {
+    const key = String(row.student);
+    if (!passedByStudent.has(key)) passedByStudent.set(key, new Set());
+    passedByStudent.get(key).add(String(row.course));
+  }
+  const seats = Math.max(0, offering.capacity - offering.registeredCount);
+  res.json({
+    offering: {
+      id: String(offering._id),
+      course: { id: String(offering.course._id), code: offering.course.code, title: offering.course.title },
+      program: offering.program
+        ? { id: String(offering.program._id), code: offering.program.code, name: offering.program.name }
+        : null,
+      academicYear: offering.academicYear
+        ? { id: String(offering.academicYear._id), label: offering.academicYear.label }
+        : null,
+      term: offering.term,
+      level: offering.level,
+      teacher: offering.teacher ? { id: String(offering.teacher._id), name: offering.teacher.name } : null,
+      capacity: offering.capacity,
+      registeredCount: offering.registeredCount,
+      seats,
+      status: offering.status,
+    },
+    plan: { id: String(plan._id), title: plan.title, version: plan.version },
+    windowOpen,
+    prerequisites: prerequisites.map(String),
+    ...paged(
+      students.map((student) => {
+        const alreadyRegistered = registered.has(String(student._id));
+        const studentPassed = passedByStudent.get(String(student._id)) || new Set();
+        const missingPrerequisites = prerequisites.filter((course) => !studentPassed.has(String(course)));
+        return {
+          id: String(student._id),
+          studentId: student.studentId,
+          fullName: student.fullName,
+          level: student.level,
+          studentCategory: student.studentCategory || 'regular',
+          batch: student.batch ? { id: String(student.batch._id), code: student.batch.code } : null,
+          alreadyRegistered,
+          missingPrerequisites,
+          eligible:
+            windowOpen &&
+            offering.status === 'open' &&
+            seats > 0 &&
+            !alreadyRegistered &&
+            missingPrerequisites.length === 0,
+        };
+      }),
+      total,
+      page,
+      limit,
+    ),
+  });
+});
+
+export const registerOfferingStudents = asyncHandler(async (req, res) => {
+  const { studentIds } = req.body;
+  const offering = await CourseOffering.findById(req.valid.params.offering).populate('course', 'code title').lean();
+  if (!offering) throw new AppError(404, 'OFFERING_NOT_FOUND', 'That course offering was not found.');
+  if (!offering.course) throw new AppError(409, 'COURSE_UNAVAILABLE', 'This offering no longer has a course.');
+  if (offering.status !== 'open') throw new AppError(409, 'OFFERING_NOT_OPEN', 'This course is not open for registration.');
+  if (!(await registrationWindow(offering.academicYear, offering.term))) {
+    throw new AppError(409, 'REGISTRATION_CLOSED', 'The registration window is not open for this term.');
+  }
+  const plan = await CurriculumPlan.findOne({
+    program: offering.program,
+    academicYear: offering.academicYear,
+    status: 'published',
+  }).lean();
+  if (!plan) throw new AppError(409, 'PLAN_NOT_PUBLISHED', 'The curriculum plan is not published.');
+  const entry = await CurriculumCourse.findOne({ plan: plan._id, course: offering.course._id, active: true }).lean();
+  const prerequisites = entry?.prerequisites || [];
+  const students = await Student.find(ownFilter({
+    _id: { $in: studentIds },
+    program: offering.program,
+    level: offering.level,
+    enrollmentStatus: { $in: ['active', 'pending'] },
+  })).select('_id studentId fullName').lean();
+  if (students.length !== new Set(studentIds).size) {
+    throw new AppError(400, 'STUDENT_MISMATCH', 'Every selected student must be active in this programme and level.');
+  }
+  if (prerequisites.length) {
+    const passed = await Result.find(ownFilter({
+      student: { $in: studentIds },
+      course: { $in: prerequisites },
+      status: 'published',
+      passed: true,
+    })).select('student course').lean();
+    const passedByStudent = new Map();
+    for (const row of passed) {
+      const key = String(row.student);
+      if (!passedByStudent.has(key)) passedByStudent.set(key, new Set());
+      passedByStudent.get(key).add(String(row.course));
+    }
+    for (const student of students) {
+      const studentPassed = passedByStudent.get(String(student._id)) || new Set();
+      const missing = prerequisites.filter((course) => !studentPassed.has(String(course)));
+      if (missing.length) {
+        throw new AppError(409, 'PREREQUISITE_MISSING', `${student.fullName} has not passed every prerequisite for this course.`);
+      }
+    }
+  }
+  const already = await CourseRegistration.find(ownFilter({
+    student: { $in: studentIds },
+    offering: offering._id,
+    status: 'registered',
+  })).select('student').lean();
+  if (already.length) {
+    throw new AppError(409, 'ALREADY_REGISTERED', `${already.length} selected student${already.length === 1 ? ' is' : 's are'} already registered for this course.`);
+  }
+
+  const fresh = [];
+  const reserved = [];
+  const reregistered = [];
+  let registered = 0;
+  try {
+    for (const student of students) {
+      const seat = await CourseOffering.findOneAndUpdate(
+        ownFilter({ _id: offering._id, status: 'open', $expr: { $lt: ['$registeredCount', '$capacity'] } }),
+        { $inc: { registeredCount: 1 }, $set: { updatedBy: req.user.id } },
+        { new: true },
+      );
+      if (!seat) throw new AppError(409, 'OFFERING_FULL', 'This course has no seats left.');
+      try {
+        const existing = await CourseRegistration.findOne({ student: student._id, offering: offering._id });
+        if (existing) {
+          reregistered.push({
+            registration: existing,
+            status: existing.status,
+            registeredBy: existing.registeredBy,
+            registeredAt: existing.registeredAt,
+          });
+          existing.status = 'registered';
+          existing.statusHistory.push({ status: 'registered', by: req.user.id, reason: 'Bulk re-registration' });
+          existing.registeredBy = req.user.id;
+          existing.registeredAt = new Date();
+          await existing.save();
+        } else {
+          const registration = await CourseRegistration.create({
+            student: student._id,
+            offering: offering._id,
+            course: offering.course._id,
+            academicYear: offering.academicYear,
+            term: offering.term,
+            creditHours: offering.creditHours,
+            status: 'registered',
+            registeredBy: req.user.id,
+            statusHistory: [{ status: 'registered', by: req.user.id }],
+          });
+          fresh.push(registration._id);
+        }
+        reserved.push(offering._id);
+        registered += 1;
+      } catch (err) {
+        await CourseOffering.updateOne({ _id: offering._id }, { $inc: { registeredCount: -1 } }).catch(() => {});
+        throw err;
+      }
+    }
+  } catch (err) {
+    await CourseRegistration.deleteMany(ownFilter({ _id: { $in: fresh } })).catch(() => {});
+    for (const row of reregistered) {
+      if (row.registration.status !== 'registered') continue;
+      row.registration.status = row.status;
+      row.registration.registeredBy = row.registeredBy;
+      row.registration.registeredAt = row.registeredAt;
+      row.registration.statusHistory.pop();
+      await row.registration.save().catch(() => {});
+    }
+    await CourseOffering.updateMany(ownFilter({ _id: { $in: reserved } }), { $inc: { registeredCount: -1 } }).catch(() => {});
+    throw err;
+  }
+  audit({
+    req,
+    action: 'registrar.registration.bulk',
+    targetType: 'CourseOffering',
+    targetId: offering._id,
+    meta: { count: registered, term: offering.term, course: offering.course.code },
+  });
+  res.status(201).json({ registered, offering: String(offering._id) });
 });
 
 export const listRegistrations = asyncHandler(async (req, res) => {

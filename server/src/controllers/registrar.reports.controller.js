@@ -38,8 +38,8 @@ export const reportOverview = asyncHandler(async (_req, res) => {
 });
 
 export const exportReport = asyncHandler(async (req, res) => {
-  const { type, format, academicYear, program, department, status } = req.query;
-  const report = await buildReport({ type, academicYear, program, department, status });
+  const { type, format, academicYear, program, department, batch, category, status } = req.query;
+  const report = await buildReport({ type, academicYear, program, department, batch, category, status });
   const result = await buildExport({
     format,
     filenamePrefix: `registrar-${type}`,
@@ -69,7 +69,7 @@ async function studentIdsForScope({ program, department }) {
   return students.map((row) => row._id);
 }
 
-async function buildReport({ type, academicYear, program, department, status }) {
+async function buildReport({ type, academicYear, program, department, batch, category, status }) {
   status = status === 'all' ? '' : String(status || '').trim();
   const year = academicYear ? await AcademicYear.findById(academicYear).lean() : null;
   const programme = program ? await Program.findById(program).lean() : null;
@@ -82,6 +82,8 @@ async function buildReport({ type, academicYear, program, department, status }) 
   const studentFilter = mergeFilters(
     department ? { department } : null,
     program ? { program } : null,
+    batch ? { batch } : null,
+    category ? { studentCategory: category } : null,
     academicYear ? { admissionAcademicYear: academicYear } : null,
     status && type === 'students' ? { studentStatus: status } : null,
   );
@@ -105,6 +107,7 @@ async function buildReport({ type, academicYear, program, department, status }) 
         { header: 'Sex', key: 'sex', width: 12 },
         { header: 'Programme', key: 'programme', width: 28 },
         { header: 'Department', key: 'department', width: 24 },
+        { header: 'Stream', key: 'category', width: 12 },
         { header: 'Level', key: 'level', width: 10 },
         { header: 'Batch', key: 'batch', width: 16 },
         { header: 'Admission year', key: 'year', width: 18 },
@@ -116,6 +119,7 @@ async function buildReport({ type, academicYear, program, department, status }) 
         sex: row.sex,
         programme: row.program?.name || '',
         department: row.department?.name || '',
+        category: row.studentCategory || 'regular',
         level: row.level,
         batch: row.batch?.code || '',
         year: row.admissionAcademicYear?.label || '',

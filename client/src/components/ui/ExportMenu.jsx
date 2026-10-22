@@ -77,6 +77,7 @@ export default function ExportMenu({
   filenamePrefix = 'export',
   disabled = false,
   label = 'Export',
+  formats = ['xlsx', 'docx', 'pdf'],
   className = '',
 }) {
   const [open, setOpen] = useState(false);
@@ -85,6 +86,7 @@ export default function ExportMenu({
   const root = useRef(null);
   const button = useRef(null);
   const menu = useRef(null);
+  const formatOptions = FORMATS.filter((format) => formats.includes(format.key));
 
   const place = () => {
     const rect = button.current?.getBoundingClientRect();
@@ -187,7 +189,7 @@ export default function ExportMenu({
               <p className="px-3 pb-1.5 pt-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                 Download this view
               </p>
-              {FORMATS.map(({ key, label: formatLabel, hint, icon: Icon, tone }) => (
+              {formatOptions.map(({ key, label: formatLabel, hint, icon: Icon, tone }) => (
                 <button
                   key={key}
                   type="button"

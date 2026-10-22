@@ -5,7 +5,6 @@ const LABELS = {
   registrar: 'Registrar',
   dashboard: 'Dashboard',
   students: 'Students',
-  enrollments: 'Enrollments',
   'academic-structure': 'Academic structure',
   'academic-calendar': 'Academic calendar',
   batches: 'Batches',

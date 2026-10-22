@@ -14,6 +14,7 @@ const photoSchema = new mongoose.Schema(
     url: { type: String, default: null },
     thumbnailUrl: { type: String, default: null },
     contentType: { type: String, default: null },
+    extension: { type: String, default: null, lowercase: true, trim: true },
     bytes: { type: Number, default: null },
     width: { type: Number, default: null },
     height: { type: Number, default: null },

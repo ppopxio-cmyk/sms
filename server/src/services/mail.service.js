@@ -126,6 +126,7 @@ const COPY = {
   password_reset: { subject: 'Reset your password', accent: 'Password reset', title: 'Reset your password', intro: 'Use this code to choose a new password.' },
   session_terminate: { subject: 'Confirm signing a device out', accent: 'Device sign-out', title: 'Confirm this sign-out', intro: 'Use this code to sign the other device out of your account.' },
   account_delete: { subject: 'Confirm deleting your account', accent: 'Account deletion', title: 'Confirm you want to delete your account', intro: 'Use this code to confirm that your account should be deleted. This cannot be undone.' },
+  student_delete: { subject: 'Confirm deleting a student record', accent: 'Student record deletion', title: 'Confirm this permanent deletion', intro: 'Use this code to permanently delete the student record you selected. This cannot be undone.' },
 };
 
 export function sendCodeEmail({ to, name, code, purpose }) {

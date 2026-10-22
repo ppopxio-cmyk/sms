@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 const { Schema } = mongoose;
 
 export const QUALIFICATION_TYPES = ['degree', 'diploma', 'short-term'];
+export const PROGRAM_CATEGORIES = ['regular', 'extension'];
 export const ACADEMIC_YEAR_STATUSES = ['planned', 'active', 'closed'];
 export const BATCH_STATUSES = ['planned', 'active', 'completed', 'archived'];
 export const CALENDAR_EVENT_TYPES = ['registration', 'exam', 'important', 'holiday'];
@@ -35,12 +36,24 @@ const programSchema = new Schema(
     name: { type: String, required: true, trim: true, maxlength: 160 },
     department: { type: Schema.Types.ObjectId, ref: 'Department', required: true, index: true },
     qualificationType: { type: String, enum: QUALIFICATION_TYPES, required: true, index: true },
+    // A programme may be offered in either or both delivery modes. Batches and students
+    // then narrow that down to the actual stream they belong to.
+    categories: {
+      type: [String],
+      enum: PROGRAM_CATEGORIES,
+      default: () => ['regular', 'extension'],
+      index: true,
+    },
     durationYears: { type: Number, min: 1, max: 10, default: null },
     levels: { type: [Number], default: undefined },
     shortTerm: {
       duration: { type: Number, min: 1, default: null },
       unit: { type: String, enum: ['weeks', 'months'], default: 'weeks' },
     },
+    // The number of students the programme can carry across all active batches.
+    // Null means the college has not set a cap.
+    capacity: { type: Number, min: 1, max: 10000, default: null },
+    teachers: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     graduationPolicy: { type: graduationPolicySchema, default: () => ({}) },
     description: { type: String, trim: true, maxlength: 1000, default: '' },
     active: { type: Boolean, default: true, index: true },
@@ -51,6 +64,12 @@ const programSchema = new Schema(
 );
 
 programSchema.pre('validate', function normalizeProgram() {
+  const categories = [...new Set((this.categories?.length ? this.categories : PROGRAM_CATEGORIES).map(String))];
+  if (categories.some((category) => !PROGRAM_CATEGORIES.includes(category))) {
+    throw new Error('A programme can only be offered as regular, extension, or both.');
+  }
+  this.categories = categories;
+
   if (this.qualificationType === 'diploma') {
     const levels = (this.levels?.length ? this.levels : [1, 2, 3, 4]).map(Number).sort((a, b) => a - b);
     if (levels.some((level) => !Number.isInteger(level) || level < 1 || level > 4)) {
@@ -62,6 +81,9 @@ programSchema.pre('validate', function normalizeProgram() {
   }
   if (this.qualificationType === 'degree' && !this.durationYears) {
     throw new Error('A degree programme needs a duration in years.');
+  }
+  if (this.qualificationType === 'short-term' && !this.shortTerm?.duration) {
+    throw new Error('A short-term programme needs a duration in weeks or months.');
   }
 });
 
@@ -147,6 +169,9 @@ const batchSchema = new Schema(
     name: { type: String, required: true, trim: true, maxlength: 120 },
     program: { type: Schema.Types.ObjectId, ref: 'Program', required: true, index: true },
     department: { type: Schema.Types.ObjectId, ref: 'Department', required: true, index: true },
+    // Intake streams are separated so a regular and an extension batch of the same
+    // programme never share a register, a student number sequence, or a timetable.
+    category: { type: String, enum: PROGRAM_CATEGORIES, default: 'regular', index: true },
     admissionAcademicYear: { type: Schema.Types.ObjectId, ref: 'AcademicYear', required: true, index: true },
     expectedCompletionYear: { type: Number, min: 2000, max: 2300, default: null },
     currentLevel: { type: Number, min: 1, max: 20, default: 1 },

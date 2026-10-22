@@ -130,8 +130,8 @@ async function setupGradingPolicy(policy) {
   if (!bands.length) fail('gradingPolicy.bands must contain at least one band.');
   const normalized = bands.map((band, index) => {
     validateAssetShape(band, `gradingPolicy.bands[${index}]`);
-    const min = number(band.min, `gradingPolicy.bands[${index}].min`, { min: 0, max: 100 });
-    const max = number(band.max, `gradingPolicy.bands[${index}].max`, { min: 0, max: 100 });
+    const min = integer(band.min, `gradingPolicy.bands[${index}].min`, { min: 0, max: 100 });
+    const max = integer(band.max, `gradingPolicy.bands[${index}].max`, { min: 0, max: 100 });
     if (max < min) fail(`gradingPolicy.bands[${index}] has a maximum below its minimum.`);
     return {
       min,
@@ -144,8 +144,8 @@ async function setupGradingPolicy(policy) {
   if (normalized[0].min !== 0) fail('The first grade band must start at 0.');
   if (normalized[normalized.length - 1].max !== 100) fail('The last grade band must end at 100.');
   for (let index = 1; index < normalized.length; index += 1) {
-    if (normalized[index].min !== normalized[index - 1].max) {
-      fail('Grade bands must be contiguous: each band must start where the previous one ends.');
+    if (normalized[index].min !== normalized[index - 1].max + 1) {
+      fail('Grade bands must be contiguous: the next band must start one mark after the previous band ends.');
     }
   }
   const version = integer(policy.version, 'gradingPolicy.version', { min: 1 });

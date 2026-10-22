@@ -1,12 +1,18 @@
-import { Student, Enrollment } from '../models/Student.js';
+import { Student, Enrollment, ProgressionRecord } from '../models/Student.js';
 import { Program, Department, Batch, AcademicYear } from '../models/AcademicStructure.js';
-import { CourseRegistration } from '../models/Offering.js';
-import { Result } from '../models/Records.js';
-import { Certificate } from '../models/Documents.js';
+import { CourseRegistration, CourseOffering } from '../models/Offering.js';
+import { Result, AttendanceRecord } from '../models/Records.js';
+import { Certificate, Transcript } from '../models/Documents.js';
+import { Counter } from '../models/RegistrarSupport.js';
+import { User } from '../models/User.js';
 import { audit } from '../services/audit.service.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { signedImageUrl, uploadImage, deleteImage, validateImage } from '../services/imagekit.service.js';
+import { sendCode } from '../services/codeDelivery.js';
+import { checkCode } from '../services/code.service.js';
+import { notifyAdmins } from '../services/notification.service.js';
+import { buildStudentProfileExport } from '../services/studentExport.service.js';
 import { logger } from '../utils/logger.js';
 import { pageOf, sortOf, searchFilter, mergeFilters, paged, ownFilter } from '../services/registrar.helpers.js';
 
@@ -45,7 +51,7 @@ export const studentView = (student) => ({
   _id: undefined,
 });
 
-async function loadOptions(programId, departmentId, batchId) {
+async function loadOptions(programId, departmentId, batchId, category = 'regular') {
   const program = await Program.findById(programId).lean();
   if (!program || !program.active) throw new AppError(400, 'PROGRAM_INVALID', 'Choose an active programme.');
   const department = await Department.findById(departmentId).lean();
@@ -53,14 +59,70 @@ async function loadOptions(programId, departmentId, batchId) {
   if (String(program.department) !== String(department._id)) {
     throw new AppError(400, 'PROGRAM_DEPARTMENT_MISMATCH', 'That programme does not belong to the selected department.');
   }
+  const categories = program.categories?.length ? program.categories : ['regular', 'extension'];
+  if (!categories.includes(category)) {
+    throw new AppError(409, 'PROGRAM_CATEGORY', 'This programme is not offered in the selected regular/extension stream.');
+  }
+
+  // Placement is one choice: department, programme and stream decide the batch.
+  // When the Registrar has not picked one, the current planned/active intake is used.
   let batch = null;
   if (batchId) {
     batch = await Batch.findById(batchId).lean();
     if (!batch || String(batch.program) !== String(program._id)) {
       throw new AppError(400, 'BATCH_INVALID', 'Choose a batch that belongs to this programme.');
     }
+    if ((batch.category || 'regular') !== category) {
+      throw new AppError(409, 'BATCH_CATEGORY', 'That batch belongs to a different regular/extension stream.');
+    }
+  } else {
+    batch = await Batch.findOne(ownFilter({ program: program._id, category, status: { $in: ['planned', 'active'] } }))
+      .sort({ createdAt: -1 })
+      .lean();
   }
   return { program, department, batch };
+}
+
+function validateLevel(program, level) {
+  if (program.qualificationType === 'diploma') {
+    const allowed = program.levels?.length ? program.levels : [1, 2, 3, 4];
+    if (!allowed.includes(Number(level))) {
+      throw new AppError(400, 'LEVEL_INVALID', `Choose a diploma level from ${allowed.join(', ')}.`);
+    }
+    return;
+  }
+  if (program.qualificationType === 'degree') {
+    const maximum = Number(program.durationYears) || 1;
+    if (level < 1 || level > maximum) {
+      throw new AppError(400, 'LEVEL_INVALID', `A degree programme has levels 1 to ${maximum}.`);
+    }
+    return;
+  }
+  if (level !== 1) throw new AppError(400, 'LEVEL_INVALID', 'A short-term programme only has level 1.');
+}
+
+async function nextStudentId({ program, batch, category }) {
+  if (!batch) throw new AppError(409, 'BATCH_REQUIRED', 'Create a batch for this programme and stream before admitting students.');
+  const stream = category === 'extension' ? 'EXT' : 'REG';
+  const batchCode = String(batch.code || '').toUpperCase().startsWith('BAT')
+    ? String(batch.code).toUpperCase()
+    : `BAT${String(batch.code || '').toUpperCase()}`;
+  const fullPrefix = `${program.code}-${batchCode}-${stream}`;
+  const prefix = fullPrefix.length > 35 ? fullPrefix.slice(0, 35).replace(/-+$/, '') : fullPrefix;
+  const counter = await Counter.findOneAndUpdate(
+    { key: `sid:${program._id}:${batch._id}:${stream}` },
+    { $inc: { value: 1 } },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
+  return `${prefix}-${String(counter.value).padStart(3, '0')}`;
+}
+
+async function assertCapacity(program) {
+  if (!program.capacity) return;
+  const current = await Student.countDocuments({ program: program._id, studentStatus: 'active' });
+  if (current >= program.capacity) {
+    throw new AppError(409, 'PROGRAM_FULL', `${program.name} has reached its capacity of ${program.capacity} students.`);
+  }
 }
 
 export const listStudents = asyncHandler(async (req, res) => {
@@ -149,29 +211,37 @@ export const getStudent = asyncHandler(async (req, res) => {
 
 export const createStudent = asyncHandler(async (req, res) => {
   const input = req.body;
-  const { program, department, batch } = await loadOptions(input.program, input.department, input.batch);
-  const existing = await Student.findOne({ studentId: input.studentId.toUpperCase() }).lean();
-  if (existing) throw new AppError(409, 'STUDENT_ID_EXISTS', 'That student ID is already in use.');
+  const category = input.studentCategory || 'regular';
+  const { program, department, batch } = await loadOptions(input.program, input.department, input.batch, category);
+  await assertCapacity(program);
+  validateLevel(program, input.level || 1);
 
   let academicYear = null;
-  if (input.admissionAcademicYear) {
-    academicYear = await AcademicYear.findById(input.admissionAcademicYear).lean();
+  const yearId = input.admissionAcademicYear || batch?.admissionAcademicYear;
+  if (yearId) {
+    academicYear = await AcademicYear.findById(yearId).lean();
     if (!academicYear) throw new AppError(400, 'ACADEMIC_YEAR_INVALID', 'Choose a valid academic year.');
   }
 
+  const studentId = await nextStudentId({ program, batch, category });
   const student = await Student.create({
     ...input,
-    studentId: input.studentId.toUpperCase(),
+    studentId,
+    studentCategory: category,
     department: department._id,
     program: program._id,
     qualificationType: program.qualificationType,
     batch: batch?._id ?? null,
     admissionAcademicYear: academicYear?._id ?? null,
+    admissionDate: input.admissionDate || new Date(),
+    enrollmentStatus: 'active',
+    studentStatus: input.studentStatus || 'active',
+    notes: '',
     createdBy: req.user.id,
     updatedBy: req.user.id,
   });
 
-  if (academicYear && ['pending', 'active'].includes(student.enrollmentStatus)) {
+  if (academicYear) {
     await Enrollment.create({
       student: student._id,
       program: program._id,
@@ -181,8 +251,8 @@ export const createStudent = asyncHandler(async (req, res) => {
       batch: batch?._id ?? null,
       level: student.level,
       enrollmentDate: student.admissionDate || new Date(),
-      status: student.enrollmentStatus,
-      statusHistory: [{ status: student.enrollmentStatus, by: req.user.id }],
+      status: 'active',
+      statusHistory: [{ status: 'active', by: req.user.id }],
       createdBy: req.user.id,
       updatedBy: req.user.id,
     });
@@ -193,7 +263,7 @@ export const createStudent = asyncHandler(async (req, res) => {
     action: 'registrar.student.create',
     targetType: 'Student',
     targetId: student._id,
-    meta: { studentId: student.studentId, program: program.code },
+    meta: { studentId: student.studentId, program: program.code, category, batch: batch?.code ?? null },
   });
   res.status(201).json({ student: studentView(student.toObject()) });
 });
@@ -204,8 +274,11 @@ export const updateStudent = asyncHandler(async (req, res) => {
   const input = req.body;
   const programId = input.program ?? student.program;
   const departmentId = input.department ?? student.department;
+  const category = input.studentCategory ?? student.studentCategory ?? 'regular';
   const batchId = input.batch === undefined ? student.batch : input.batch;
-  const { program, department, batch } = await loadOptions(programId, departmentId, batchId);
+  const { program, department, batch } = await loadOptions(programId, departmentId, batchId, category);
+  const level = input.level !== undefined ? Number(input.level) : student.level;
+  validateLevel(program, level);
 
   if (input.admissionAcademicYear) {
     const year = await AcademicYear.findById(input.admissionAcademicYear).lean();
@@ -214,7 +287,7 @@ export const updateStudent = asyncHandler(async (req, res) => {
   }
   const fields = [
     'firstName', 'middleName', 'lastName', 'sex', 'dateOfBirth', 'email', 'phone', 'address',
-    'level', 'enrollmentStatus', 'studentStatus', 'studentCategory', 'admissionDate', 'completionDate', 'notes',
+    'level', 'enrollmentStatus', 'studentStatus', 'studentCategory', 'admissionDate', 'completionDate',
   ];
   for (const field of fields) if (input[field] !== undefined) student[field] = input[field];
   student.program = program._id;
@@ -239,11 +312,9 @@ export const uploadStudentPhoto = asyncHandler(async (req, res) => {
   if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student record was not found.');
   const info = validateImage(req.body);
   const extension = info.extension;
-  // The file name carries the student number and the year it was taken so a profile
-  // folder can be audited without opening the images: STU-YYYY-NNN.ext.
-  const year = new Date().getFullYear();
-  const sequence = String(Date.now() % 1000).padStart(3, '0');
-  const fileName = `STU-${year}-${sequence}.${extension}`;
+  // The file name carries the official student number so an ImageKit folder can be
+  // audited without opening the images.
+  const fileName = `${student.studentId}-${Date.now()}.${extension}`;
   const uploaded = await uploadImage(req.body, {
     fileName,
     folder: `/students/${student._id}/profile`,
@@ -254,6 +325,7 @@ export const uploadStudentPhoto = asyncHandler(async (req, res) => {
   try {
     student.photo = {
       ...uploaded,
+      extension,
       width: info.width,
       height: info.height,
       status: 'active',
@@ -302,6 +374,115 @@ export const removeStudentPhoto = asyncHandler(async (req, res) => {
   res.json({ photo: null });
 });
 
+export const requestStudentDeleteCode = asyncHandler(async (req, res) => {
+  const student = await Student.findById(req.valid.params.studentId).lean();
+  if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student record was not found.');
+  const user = await User.findById(req.user.id).lean();
+  if (!user) throw new AppError(401, 'SESSION_ENDED', 'Please sign in again.');
+  const sent = await sendCode(user, 'student_delete');
+  if (!sent) throw new AppError(429, 'WAIT_BEFORE_RESEND', 'Please wait before asking for another code.');
+  audit({
+    req,
+    action: 'registrar.student.delete_code_sent',
+    targetType: 'Student',
+    targetId: student._id,
+    meta: { studentId: student.studentId },
+  });
+  res.json({ message: `We emailed a 6-digit code to ${user.email}.`, email: user.email });
+});
+
+export const deleteStudent = asyncHandler(async (req, res) => {
+  const student = await Student.findById(req.valid.params.studentId)
+    .populate('program', 'code name')
+    .populate('department', 'code name')
+    .lean();
+  if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student record was not found.');
+  const user = await User.findById(req.user.id).lean();
+  if (!user) throw new AppError(401, 'SESSION_ENDED', 'Please sign in again.');
+  await checkCode(user._id, 'student_delete', req.body.code);
+
+  const registrations = await CourseRegistration.find({ student: student._id, status: 'registered' })
+    .select('offering')
+    .lean();
+  if (registrations.length) {
+    const counts = new Map();
+    for (const row of registrations) {
+      const key = String(row.offering);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    await Promise.all(
+      [...counts.entries()].map(([offering, count]) =>
+        CourseOffering.updateOne(ownFilter({ _id: offering, registeredCount: { $gte: count } }), {
+          $inc: { registeredCount: -count },
+        }),
+      ),
+    );
+  }
+
+  await Promise.all([
+    Enrollment.deleteMany({ student: student._id }),
+    ProgressionRecord.deleteMany({ student: student._id }),
+    CourseRegistration.deleteMany({ student: student._id }),
+    AttendanceRecord.deleteMany({ student: student._id }),
+    Result.deleteMany({ student: student._id }),
+    Certificate.deleteMany({ student: student._id }),
+    Transcript.deleteMany({ student: student._id }),
+  ]);
+  await Student.deleteOne({ _id: student._id });
+
+  if (student.photo?.fileId) {
+    await deleteImage(student.photo.fileId).catch((err) =>
+      logger.warn({ err: err?.message, fileId: student.photo.fileId }, 'student record deleted but the photo could not be removed'),
+    );
+  }
+
+  audit({
+    req,
+    action: 'registrar.student.delete',
+    targetType: 'Student',
+    targetId: student._id,
+    meta: {
+      studentId: student.studentId,
+      fullName: student.fullName,
+      program: student.program?.code || null,
+      department: student.department?.code || null,
+      photoFileId: student.photo?.fileId || null,
+    },
+  });
+  await notifyAdmins({
+    type: 'student_deleted',
+    title: `${student.fullName} was permanently deleted`,
+    body: `${student.studentId} · ${student.program?.name || 'Programme not set'} · deleted by ${user.name || user.email}`,
+    actorId: user._id,
+    actorName: user.name || user.email,
+    meta: { studentId: student.studentId, student: String(student._id) },
+  });
+  res.json({ message: 'The student record and its stored photo were permanently deleted.' });
+});
+
+export const exportStudentProfile = asyncHandler(async (req, res) => {
+  const student = await Student.findById(req.valid.params.studentId)
+    .populate('program', 'code name qualificationType')
+    .populate('department', 'code name')
+    .populate('batch', 'code name')
+    .populate('admissionAcademicYear', 'label')
+    .lean();
+  if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student record was not found.');
+  const result = await buildStudentProfileExport({ student, format: req.valid.query.format });
+  audit({
+    req,
+    action: 'registrar.student.export',
+    targetType: 'Student',
+    targetId: student._id,
+    meta: { format: result.format },
+  });
+  res.setHeader('Content-Type', result.contentType);
+  res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+  res.setHeader('Content-Length', String(result.buffer.length));
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(result.buffer);
+});
+
 export const studentOptions = asyncHandler(async (_req, res) => {
   const [departments, programs, batches, years] = await Promise.all([
     Department.find({ active: true }).sort({ name: 1 }).lean(),
@@ -317,14 +498,20 @@ export const studentOptions = asyncHandler(async (_req, res) => {
       name: row.name,
       qualificationType: row.qualificationType,
       department: String(row.department),
+      categories: row.categories?.length ? row.categories : ['regular', 'extension'],
       durationYears: row.durationYears,
       levels: row.levels,
+      shortTerm: row.shortTerm,
+      capacity: row.capacity,
+      teachers: (row.teachers || []).map((teacher) => String(teacher)),
     })),
     batches: batches.map((row) => ({
       id: String(row._id),
       code: row.code,
       name: row.name,
       program: String(row.program),
+      category: row.category || 'regular',
+      admissionAcademicYear: row.admissionAcademicYear ? String(row.admissionAcademicYear) : null,
       status: row.status,
     })),
     academicYears: years.map((row) => ({

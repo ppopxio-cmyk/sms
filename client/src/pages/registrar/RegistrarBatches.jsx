@@ -26,7 +26,9 @@ import SearchInput from '../../components/ui/SearchInput';
 export default function RegistrarBatches() {
   const [search, setSearch] = useState('');
   const debounced = useDebounced(search, 300);
+  const [department, setDepartment] = useState('');
   const [program, setProgram] = useState('');
+  const [category, setCategory] = useState('');
   const [status, setStatus] = useState('all');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
@@ -40,13 +42,17 @@ export default function RegistrarBatches() {
     staleTime: 5 * 60_000,
   });
 
+  const programs = (options.data?.programs || []).filter((row) => !department || row.department === department);
+
   const params = useMemo(() => ({
     page,
     limit,
     ...(debounced.trim() ? { search: debounced.trim() } : {}),
+    ...(department ? { department } : {}),
     ...(program ? { program } : {}),
+    ...(category ? { category } : {}),
     ...(status !== 'all' ? { status } : {}),
-  }), [page, limit, debounced, program, status]);
+  }), [page, limit, debounced, department, program, category, status]);
 
   const query = useQuery({
     queryKey: ['registrar', 'batches', params],
@@ -69,6 +75,7 @@ export default function RegistrarBatches() {
       ),
     },
     { key: 'program', label: 'Programme', render: (row) => row.program ? `${row.program.code} · ${row.program.name}` : '—' },
+    { key: 'category', label: 'Stream', render: (row) => <Badge tone={row.category === 'extension' ? 'warning' : 'neutral'}>{humanStatus(row.category || 'regular')}</Badge> },
     {
       key: 'students',
       label: 'Students',
@@ -109,10 +116,19 @@ export default function RegistrarBatches() {
       <Card className="p-4 sm:p-5">
         <div className="flex flex-col gap-3">
           <SearchInput value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search batch code or name" loading={query.isFetching} />
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <SelectField label="Department" value={department} onChange={(event) => { setDepartment(event.target.value); setProgram(''); setPage(1); }}>
+              <option value="">All departments</option>
+              {(options.data?.departments || []).map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
+            </SelectField>
             <SelectField label="Programme" value={program} onChange={(event) => { setProgram(event.target.value); setPage(1); }}>
               <option value="">All programmes</option>
-              {(options.data?.programs || []).map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
+              {programs.map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
+            </SelectField>
+            <SelectField label="Stream" value={category} onChange={(event) => { setCategory(event.target.value); setPage(1); }}>
+              <option value="">Both streams</option>
+              <option value="regular">Regular</option>
+              <option value="extension">Extension</option>
             </SelectField>
             <SelectField label="Status" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
               <option value="all">All statuses</option>
@@ -137,7 +153,7 @@ export default function RegistrarBatches() {
           error={query.error ? query.error?.response?.data?.message || 'Batches could not be loaded.' : null}
           onRetry={query.refetch}
           rowKey={(row) => row.id}
-          noResults={Boolean(debounced.trim() || program || status !== 'all')}
+          noResults={Boolean(debounced.trim() || department || program || category || status !== 'all')}
           emptyTitle="No batches yet"
           emptyMessage="Create a batch to group a programme intake."
         />
@@ -170,6 +186,7 @@ function BatchFormModal({ open, record, options, onClose, onSaved }) {
       code: record?.code || '',
       name: record?.name || '',
       program: record?.program?.id || '',
+      category: record?.category || 'regular',
       admissionAcademicYear: record?.admissionAcademicYear?.id || '',
       expectedCompletionYear: record?.expectedCompletionYear || '',
       currentLevel: record?.currentLevel || 1,
@@ -208,12 +225,23 @@ function BatchFormModal({ open, record, options, onClose, onSaved }) {
   });
 
   const set = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+  const selectedProgram = (options?.programs || []).find((row) => row.id === form.program);
+  const availableCategories = selectedProgram?.categories?.length ? selectedProgram.categories : ['regular', 'extension'];
+  const chooseProgram = (programId) => {
+    const next = (options?.programs || []).find((row) => row.id === programId);
+    const categories = next?.categories?.length ? next.categories : ['regular', 'extension'];
+    setForm((current) => ({
+      ...current,
+      program: programId,
+      category: categories.includes(current.category) ? current.category : categories[0],
+    }));
+  };
 
   return (
     <Modal
       open={open}
       title={record ? 'Edit batch' : 'New batch'}
-      subtitle="The department is taken from the programme by the server."
+      subtitle="The department is taken from the programme by the server. A batch belongs to one delivery stream."
       onClose={save.isPending ? undefined : onClose}
       dismissible={!save.isPending}
       footer={<><Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending}>{record ? 'Save changes' : 'Create batch'}</Button></>}
@@ -223,9 +251,18 @@ function BatchFormModal({ open, record, options, onClose, onSaved }) {
         <FormGrid>
           <Field label="Batch code" value={form.code || ''} onChange={(event) => set('code', event.target.value)} placeholder="e.g. CS-2026-A" required />
           <Field label="Batch name" value={form.name || ''} onChange={(event) => set('name', event.target.value)} placeholder="e.g. Computer Science intake A" required />
-          <SelectField label="Programme" value={form.program || ''} onChange={(event) => set('program', event.target.value)} required>
+          <SelectField
+            label="Programme"
+            value={form.program || ''}
+            onChange={(event) => chooseProgram(event.target.value)}
+            hint={selectedProgram ? `${selectedProgram.code} · ${selectedProgram.name}` : undefined}
+            required
+          >
             <option value="">Choose a programme</option>
             {(options?.programs || []).map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
+          </SelectField>
+          <SelectField label="Delivery stream" value={form.category || 'regular'} onChange={(event) => set('category', event.target.value)} required>
+            {availableCategories.map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
           </SelectField>
           <SelectField label="Admission academic year" value={form.admissionAcademicYear || ''} onChange={(event) => set('admissionAcademicYear', event.target.value)} required>
             <option value="">Choose a year</option>
@@ -263,6 +300,7 @@ function AssignModal({ batch, onClose, onSaved }) {
     queryFn: async () => (await api.get(`${REGISTRAR}/students`, {
       params: {
         program: batch.program.id,
+        category: batch.category || 'regular',
         limit: 50,
         sort: 'fullName',
         order: 'asc',

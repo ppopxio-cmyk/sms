@@ -16,6 +16,7 @@ export const PERMISSIONS = {
   'enrollments:view': ['REGISTRAR'],
   'enrollments:manage': ['REGISTRAR'],
   'structure:view': ['ADMIN', 'REGISTRAR'],
+  'structure:manage': ['REGISTRAR'],
   'calendar:view': ['REGISTRAR'],
   'calendar:manage': ['REGISTRAR'],
   'batches:view': ['REGISTRAR'],
