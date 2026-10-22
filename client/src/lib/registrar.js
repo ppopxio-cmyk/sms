@@ -152,6 +152,30 @@ export function isValidEthiopianPhone(value) {
   return /^\+251\d{9}$/.test(normalized);
 }
 
+export async function toJpegFile(file, { maxDimension = 1600, quality = 0.9 } = {}) {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, width, height);
+    context.drawImage(bitmap, 0, 0, width, height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+    if (!blob) throw new Error('The photo could not be prepared for upload.');
+    return new File([blob], `${String(file.name || 'student').replace(/\.[^.]+$/, '')}.jpg`, {
+      type: 'image/jpeg',
+      lastModified: Date.now(),
+    });
+  } finally {
+    bitmap.close?.();
+  }
+}
+
 export function phoneError(value) {
   if (value == null || String(value).trim() === '') return 'Phone number is required.';
   if (!isValidEthiopianPhone(value)) return 'Enter a valid Ethiopian mobile number, e.g. +251 912 345 678.';

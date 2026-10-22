@@ -1148,18 +1148,19 @@ export const offeringCandidates = asyncHandler(async (req, res) => {
   if (!offering) throw new AppError(404, 'OFFERING_NOT_FOUND', 'That course offering was not found.');
   if (!offering.course) throw new AppError(409, 'COURSE_UNAVAILABLE', 'This offering no longer has a course.');
   const plan = await CurriculumPlan.findOne({
-    program: offering.program?._id ?? offering.program,
-    academicYear: offering.academicYear?._id ?? offering.academicYear,
+    _id: offering.curriculumPlan,
     status: 'published',
   }).lean();
   if (!plan) throw new AppError(409, 'PLAN_NOT_PUBLISHED', 'No published curriculum plan applies to this offering.');
   const entry = await CurriculumCourse.findOne({ plan: plan._id, course: offering.course._id, active: true }).lean();
-  const prerequisites = entry?.prerequisites || [];
+  if (!entry) throw new AppError(409, 'COURSE_NOT_IN_PLAN', 'This course is no longer part of the published plan.');
+  const prerequisites = entry.prerequisites || [];
   const filter = mergeFilters(
     {
       program: offering.program?._id ?? offering.program,
       level: offering.level,
       enrollmentStatus: { $in: ['active', 'pending'] },
+      studentStatus: 'active',
     },
     query.category ? { studentCategory: query.category } : null,
     query.batch ? { batch: query.batch } : null,
@@ -1259,18 +1260,19 @@ export const registerOfferingStudents = asyncHandler(async (req, res) => {
     throw new AppError(409, 'REGISTRATION_CLOSED', 'The registration window is not open for this term.');
   }
   const plan = await CurriculumPlan.findOne({
-    program: offering.program,
-    academicYear: offering.academicYear,
+    _id: offering.curriculumPlan,
     status: 'published',
   }).lean();
   if (!plan) throw new AppError(409, 'PLAN_NOT_PUBLISHED', 'The curriculum plan is not published.');
   const entry = await CurriculumCourse.findOne({ plan: plan._id, course: offering.course._id, active: true }).lean();
-  const prerequisites = entry?.prerequisites || [];
+  if (!entry) throw new AppError(409, 'COURSE_NOT_IN_PLAN', 'This course is no longer part of the published plan.');
+  const prerequisites = entry.prerequisites || [];
   const students = await Student.find(ownFilter({
     _id: { $in: studentIds },
     program: offering.program,
     level: offering.level,
     enrollmentStatus: { $in: ['active', 'pending'] },
+    studentStatus: 'active',
   })).select('_id studentId fullName').lean();
   if (students.length !== new Set(studentIds).size) {
     throw new AppError(400, 'STUDENT_MISMATCH', 'Every selected student must be active in this programme and level.');

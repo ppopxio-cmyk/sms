@@ -23,12 +23,11 @@ import {
 const GROUPS = [
   {
     id: 'people',
-    label: 'People & enrolment',
+    label: 'People',
     icon: Users,
     items: [
       { to: '/registrar/students', label: 'Students', icon: Users },
       { to: '/registrar/batches', label: 'Batches', icon: UserSquare2 },
-      { to: '/registrar/grading-policy', label: 'Grading policy', icon: FileBarChart },
     ],
   },
   {

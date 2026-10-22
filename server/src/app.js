@@ -72,7 +72,7 @@ export function createApp() {
   // the JSON parser consumes it, and it is deliberately outside the API's CSRF and
   // maintenance gates: the provider is not a browser session.
   app.post(
-    '/api/webhooks/imagekitA',
+    '/api/webhooks/imagekit',
     express.raw({ type: 'application/json', limit: '1mb' }),
     imagekitWebhook,
   );

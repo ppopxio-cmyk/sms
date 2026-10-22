@@ -280,10 +280,15 @@ export const updateStudent = asyncHandler(async (req, res) => {
   const level = input.level !== undefined ? Number(input.level) : student.level;
   validateLevel(program, level);
 
-  if (input.admissionAcademicYear) {
-    const year = await AcademicYear.findById(input.admissionAcademicYear).lean();
+  const placementChanged =
+    input.program !== undefined || input.batch !== undefined || input.studentCategory !== undefined;
+  const yearId = input.admissionAcademicYear || (placementChanged ? batch?.admissionAcademicYear : undefined);
+  if (yearId) {
+    const year = await AcademicYear.findById(yearId).lean();
     if (!year) throw new AppError(400, 'ACADEMIC_YEAR_INVALID', 'Choose a valid academic year.');
     student.admissionAcademicYear = year._id;
+  } else if (placementChanged) {
+    student.admissionAcademicYear = null;
   }
   const fields = [
     'firstName', 'middleName', 'lastName', 'sex', 'dateOfBirth', 'email', 'phone', 'address',
@@ -312,9 +317,7 @@ export const uploadStudentPhoto = asyncHandler(async (req, res) => {
   if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student record was not found.');
   const info = validateImage(req.body);
   const extension = info.extension;
-  // The file name carries the official student number so an ImageKit folder can be
-  // audited without opening the images.
-  const fileName = `${student.studentId}-${Date.now()}.${extension}`;
+  const fileName = `${student.studentId}.${extension}`;
   const uploaded = await uploadImage(req.body, {
     fileName,
     folder: `/students/${student._id}/profile`,

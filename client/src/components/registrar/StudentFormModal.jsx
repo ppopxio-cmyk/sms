@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Camera, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../../lib/api';
-import { REGISTRAR, cleanPayload, dateInput, humanStatus, levelLabel, phoneError } from '../../lib/registrar';
+import { REGISTRAR, cleanPayload, dateInput, humanStatus, levelLabel, phoneError, toJpegFile } from '../../lib/registrar';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import Field from '../ui/Field';
 import { FormGrid, SelectField } from './Fields';
+
+const MAX_PHOTO = 5 * 1024 * 1024;
+const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 const EMPTY = {
   firstName: '',
@@ -47,15 +51,26 @@ function fromStudent(student) {
 export default function StudentFormModal({ open, student, options, onClose, onSaved }) {
   const editing = Boolean(student);
   const queryClient = useQueryClient();
+  const photoInput = useRef(null);
   const [form, setForm] = useState(() => fromStudent(student));
   const [error, setError] = useState('');
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState('');
+  const [photoError, setPhotoError] = useState('');
 
   useEffect(() => {
     if (open) {
       setForm(fromStudent(student));
       setError('');
+      setPhotoFile(null);
+      setPhotoPreview('');
+      setPhotoError('');
     }
   }, [open, student]);
+
+  useEffect(() => () => {
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+  }, [photoPreview]);
 
   const programs = useMemo(
     () => (options?.programs || []).filter((program) => !form.department || program.department === form.department),
@@ -80,7 +95,7 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
   const set = (field, value) => setForm((current) => ({ ...current, [field]: value }));
 
   const chooseDepartment = (department) => {
-    setForm((current) => ({ ...current, department, program: '', batch: '', level: 1 }));
+    setForm((current) => ({ ...current, department, program: '', batch: '', admissionAcademicYear: '', level: 1 }));
   };
 
   const chooseProgram = (programId) => {
@@ -91,12 +106,13 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
       program: programId,
       studentCategory: nextCategories.includes(current.studentCategory) ? current.studentCategory : nextCategories[0],
       batch: '',
+      admissionAcademicYear: '',
       level: 1,
     }));
   };
 
   const chooseCategory = (category) => {
-    setForm((current) => ({ ...current, studentCategory: category, batch: '' }));
+    setForm((current) => ({ ...current, studentCategory: category, batch: '', admissionAcademicYear: '' }));
   };
 
   const chooseBatch = (batchId) => {
@@ -104,8 +120,31 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
     setForm((current) => ({
       ...current,
       batch: batchId,
-      admissionAcademicYear: batch?.admissionAcademicYear || current.admissionAcademicYear,
+      admissionAcademicYear: batch?.admissionAcademicYear || (batchId ? current.admissionAcademicYear : ''),
     }));
+  };
+
+  const choosePhoto = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!PHOTO_TYPES.includes(file.type)) {
+      setPhotoError('Choose a JPEG, PNG or WebP image.');
+      return;
+    }
+    if (file.size > MAX_PHOTO) {
+      setPhotoError('The photo must be smaller than 5 MB.');
+      return;
+    }
+    setPhotoError('');
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  };
+
+  const clearPhoto = () => {
+    setPhotoFile(null);
+    setPhotoPreview('');
+    setPhotoError('');
   };
 
   const save = useMutation({
@@ -142,9 +181,21 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
         completionDate: editing ? form.completionDate || undefined : undefined,
         address: form.address,
       });
-      return editing
+      const saved = editing
         ? (await api.patch(`${REGISTRAR}/students/${student.id}`, payload)).data
         : (await api.post(`${REGISTRAR}/students`, payload)).data;
+      if (photoFile) {
+        try {
+          const jpeg = await toJpegFile(photoFile);
+          const buffer = await jpeg.arrayBuffer();
+          await api.post(`${REGISTRAR}/students/${saved.student.id}/photo`, buffer, {
+            headers: { 'Content-Type': 'image/jpeg' },
+          });
+        } catch (err) {
+          toast.error(errorMessage(err, 'The record was saved, but the photo could not be uploaded.'));
+        }
+      }
+      return saved;
     },
     onSuccess: () => {
       toast.success(editing ? 'Student record updated.' : 'Student admitted to the register.');
@@ -180,6 +231,45 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
     >
       <div className="grid gap-4">
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
+
+        <div className="flex flex-col gap-4 rounded-2xl bg-slate-50/80 p-4 sm:flex-row sm:items-center">
+          <div className="flex h-28 w-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white ring-1 ring-slate-100">
+            {photoPreview || student?.photo?.thumbnailUrl || student?.photo?.url ? (
+              <img
+                src={photoPreview || student?.photo?.thumbnailUrl || student?.photo?.url}
+                alt="Student portrait preview"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <Camera className="h-8 w-8 text-slate-300" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-slate-800">Student photo</p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-500">
+              Stored in ImageKit as {student?.studentId ? `${student.studentId}.jpg` : 'the generated student number .jpg'}.
+              JPEG, PNG or WebP up to 5 MB; the image is converted to JPEG before upload.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" variant="secondary" onClick={() => photoInput.current?.click()} className="gap-1.5">
+                <Camera className="h-3.5 w-3.5" /> {photoPreview || student?.photo ? 'Change photo' : 'Choose photo'}
+              </Button>
+              {photoPreview ? (
+                <Button size="sm" variant="ghost" onClick={clearPhoto} className="gap-1.5">
+                  <Trash2 className="h-3.5 w-3.5" /> Clear selection
+                </Button>
+              ) : null}
+            </div>
+            {photoError ? <p className="mt-2 text-xs font-medium text-rose-600">{photoError}</p> : null}
+            <input
+              ref={photoInput}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={choosePhoto}
+            />
+          </div>
+        </div>
 
         <FormGrid>
           <Field label="First name" value={form.firstName} onChange={(event) => set('firstName', event.target.value)} required />

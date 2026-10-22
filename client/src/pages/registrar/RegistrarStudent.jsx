@@ -20,6 +20,7 @@ import {
   humanStatus,
   levelLabel,
   qualificationLabel,
+  toJpegFile,
   toneForStatus,
 } from '../../lib/registrar';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
@@ -73,9 +74,10 @@ export default function RegistrarStudent() {
     mutationFn: async (file) => {
       if (!ACCEPTED.includes(file.type)) throw new Error('Choose a JPEG, PNG or WebP image.');
       if (file.size > MAX_PHOTO) throw new Error('The photo must be smaller than 5 MB.');
-      const buffer = await file.arrayBuffer();
+      const jpeg = await toJpegFile(file);
+      const buffer = await jpeg.arrayBuffer();
       return (await api.post(`${REGISTRAR}/students/${studentId}/photo`, buffer, {
-        headers: { 'Content-Type': file.type },
+        headers: { 'Content-Type': 'image/jpeg' },
       })).data;
     },
     onSuccess: () => {

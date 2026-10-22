@@ -49,6 +49,7 @@ export async function uploadImage(buffer, { fileName, folder, contentType }) {
     folder,
     isPrivateFile: true,
     useUniqueFileName: false,
+    overwriteFile: true,
     tags: ['sms-registrar'],
   });
   if (!response?.fileId || !response?.filePath) {

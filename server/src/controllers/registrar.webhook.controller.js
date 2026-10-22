@@ -1,7 +1,7 @@
 ﻿import { z } from 'zod';
 import { Student } from '../models/Student.js';
 import { ImageKitEvent } from '../models/RegistrarSupport.js';
-import { verifyWebhook, payloadHash } from '../services/imagekit.service.js';
+import { verifyWebhook, payloadHash, signedImageUrl } from '../services/imagekit.service.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { logger } from '../utils/logger.js';
@@ -15,6 +15,11 @@ const webhookSchema = z.object({
       name: z.string().max(300).optional().default(''),
       url: z.string().max(2000).optional().default(''),
       thumbnailUrl: z.string().max(2000).optional().default(''),
+      fileType: z.string().max(80).optional().default(''),
+      mime: z.string().max(120).optional().default(''),
+      size: z.coerce.number().optional().default(0),
+      width: z.coerce.number().optional().default(0),
+      height: z.coerce.number().optional().default(0),
     })
     .passthrough(),
 }).passthrough();
@@ -85,15 +90,51 @@ export const imagekitWebhook = asyncHandler(async (req, res) => {
       event.outcome = result.modifiedCount ? 'processed' : 'ignored';
       event.detail = result.modifiedCount ? 'Student photo marked missing.' : 'No student references this file.';
     } else if (payload.type === 'file.created') {
-      // A create notice only restores a reference this system already made. It never
-      // links a new file to a student by name or path, which would let anyone who can
-      // upload to ImageKit attach a file to a student record.
-      const result = await Student.updateMany(
+      let result = await Student.updateMany(
         { 'photo.fileId': payload.data.fileId, 'photo.status': 'missing' },
         { $set: { 'photo.status': 'active', 'photo.missingAt': null }, $unset: { 'photo.url': '' } },
       );
+      let detail = result.modifiedCount ? 'Student photo reference restored.' : 'No student reference to restore.';
+      if (!result.modifiedCount) {
+        const name = payload.data.name.trim().split(/[\\/]/).pop();
+        const match = /^([A-Za-z0-9._-]+)\.(jpe?g|png|webp)$/i.exec(name);
+        const student = match ? await Student.findOne({ studentId: match[1].toUpperCase() }).select('_id').lean() : null;
+        if (student) {
+          const extension = match[2].toLowerCase() === 'jpeg' ? 'jpg' : match[2].toLowerCase();
+          const contentType = payload.data.mime
+            || (payload.data.fileType.includes('/')
+              ? payload.data.fileType
+              : { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[extension]);
+          const url = signedImageUrl(payload.data.filePath) || payload.data.url || null;
+          const thumbnailUrl = signedImageUrl(payload.data.filePath, {
+            transformation: [{ width: 160, height: 160, crop: 'maintain_ratio', focus: 'face' }],
+          }) || payload.data.thumbnailUrl || null;
+          await Student.updateOne(
+            { _id: student._id },
+            {
+              $set: {
+                'photo.provider': 'imagekit',
+                'photo.fileId': payload.data.fileId,
+                'photo.filePath': payload.data.filePath || null,
+                'photo.url': url,
+                'photo.thumbnailUrl': thumbnailUrl,
+                'photo.contentType': contentType || null,
+                'photo.extension': extension,
+                'photo.bytes': payload.data.size || null,
+                'photo.width': payload.data.width || null,
+                'photo.height': payload.data.height || null,
+                'photo.status': 'active',
+                'photo.uploadedAt': new Date(),
+                'photo.missingAt': null,
+              },
+            },
+          );
+          result = { modifiedCount: 1 };
+          detail = 'Student photo linked by file name.';
+        }
+      }
       event.outcome = result.modifiedCount ? 'processed' : 'ignored';
-      event.detail = result.modifiedCount ? 'Student photo reference restored.' : 'No student reference to restore.';
+      event.detail = detail;
     } else {
       event.outcome = 'ignored';
       event.detail = 'Event type is not handled by the Registrar photo store.';
