@@ -12,7 +12,6 @@ import {
   assignmentIdsForTeacher,
   readAssignmentIdsForTeacher,
   dayKey,
-  readAssignmentIdsForTeacher,
   studentDto,
 } from './teacherScope.service.js';
 import { activeProgramIdsForTeacher } from './teacherAccess.service.js';
