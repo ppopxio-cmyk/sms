@@ -52,6 +52,7 @@ const RegistrarAnalytics = lazy(() => import('./pages/registrar/RegistrarAnalyti
 const RegistrarStudents = lazy(() => import('./pages/registrar/RegistrarStudents.jsx'));
 const RegistrarStudent = lazy(() => import('./pages/registrar/RegistrarStudent.jsx'));
 const RegistrarAcademicStructure = lazy(() => import('./pages/registrar/RegistrarAcademicStructure.jsx'));
+const RegistrarProgram = lazy(() => import('./pages/registrar/RegistrarProgram.jsx'));
 const RegistrarCalendar = lazy(() => import('./pages/registrar/RegistrarCalendar.jsx'));
 const RegistrarBatches = lazy(() => import('./pages/registrar/RegistrarBatches.jsx'));
 const RegistrarBatch = lazy(() => import('./pages/registrar/RegistrarBatch.jsx'));
@@ -170,6 +171,7 @@ export default function App() {
               <Route path="/registrar/students" element={<RegistrarStudents />} />
               <Route path="/registrar/students/:studentId" element={<RegistrarStudent />} />
               <Route path="/registrar/academic-structure" element={<RegistrarAcademicStructure />} />
+              <Route path="/registrar/academic-structure/programs/:id" element={<RegistrarProgram />} />
               <Route path="/registrar/academic-calendar" element={<RegistrarCalendar />} />
               <Route path="/registrar/batches" element={<RegistrarBatches />} />
             <Route path="/registrar/batches/:batchId" element={<RegistrarBatch />} />

@@ -11,6 +11,7 @@ import {
   assignmentDto,
   assignmentForTeacher,
   assignmentIdsForTeacher,
+  readAssignmentIdsForTeacher,
   enrollmentDto,
 } from './teacherScope.service.js';
 
@@ -114,7 +115,7 @@ async function ensureEditable(assignmentId) {
 }
 
 export async function listCourseMarkSummary(teacherId, query) {
-  const visibleIds = await assignmentIdsForTeacher(teacherId, { includeCompleted: true });
+  const visibleIds = await readAssignmentIdsForTeacher(teacherId, { includeCompleted: true });
   const assignments = await CourseOffering.find(ownFilter({ _id: { $in: visibleIds } }))
     .populate(ASSIGNMENT_POPULATE)
     .sort({ createdAt: -1 })

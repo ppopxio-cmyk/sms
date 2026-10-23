@@ -12,6 +12,7 @@ import { planCredits } from '../services/eligibility.service.js';
 import { buildExport, EXPORT_LIMIT } from '../services/export.service.js';
 import { notifyProgramTeachers } from '../services/notification.service.js';
 import { syncProgramTeachers } from '../services/teacherAccess.service.js';
+import { TeacherProgramAssignment } from '../models/Teaching.js';
 import { sendCode } from '../services/codeDelivery.js';
 import { checkCode } from '../services/code.service.js';
 
@@ -255,6 +256,45 @@ export const deleteProgram = asyncHandler(async (req, res) => {
   await Program.deleteOne({ _id: program._id });
   audit({ req, action: 'registrar.program.delete', targetType: 'Program', targetId: program._id, meta: { code: program.code } });
   res.status(204).end();
+});
+
+export const programDetail = asyncHandler(async (req, res) => {
+  const program = await Program.findById(req.valid.params.id)
+    .populate('department', 'code name')
+    .populate('teachers', 'name email role')
+    .lean();
+  if (!program) throw new AppError(404, 'PROGRAM_NOT_FOUND', 'That programme was not found.');
+  const [batches, courses, plans, assignments, studentCount] = await Promise.all([
+    Batch.find({ program: program._id }).sort({ code: 1, category: 1 }).lean(),
+    Course.find({ department: program.department }).sort({ code: 1 }).lean(),
+    CurriculumPlan.find({ program: program._id }).sort({ version: -1 }).lean(),
+    TeacherProgramAssignment.find(ownFilter({ program: program._id, status: 'active' }))
+      .populate('teacher', 'name email')
+      .sort({ assignedAt: -1 })
+      .lean(),
+    Student.countDocuments({ program: program._id, studentStatus: 'active' }),
+  ]);
+  res.json({
+    program: {
+      ...program,
+      id: String(program._id),
+      department: program.department ? { id: String(program.department._id), code: program.department.code, name: program.department.name } : null,
+      teachers: (program.teachers || []).map((teacher) => ({ id: String(teacher._id), name: teacher.name || teacher.email, email: teacher.email })),
+      _id: undefined,
+    },
+    assignments: assignments.map((row) => ({
+      id: String(row._id),
+      teacher: row.teacher ? { id: String(row.teacher._id), name: row.teacher.name || row.teacher.email, email: row.teacher.email } : null,
+      status: row.status,
+      source: row.source,
+      assignedAt: row.assignedAt,
+      assignedBy: row.assignedBy,
+    })),
+    batches: batches.map((row) => ({ ...row, id: String(row._id), _id: undefined })),
+    courses: courses.map((row) => ({ ...row, id: String(row._id), _id: undefined })),
+    plans: plans.map((row) => ({ ...row, id: String(row._id), _id: undefined })),
+    studentCount,
+  });
 });
 
 export const calendar = asyncHandler(async (_req, res) => {

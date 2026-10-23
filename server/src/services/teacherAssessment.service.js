@@ -8,6 +8,7 @@ import {
   assessmentForTeacher,
   assignmentForTeacher,
   assignmentIdsForTeacher,
+  readAssignmentIdsForTeacher,
   enrollmentDto,
 } from './teacherScope.service.js';
 import { ownFilter } from './registrar.helpers.js';
@@ -81,7 +82,7 @@ async function gradedCount(offering, assessmentTitle) {
 }
 
 export async function listAssessments(teacherId, query) {
-  const assignmentIds = await assignmentIdsForTeacher(teacherId);
+  const assignmentIds = await readAssignmentIdsForTeacher(teacherId);
   const match = { offering: { $in: assignmentIds } };
   if (query.assignmentId) match.offering = { $in: assignmentIds.filter((id) => String(id) === query.assignmentId) };
   if (query.type !== 'all') match.type = query.type;

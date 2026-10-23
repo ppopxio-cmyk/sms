@@ -7,6 +7,7 @@ import {
   assignmentDto,
   assignmentForTeacher,
   assignmentIdsForTeacher,
+  readAssignmentIdsForTeacher,
   dateFromKey,
   dayKey,
   enrollmentDto,
@@ -57,7 +58,7 @@ async function loadRecords(sheets) {
 }
 
 export async function attendanceOverview(teacherId, query) {
-  const assignmentIds = await assignmentIdsForTeacher(teacherId);
+  const assignmentIds = await readAssignmentIdsForTeacher(teacherId);
   const match = { offering: { $in: assignmentIds } };
   if (query.assignmentId) match.offering = { $in: assignmentIds.filter((id) => String(id) === query.assignmentId) };
   if (query.status !== 'all') match.status = query.status;

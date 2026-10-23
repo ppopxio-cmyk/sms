@@ -9,6 +9,7 @@ import {
   assignmentForTeacher,
   assignmentForTeacherRead,
   assignmentIdsForTeacher,
+  readAssignmentIdsForTeacher,
   materialForTeacher,
 } from './teacherScope.service.js';
 import { ownFilter, searchFilter } from './registrar.helpers.js';
@@ -46,7 +47,7 @@ function validHttpUrl(value) {
 }
 
 export async function listMaterials(teacherId, query) {
-  const assignmentIds = await assignmentIdsForTeacher(teacherId);
+  const assignmentIds = await readAssignmentIdsForTeacher(teacherId);
   const match = { offering: { $in: assignmentIds }, deletedAt: null };
   if (query.assignmentId) match.offering = { $in: assignmentIds.filter((id) => String(id) === query.assignmentId) };
   if (query.kind !== 'all') match.kind = query.kind;

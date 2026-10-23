@@ -39,6 +39,30 @@ export async function activeProgramsForTeacher(teacherId) {
     .lean();
 }
 
+// A student is admitted into a programme, so the teacher(s) on that programme's
+// assignment are the ones who must see the student. If the registrar has not assigned a
+// teacher yet, admission fails loudly instead of silently handing the student to nobody.
+export async function resolveTeacherIdsForPlacement(programId, { batchId = null } = {}) {
+  const ids = await programTeacherIds(programId);
+  if (!ids.length) {
+    throw new AppError(
+      409,
+      'TEASSIGNMENT_REQUIRED',
+      'No teacher is assigned to this programme yet. Assign a teacher on the programme before admitting students.',
+    );
+  }
+  return ids;
+}
+
+export async function programTeacherIds(programId) {
+  const rows = await TeacherProgramAssignment.find(
+    ownFilter({ program: programId, status: 'active' }),
+  )
+    .select('teacher')
+    .lean();
+  return [...new Set(rows.map((row) => String(row.teacher)))];
+}
+
 export async function assertProgramRead(teacherId, programId) {
   const ids = await activeProgramIdsForTeacher(teacherId);
   if (!ids.some((id) => String(id) === String(programId))) {

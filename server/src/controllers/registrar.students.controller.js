@@ -11,11 +11,12 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { signedImageUrl, uploadImage, deleteImage, validateImage } from '../services/imagekit.service.js';
 import { sendCode } from '../services/codeDelivery.js';
 import { checkCode } from '../services/code.service.js';
-import { notifyAdmins } from '../services/notification.service.js';
+import { notifyAdmins, notifyUsers } from '../services/notification.service.js';
+import { resolveTeacherIdsForPlacement } from '../services/teacherAccess.service.js';
 import { sendStudentAdmissionEmail } from '../services/mail.service.js';
 import { buildStudentProfileExport } from '../services/studentExport.service.js';
 import { logger } from '../utils/logger.js';
-import { pageOf, sortOf, searchFilter, mergeFilters, paged, ownFilter } from '../services/registrar.helpers.js';
+import { pageOf, sortOf, searchFilter, mergeFilters, paged, ownFilter, canonicalNow } from '../services/registrar.helpers.js';
 
 const STUDENT_SORT = ['createdAt', 'updatedAt', 'studentId', 'fullName', 'level', 'admissionDate'];
 
@@ -243,6 +244,14 @@ export const createStudent = asyncHandler(async (req, res) => {
     if (!academicYear) throw new AppError(400, 'ACADEMIC_YEAR_INVALID', 'Choose a valid academic year.');
   }
 
+  // Admission date defaults to the canonical Ethiopian day, not the browser clock, so a
+  // registrar in a different offset never writes a date that drifts by a day.
+  const admissionDate = input.admissionDate ? new Date(input.admissionDate) : canonicalNow();
+  if (Number.isNaN(admissionDate.getTime())) {
+    throw new AppError(400, 'BAD_DATE', 'The admission date is not a valid date.');
+  }
+  const teacherIds = await resolveTeacherIdsForPlacement(program._id, { batchId: batch?._id ?? null });
+
   const base = {
     ...input,
     email,
@@ -252,7 +261,7 @@ export const createStudent = asyncHandler(async (req, res) => {
     qualificationType: program.qualificationType,
     batch: batch?._id ?? null,
     admissionAcademicYear: academicYear?._id ?? null,
-    admissionDate: input.admissionDate || new Date(),
+    admissionDate,
     enrollmentStatus: 'active',
     studentStatus: input.studentStatus || 'active',
     notes: '',
@@ -300,8 +309,16 @@ export const createStudent = asyncHandler(async (req, res) => {
     action: 'registrar.student.create',
     targetType: 'Student',
     targetId: student._id,
-    meta: { studentId: student.studentId, program: program.code, category, batch: batch?.code ?? null },
+    meta: { studentId: student.studentId, program: program.code, category, batch: batch?.code ?? null, teachers: teacherIds.length },
   });
+  void notifyUsers(teacherIds, {
+    type: 'student_admitted',
+    title: 'New student admitted',
+    body: `${student.studentId} · ${student.fullName} · ${program.code}`,
+    actorId: req.user.id,
+    actorName: req.user.name || 'Registrar',
+    meta: { studentId: student.studentId, program: program.code, batch: batch?.code ?? null },
+  }).catch(() => {});
   void sendStudentAdmissionEmail({
     to: email,
     name: student.fullName,

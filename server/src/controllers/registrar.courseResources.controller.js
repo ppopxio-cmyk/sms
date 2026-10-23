@@ -4,6 +4,7 @@ import { Program } from '../models/AcademicStructure.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
 import { audit } from '../services/audit.service.js';
+import { notifyProgramTeachers } from '../services/notification.service.js';
 import { ownFilter, searchFilter } from '../services/registrar.helpers.js';
 import { deleteImage, signedImageUrl, uploadDocument, validateDocument } from '../services/imagekit.service.js';
 import { logger } from '../utils/logger.js';
@@ -90,6 +91,14 @@ export const uploadCourseResource = asyncHandler(async (req, res) => {
     targetId: resource._id,
     meta: { program: program.code, courseCode: resource.courseCode, fileName: safeName, bytes: resource.bytes },
   });
+  void notifyProgramTeachers(program._id, {
+    type: 'course_material',
+    title: `${resource.courseCode} material published`,
+    body: `${safeName} is available in your materials page.`,
+    actorId: req.user.id,
+    actorName: req.user.name || 'Registrar',
+    meta: { program: program.code, courseCode: resource.courseCode, resourceId: String(resource._id) },
+  }).catch(() => {});
   res.status(201).json({ resource: resourceDto(populated) });
 });
 

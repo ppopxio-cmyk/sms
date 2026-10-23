@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { BookOpen, Building2, GraduationCap, Pencil, Plus, ShieldCheck, Trash2, UserRoundCheck } from 'lucide-react';
@@ -91,6 +92,7 @@ export default function RegistrarAcademicStructure() {
   const [search, setSearch] = useState('');
   const [departmentModal, setDepartmentModal] = useState(null);
   const [programModal, setProgramModal] = useState(null);
+  const [assignModal, setAssignModal] = useState(null);
   const [deleting, setDeleting] = useState(null);
 
   const query = useQuery({
@@ -126,6 +128,17 @@ export default function RegistrarAcademicStructure() {
       invalidate();
     },
     onError: (err) => toast.error(errorMessage(err, 'The programme could not be updated.')),
+  });
+
+  const assignTeachers = useMutation({
+    mutationFn: async ({ row, teacherIds }) =>
+      (await api.patch(`${REGISTRAR}/academic-structure/programs/${row.id}`, { teachers: teacherIds })).data,
+    onSuccess: (data, variables) => {
+      toast.success(`${variables.row.name} teachers updated.`);
+      setAssignModal(null);
+      invalidate();
+    },
+    onError: (err) => toast.error(errorMessage(err, 'The teacher assignment could not be saved.')),
   });
 
   const term = search.trim().toLowerCase();
@@ -271,14 +284,31 @@ export default function RegistrarAcademicStructure() {
                       <UserRoundCheck className="h-3.5 w-3.5" />
                       {(row.teachers || []).length ? (row.teachers || []).map((teacher) => teacher.name).join(', ') : 'No teachers assigned'}
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => toggleProgram.mutate(row)}
-                      disabled={toggleProgram.isPending}
-                      className="focus-ring rounded-lg text-xs font-semibold text-brand-700 hover:underline disabled:opacity-50"
-                    >
-                      {row.active ? 'Inactivate' : 'Activate'}
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <Link
+                        to={`${REGISTRAR}/academic-structure/programs/${row.id}`}
+                        className="focus-ring inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50"
+                      >
+                        View details
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => setAssignModal({ row })}
+                        className="focus-ring rounded-lg p-1.5 text-slate-400 hover:bg-brand-50 hover:text-brand-700"
+                        aria-label={`Assign teachers to ${row.name}`}
+                        title="Assign teachers"
+                      >
+                        <UserRoundCheck className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleProgram.mutate(row)}
+                        disabled={toggleProgram.isPending}
+                        className="focus-ring rounded-lg text-xs font-semibold text-brand-700 hover:underline disabled:opacity-50"
+                      >
+                        {row.active ? 'Inactivate' : 'Activate'}
+                      </button>
+                    </div>
                   </div>
                   {!row.active ? <p className="mt-2 text-xs font-medium text-amber-700">Inactive programmes cannot receive new batches or admissions.</p> : null}
                 </div>
@@ -340,7 +370,75 @@ export default function RegistrarAcademicStructure() {
         onClose={() => setDeleting(null)}
         onConfirm={() => remove.mutate()}
       />
+      <AssignTeachersModal
+        open={Boolean(assignModal)}
+        row={assignModal?.row}
+        teachers={query.data?.teachers || []}
+        onClose={() => setAssignModal(null)}
+        onSaved={assignTeachers.mutate}
+      />
     </div>
+  );
+}
+
+function AssignTeachersModal({ open, row, teachers, onClose, onSaved }) {
+  const [selected, setSelected] = useState(
+    (row?.teachers || []).map((teacher) => teacher.id || String(teacher)),
+  );
+
+  useEffect(() => {
+    if (open && row) {
+      setSelected((row.teachers || []).map((teacher) => teacher.id || String(teacher)));
+    }
+  }, [open, row]);
+
+  const toggle = (teacherId) =>
+    setSelected((current) =>
+      current.includes(teacherId)
+        ? current.filter((id) => id !== teacherId)
+        : [...current, teacherId],
+    );
+
+  return (
+    <Modal
+      open={open}
+      title={row ? `Assign teachers to ${row.name}` : 'Assign teachers'}
+      subtitle="Every teacher on this list can see the programme, its classes and its students."
+      size="md"
+      onClose={onClose}
+      dismissible
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => onSaved?.({ row, teacherIds: selected })} className="gap-2">
+            <UserRoundCheck className="h-4 w-4" /> Save teachers
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <p className="text-sm text-slate-500">
+          Ticking a teacher makes the programme appear in their workspace. Unticking keeps their historical records but removes the programme from their active view.
+        </p>
+        <div className="max-h-72 space-y-1 overflow-y-auto rounded-xl border border-slate-100 p-2">
+          {teachers.map((teacher) => (
+            <label key={teacher.id} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 text-sm text-slate-700 hover:bg-slate-50">
+              <input
+                type="checkbox"
+                checked={selected.includes(teacher.id)}
+                onChange={() => toggle(teacher.id)}
+                className="h-4 w-4 rounded border-slate-300 text-brand-600"
+              />
+              <span className="min-w-0 flex-1 truncate">
+                {teacher.name} <span className="text-xs text-slate-400">{teacher.email}</span>
+              </span>
+            </label>
+          ))}
+          {!teachers.length ? <p className="px-2 py-3 text-sm text-slate-500">No active teacher accounts exist yet.</p> : null}
+        </div>
+        <p className="text-xs text-slate-500">{selected.length} teacher{selected.length === 1 ? '' : 's'} selected.</p>
+      </div>
+    </Modal>
   );
 }
 

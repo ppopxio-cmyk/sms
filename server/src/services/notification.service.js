@@ -55,6 +55,15 @@ export async function notifyAdmins(entry) {
   await Promise.all(admins.map((admin) => deliver({ ...entry, userId: admin._id })));
 }
 
+export async function notifyUsers(userIds, entry) {
+  const ids = [...new Set((userIds || []).map(String).filter(Boolean))];
+  if (!ids.length) return;
+  const users = await User.find(ownFilter({ _id: { $in: ids }, status: 'active', deletedAt: null }))
+    .select('_id')
+    .lean();
+  await Promise.all(users.map((user) => deliver({ ...entry, userId: user._id })));
+}
+
 export async function notifyRole(role, entry) {
   const users = await User.find({ role, status: 'active', deletedAt: null }).select('_id').lean();
   await Promise.all(users.map((user) => deliver({ ...entry, userId: user._id })));

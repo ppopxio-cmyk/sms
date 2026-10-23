@@ -10,6 +10,7 @@ import {
   STUDENT_POPULATE,
   assignmentDto,
   assignmentIdsForTeacher,
+  readAssignmentIdsForTeacher,
   dayKey,
   readAssignmentIdsForTeacher,
   studentDto,
@@ -131,7 +132,7 @@ export async function listTeacherStudents(teacherId, query) {
 
 export async function teacherStudentDetail(teacherId, studentId) {
   const programIds = await activeProgramIdsForTeacher(teacherId);
-  const ownAssignmentIds = await assignmentIdsForTeacher(teacherId);
+  const ownAssignmentIds = await readAssignmentIdsForTeacher(teacherId);
   const readIds = await readAssignmentIdsForTeacher(teacherId);
 
   const student = await Student.findById(studentId)

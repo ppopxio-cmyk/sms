@@ -1,6 +1,23 @@
 import mongoose from 'mongoose';
 import { escapeRegex } from '../utils/text.js';
 
+// The college keeps one canonical "now": midnight in Addis Ababa. Every admission date
+// and timestamp that the registrar writes starts here, so a record never drifts by a
+// half-day because the browser sat in a different offset than the server.
+export function canonicalNow(date = new Date()) {
+  const key = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Addis_Ababa',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+  return new Date(`${key}T00:00:00+03:00`);
+}
+
+export function todayKey() {
+  return canonicalNow().toISOString().slice(0, 10);
+}
+
 export function pageOf(query) {
   const page = Math.max(1, Number(query.page) || 1);
   const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));

@@ -10,6 +10,7 @@ import {
   dayKey,
 } from './teacherScope.service.js';
 import { ownFilter } from './registrar.helpers.js';
+import { teacherOfferingFilter } from './teacherAccess.service.js';
 
 const countBy = (rows) =>
   rows.reduce((acc, row) => {
@@ -18,7 +19,10 @@ const countBy = (rows) =>
   }, {});
 
 export async function teacherDashboard(teacherId) {
-  const assignments = await CourseOffering.find(ownFilter({ teacher: teacherId, status: { $in: WRITE_STATUSES } }))
+  const access = await teacherOfferingFilter(teacherId);
+  const assignments = await CourseOffering.find(
+    ownFilter({ $and: [access, { status: { $in: WRITE_STATUSES } }] }),
+  )
     .populate(ASSIGNMENT_POPULATE)
     .sort({ createdAt: -1 })
     .lean();

@@ -9,6 +9,7 @@ import {
   assignmentDto,
   assignmentForTeacher,
   assignmentIdsForTeacher,
+  readAssignmentIdsForTeacher,
   activeEnrollments,
   dateFromKey,
   studentDto,
@@ -37,7 +38,7 @@ function classSubtitle(assignment) {
 }
 
 export async function reportOptions(teacherId, query) {
-  const ids = await assignmentIdsForTeacher(teacherId);
+  const ids = await readAssignmentIdsForTeacher(teacherId);
   const rows = await CourseOffering.find(ownFilter({ _id: { $in: ids } }))
     .populate(ASSIGNMENT_POPULATE)
     .sort({ createdAt: -1 })
