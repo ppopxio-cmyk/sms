@@ -67,7 +67,8 @@ async function loadOptions(programId, departmentId, batchId, category = 'regular
   }
 
   // Placement is one choice: department, programme and stream decide the batch.
-  // When the Registrar has not picked one, the current planned/active intake is used.
+  // When the Registrar has not picked one, the latest existing intake is used so
+  // the student always lands in a batch instead of being left unassigned.
   let batch = null;
   if (batchId) {
     batch = await Batch.findById(batchId).lean();
@@ -78,7 +79,7 @@ async function loadOptions(programId, departmentId, batchId, category = 'regular
       throw new AppError(409, 'BATCH_CATEGORY', 'That batch belongs to a different regular/extension stream.');
     }
   } else {
-    batch = await Batch.findOne(ownFilter({ program: program._id, category, status: { $in: ['planned', 'active'] } }))
+    batch = await Batch.findOne(ownFilter({ program: program._id, category }))
       .sort({ createdAt: -1 })
       .lean();
   }

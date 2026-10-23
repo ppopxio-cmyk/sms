@@ -100,6 +100,7 @@ export async function listTeacherAssignments(teacherId, query) {
       code: row.code,
       name: row.name,
       qualificationType: row.qualificationType,
+      department: row.department ? { id: String(row.department._id), code: row.department.code, name: row.department.name } : null,
     })),
     pagination: { page: query.page, limit: query.limit, total, pages: Math.max(1, Math.ceil(total / query.limit)) },
   };

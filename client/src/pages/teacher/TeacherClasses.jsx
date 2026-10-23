@@ -100,12 +100,41 @@ export default function TeacherClasses() {
             <ErrorState message="We could not load your classes." onRetry={query.refetch} />
           ) : query.isLoading ? (
             <SkeletonRows rows={5} />
-          ) : !rows.length ? (
+          ) : !rows.length && !programs.length ? (
             <EmptyState
               icon={GraduationCap}
               title="No classes assigned yet"
               message="The registrar assigns courses to teachers. Your classes will appear here once assigned."
             />
+          ) : !rows.length ? (
+            // Fallback: the teacher has programme-level assignments but no course offerings yet.
+            // Show the programmes as info cards so the page is never misleadingly empty.
+            <div>
+              <p className="mb-4 text-sm text-slate-500">
+                You are assigned to <strong>{programs.length} programme{programs.length > 1 ? 's' : ''}</strong>. Course offerings will appear here once the registrar creates them.
+              </p>
+              <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+                {programs.map((prog) => (
+                  <div key={prog.id} className="flex flex-col rounded-2xl border border-slate-100 bg-white/70 p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+                        <BookOpen className="h-5 w-5" />
+                      </span>
+                      <Badge tone="neutral">Pending</Badge>
+                    </div>
+                    <h2 className="mt-3 text-base font-semibold leading-snug text-slate-900">
+                      {prog.code} · {prog.name}
+                    </h2>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                      {prog.qualificationType ? `${prog.qualificationType.charAt(0).toUpperCase() + prog.qualificationType.slice(1)} programme` : 'Programme'}
+                    </p>
+                    <span className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400">
+                      Awaiting course offerings
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
               {rows.map((course) => {
