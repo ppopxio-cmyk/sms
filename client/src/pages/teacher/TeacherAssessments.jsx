@@ -1,7 +1,16 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { ArrowRight, ClipboardList, Plus, TriangleAlert } from 'lucide-react';
+import {
+  ArrowRight,
+  ClipboardList,
+  Copy,
+  Eye,
+  EyeOff,
+  Plus,
+  ShieldCheck,
+  TriangleAlert,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../../lib/api';
 import { assessmentTypeLabel, classTitle, displayDate, statusLabel, statusTone } from '../../lib/teacher';
@@ -33,6 +42,8 @@ export default function TeacherAssessments() {
   const [limit, setLimit] = useState(20);
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM, assignmentId: params.get('assignmentId') || '' });
+  const [showSecret, setShowSecret] = useState({});
+  const [copiedCode, setCopiedCode] = useState('');
   const queryClient = useQueryClient();
 
   const classes = useQuery({
@@ -95,6 +106,14 @@ export default function TeacherAssessments() {
     if (!(Number(form.maxScore) > 0)) return toast.error('The maximum score must be greater than zero.');
     if (Number(form.weight) < 0 || Number(form.weight) > 100) return toast.error('The weight must be between 0 and 100.');
     return createMutation.mutate();
+  };
+
+  const copyToClipboard = (text, code) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedCode(code);
+      setTimeout(() => setCopiedCode(''), 2000);
+      toast.success('Copied to clipboard.');
+    });
   };
 
   return (
@@ -177,14 +196,14 @@ export default function TeacherAssessments() {
               title={status !== 'all' || type !== 'all' || assignmentId ? 'No assessments match these filters' : 'No assessments yet'}
               message={
                 activeClasses.length
-                  ? 'Create a mark column for a class, then enter each student’s raw score.'
+                  ? 'Create a mark column for a class, then enter each student\'s raw score.'
                   : 'Assessments can be created once the registrar assigns you an active class.'
               }
             />
           ) : (
             <>
               <div className="hidden overflow-x-auto md:block">
-                <table className="w-full min-w-[780px] border-collapse text-left text-sm">
+                <table className="w-full min-w-[820px] border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-slate-100 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                       <th className="pb-3 pr-4">Assessment</th>
@@ -193,6 +212,7 @@ export default function TeacherAssessments() {
                       <th className="pb-3 pr-4 text-center">Max</th>
                       <th className="pb-3 pr-4 text-center">Marks</th>
                       <th className="pb-3 pr-4">State</th>
+                      <th className="pb-3 pr-4">Secret Code</th>
                       <th className="pb-3 text-right">Open</th>
                     </tr>
                   </thead>
@@ -217,6 +237,29 @@ export default function TeacherAssessments() {
                         </td>
                         <td className="py-3.5 pr-4">
                           <Badge tone={statusTone(row.status)}>{statusLabel(row.status)}</Badge>
+                        </td>
+                        <td className="py-3.5 pr-4">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-xs font-semibold text-brand-700 bg-brand-50 px-2 py-0.5 rounded">
+                              {row.secretCode || '—'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setShowSecret((s) => ({ ...s, [row.id]: !s[row.id] }))}
+                              className="text-slate-400 hover:text-slate-600 transition"
+                              title={showSecret[row.id] ? 'Hide code' : 'Show code'}
+                            >
+                              {showSecret[row.id] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => copyToClipboard(row.secretCode || '', row.id)}
+                              className="text-slate-400 hover:text-slate-600 transition"
+                              title="Copy code"
+                            >
+                              {copiedCode === row.id ? <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                            </button>
+                          </div>
                         </td>
                         <td className="py-3.5 text-right">
                           <Link
@@ -250,6 +293,19 @@ export default function TeacherAssessments() {
                       <p className="mt-2 text-xs text-slate-500">
                         {assessmentTypeLabel(row.type)} · /{row.maxScore} · weight {row.weight}%
                       </p>
+                      <p className="mt-1 text-xs font-mono text-brand-600">
+                        Code: {row.secretCode || '—'}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            copyToClipboard(row.secretCode || '', row.id);
+                          }}
+                          className="ml-1 inline-flex items-center text-slate-400 hover:text-slate-600"
+                        >
+                          <Copy className="h-3 w-3" />
+                        </button>
+                      </p>
                       <p className={`mt-1 text-xs ${row.missing ? 'text-amber-600' : 'text-emerald-600'}`}>
                         {row.graded} of {row.studentCount} marks entered
                       </p>
@@ -276,6 +332,7 @@ export default function TeacherAssessments() {
         </CardBody>
       </Card>
 
+      {/* Public link info modal */}
       <Modal
         open={formOpen}
         onClose={() => setFormOpen(false)}
@@ -388,6 +445,13 @@ export default function TeacherAssessments() {
               className="focus-ring w-full rounded-xl border border-slate-200 bg-white/85 px-3.5 py-3 text-sm text-slate-800"
             />
           </div>
+          <Alert tone="info" title="Secret code">
+            <p className="text-xs text-slate-600">
+              When you publish this assessment, a unique secret code will be generated. Students will need this code along
+              with their student ID to access the submission portal. The code is never shown on the public page — you tell
+              it to students in person.
+            </p>
+          </Alert>
           {Number(form.weight) > 0 ? (
             <p className="text-xs text-slate-500">
               The server checks that the combined weights in this class stay at or below 100%.

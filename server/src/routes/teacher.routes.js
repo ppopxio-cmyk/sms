@@ -47,6 +47,7 @@ import {
 } from '../controllers/teacher.controller.js';
 import {
   finalize,
+  history as attendanceHistoryController,
   overview as attendanceOverviewController,
   roster as attendanceRosterController,
   save as saveAttendanceController,
@@ -76,8 +77,10 @@ import {
   attendanceSummary,
   competency,
   exportReport,
+  gradeDistribution,
   gradeSheet,
   options as reportOptions,
+  performance,
   roster as reportRoster,
 } from '../controllers/teacherReports.controller.js';
 import {
@@ -139,6 +142,7 @@ r.get(
 );
 
 r.get('/attendance', requirePermission('teacher:attendance:manage'), validate(attendanceOverviewQuerySchema, 'query'), attendanceOverviewController);
+r.get('/attendance/:assignmentId/history', requirePermission('teacher:attendance:manage'), validate(attendanceOverviewQuerySchema, 'query'), attendanceHistoryController);
 
 r.get('/assessments', requirePermission('teacher:assessments:manage'), validate(listAssessmentsQuerySchema, 'query'), listAssessments);
 r.post(
@@ -355,6 +359,32 @@ r.get(
   requirePermission('teacher:reports:read'),
   validate(competencyReportQuerySchema, 'query'),
   competency,
+);
+r.get(
+  '/reports/performance',
+  requirePermission('teacher:reports:read'),
+  validate(reportOptionsQuerySchema, 'query'),
+  performance,
+);
+r.get(
+  '/reports/performance/export',
+  exportLimiter,
+  requirePermission('teacher:reports:read'),
+  validate(reportOptionsQuerySchema, 'query'),
+  exportReport('performance'),
+);
+r.get(
+  '/reports/grade-distribution',
+  requirePermission('teacher:reports:read'),
+  validate(reportOptionsQuerySchema, 'query'),
+  gradeDistribution,
+);
+r.get(
+  '/reports/grade-distribution/export',
+  exportLimiter,
+  requirePermission('teacher:reports:read'),
+  validate(reportOptionsQuerySchema, 'query'),
+  exportReport('grade-dist'),
 );
 
 export default r;

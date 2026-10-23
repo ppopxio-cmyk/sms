@@ -9,7 +9,7 @@ import TeacherPageHeader from '../../components/teacher/TeacherPageHeader';
 import Alert from '../../components/ui/Alert';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
-import Card, { CardBody, CardHeader } from '../../components/ui/Card';
+import Card, { CardBody } from '../../components/ui/Card';
 import Modal from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { SlidersHorizontal, UserPlus } from 'lucide-react';
+import { SlidersHorizontal, UserPlus, Users, Building2, BookOpen, GraduationCap, TrendingUp } from 'lucide-react';
 import { api } from '../../lib/api';
 import {
   REGISTRAR,
@@ -51,6 +51,12 @@ export default function RegistrarStudents() {
   const options = useQuery({
     queryKey: ['registrar', 'students', 'options'],
     queryFn: async () => (await api.get(`${REGISTRAR}/students/options`)).data,
+    staleTime: 5 * 60_000,
+  });
+
+  const summary = useQuery({
+    queryKey: ['registrar', 'students', 'summary'],
+    queryFn: async () => (await api.get(`${REGISTRAR}/students/summary`)).data,
     staleTime: 5 * 60_000,
   });
 
@@ -200,6 +206,66 @@ export default function RegistrarStudents() {
           </div>
         }
       />
+
+      {/* Summary chart — only shown when no filters are active */}
+      {!filtered && summary.data ? (
+        <Card>
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+            <TrendingUp className="h-4 w-4 text-brand-600" />
+            <h2 className="text-sm font-semibold text-slate-900">Enrollment overview</h2>
+            <span className="ml-auto text-xs text-slate-500">{summary.data.total} students total</span>
+          </div>
+          <div className="grid gap-4 p-5 sm:grid-cols-3">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wider text-slate-500 mb-3">By department</p>
+              <div className="space-y-1.5">
+                {(summary.data.byDepartment || []).slice(0, 5).map((row) => (
+                  <div key={row.id} className="flex items-center justify-between text-sm">
+                    <span className="text-slate-700 truncate">{row.name}</span>
+                    <span className="font-mono text-slate-900">{row.count}</span>
+                  </div>
+                ))}
+                {(summary.data.byDepartment?.length ?? 0) > 5 ? (
+                  <button
+                    type="button"
+                    onClick={() => navigate('/registrar/students')}
+                    className="text-xs text-brand-600 hover:text-brand-800"
+                  >
+                    +{(summary.data.byDepartment.length - 5)} more
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wider text-slate-500 mb-3">By programme</p>
+              <div className="space-y-1.5">
+                {(summary.data.byProgram || []).slice(0, 5).map((row) => (
+                  <div key={row.id} className="flex items-center justify-between text-sm">
+                    <span className="text-slate-700 truncate">{row.name}</span>
+                    <span className="font-mono text-slate-900">{row.count}</span>
+                  </div>
+                ))}
+                {(summary.data.byProgram?.length ?? 0) > 5 ? (
+                  <button type="button" className="text-xs text-brand-600 hover:text-brand-800">
+                    +{(summary.data.byProgram.length - 5)} more
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wider text-slate-500 mb-3">By batch</p>
+              <div className="space-y-1.5">
+                {(summary.data.byBatch || []).slice(0, 5).map((row) => (
+                  <div key={row.id} className="flex items-center justify-between text-sm">
+                    <span className="text-slate-700 truncate">{row.code || row.name}</span>
+                    <span className="font-mono text-slate-900">{row.count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Card>
+      ) : null}
 
       <Card className="p-4 sm:p-5">
         <div className="flex flex-col gap-3">

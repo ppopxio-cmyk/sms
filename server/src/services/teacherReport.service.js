@@ -1,7 +1,7 @@
 import { CourseOffering } from '../models/Offering.js';
 import { Assessment } from '../models/Assessment.js';
 import { AttendanceSheet } from '../models/AttendanceSheet.js';
-import { AttendanceRecord, Result } from '../models/Records.js';
+import { AttendanceRecord, Result, GradingPolicy, findBand } from '../models/Records.js';
 import { AppError } from '../utils/AppError.js';
 import { buildExport } from './export.service.js';
 import {
@@ -306,13 +306,119 @@ export async function competencyReportData(teacherId, query) {
   };
 }
 
+// Performance report: per-assessment average marks and submission counts
+export async function performanceReportData(teacherId, query) {
+  const assignment = await assignmentForTeacher(teacherId, query.assignmentId);
+  const assessments = await Assessment.find(
+    ownFilter({ offering: assignment._id, status: { $in: ['published', 'closed', 'submitted'] } }),
+  )
+    .select('_id title type maxScore status weight')
+    .sort({ createdAt: 1 })
+    .lean();
+
+  const enrollments = await activeEnrollments(assignment._id);
+  const results = await Result.find({ offering: assignment._id }).lean();
+  const resultByStudent = new Map(results.map((r) => [String(r.student), r]));
+
+  const rows = enrollments
+    .filter((row) => row.student)
+    .map((row) => {
+      const result = resultByStudent.get(String(row.student._id));
+      const components = (result?.components || []).reduce((acc, c) => {
+        acc[c.name] = c.score;
+        return acc;
+      }, {});
+      const total = Object.values(components).reduce((s, v) => s + (v ?? 0), 0);
+      return {
+        number: 0,
+        studentNumber: row.student.studentId ?? '',
+        name: [row.student.firstName, row.student.middleName, row.student.lastName].filter(Boolean).join(' '),
+        ...components,
+        total: Math.round(total * 100) / 100,
+      };
+    });
+
+  // Compute per-assessment stats
+  const assessmentStats = assessments.map((a) => {
+    const scores = rows.map((r) => r[`a_${a._id}`]).filter((v) => v !== undefined && v !== null && v !== '');
+    const avg = scores.length ? scores.reduce((s, v) => s + v, 0) / scores.length : 0;
+    return {
+      id: String(a._id),
+      title: a.title,
+      courseCode: assignment.course?.code,
+      averageMark: Math.round(avg * 100) / 100,
+      maxMark: a.maxScore,
+      submitted: scores.length,
+    };
+  });
+
+  return {
+    configured: true,
+    title: 'Performance overview',
+    subtitle: `${assignment.course?.code} · ${assignment.course?.title}`,
+    summary: [{ label: 'Students', value: rows.length }, { label: 'Assessments', value: assessments.length }],
+    assessments: assessmentStats,
+    rows,
+    columns: [
+      { key: 'studentNumber', label: 'Student ID', width: 16 },
+      { key: 'name', label: 'Student name', width: 28 },
+      ...assessments.map((a) => ({ key: `a_${a._id}`, label: a.title, width: 14, align: 'center' })),
+      { key: 'total', label: 'Total', width: 10, align: 'center' },
+    ],
+  };
+}
+
+// Grade distribution: count of students in each grade band
+export async function gradeDistributionData(teacherId, query) {
+  const assignment = await assignmentForTeacher(teacherId, query.assignmentId);
+  const enrollments = await activeEnrollments(assignment._id);
+  const results = await Result.find({ offering: assignment._id, status: 'published' }).lean();
+  const resultByStudent = new Map(results.map((r) => [String(r.student), r]));
+
+  // Count grade bands
+  const policy = await GradingPolicy.findOne(ownFilter({})).lean();
+  const bandCounts = {};
+  if (policy?.bands) {
+    for (const band of policy.bands) {
+      bandCounts[band.letter] = 0;
+    }
+  }
+
+  for (const enrollment of enrollments) {
+    const result = resultByStudent.get(String(enrollment.student?._id));
+    if (result?.letterGrade && bandCounts.hasOwnProperty(result.letterGrade)) {
+      bandCounts[result.letterGrade]++;
+    }
+  }
+
+  const distribution = Object.entries(bandCounts).map(([grade, count]) => ({
+    label: grade,
+    grade,
+    count,
+  }));
+
+  return {
+    configured: true,
+    title: 'Grade distribution',
+    subtitle: `${assignment.course?.code} · ${assignment.course?.title}`,
+    summary: [{ label: 'Students', value: enrollments.length }, { label: 'Published results', value: results.length }],
+    distribution,
+    rows: [],
+    columns: [],
+  };
+}
+
 export async function buildReportExport(teacherId, type, query) {
   const data =
     type === 'grades'
       ? await gradeSheetData(teacherId, query)
       : type === 'attendance'
         ? await attendanceReportData(teacherId, query)
-        : await rosterData(teacherId, query);
+        : type === 'performance'
+          ? await performanceReportData(teacherId, query)
+          : type === 'grade-dist'
+            ? await gradeDistributionData(teacherId, query)
+            : await rosterData(teacherId, query);
 
   if (data.configured === false) {
     throw new AppError(409, 'COMPETENCY_CONFIG_REQUIRED', data.message);

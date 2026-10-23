@@ -26,7 +26,6 @@ import SearchInput from '../../components/ui/SearchInput';
 export default function RegistrarBatches() {
   const [search, setSearch] = useState('');
   const debounced = useDebounced(search, 300);
-  const [department, setDepartment] = useState('');
   const [program, setProgram] = useState('');
   const [category, setCategory] = useState('');
   const [status, setStatus] = useState('all');
@@ -43,17 +42,14 @@ export default function RegistrarBatches() {
     staleTime: 5 * 60_000,
   });
 
-  const programs = (options.data?.programs || []).filter((row) => !department || row.department === department);
-
   const params = useMemo(() => ({
     page,
     limit,
     ...(debounced.trim() ? { search: debounced.trim() } : {}),
-    ...(department ? { department } : {}),
     ...(program ? { program } : {}),
     ...(category ? { category } : {}),
     ...(status !== 'all' ? { status } : {}),
-  }), [page, limit, debounced, department, program, category, status]);
+  }), [page, limit, debounced, program, category, status]);
 
   const query = useQuery({
     queryKey: ['registrar', 'batch-groups', params],
@@ -191,14 +187,10 @@ export default function RegistrarBatches() {
       <Card className="p-4 sm:p-5">
         <div className="flex flex-col gap-3">
           <SearchInput value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search batch code or name" loading={query.isFetching} />
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <SelectField label="Department" value={department} onChange={(event) => { setDepartment(event.target.value); setProgram(''); setPage(1); }}>
-              <option value="">All departments</option>
-              {(options.data?.departments || []).map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
-            </SelectField>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <SelectField label="Programme" value={program} onChange={(event) => { setProgram(event.target.value); setPage(1); }}>
               <option value="">All programmes</option>
-              {programs.map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
+              {(options.data?.programs || []).map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
             </SelectField>
             <SelectField label="Stream" value={category} onChange={(event) => { setCategory(event.target.value); setPage(1); }}>
               <option value="">Both streams</option>
@@ -228,7 +220,7 @@ export default function RegistrarBatches() {
           error={query.error ? query.error?.response?.data?.message || 'Batches could not be loaded.' : null}
           onRetry={query.refetch}
           rowKey={(row) => row.id}
-          noResults={Boolean(debounced.trim() || department || program || category || status !== 'all')}
+          noResults={Boolean(debounced.trim() || program || category || status !== 'all')}
           emptyTitle="No batches yet"
           emptyMessage="Create a batch to group a programme intake."
         />
@@ -298,25 +290,26 @@ function BatchFormModal({ open, options, onClose, onSaved }) {
 
   useEffect(() => {
     if (!open) return;
-    setError('');
-    const currentYear = (options?.academicYears || []).find((year) => year.isCurrent);
-    setForm({
-      code: '',
-      name: '',
-      department: '',
-      programs: [],
-      category: 'regular',
-      admissionAcademicYear: currentYear?.id || '',
-      durationYears: '',
-      currentLevel: 1,
-      status: 'planned',
-    });
+    setTimeout(() => {
+      setError('');
+      const currentYear = (options?.academicYears || []).find((year) => year.isCurrent);
+      setForm({
+        code: '',
+        name: '',
+        programs: [],
+        category: 'regular',
+        admissionAcademicYear: currentYear?.id || '',
+        durationYears: '',
+        currentLevel: 1,
+        status: 'planned',
+      });
+    }, 0);
   }, [open, options]);
 
   const save = useMutation({
     mutationFn: async () => {
-      if (!form.department || !form.admissionAcademicYear) {
-        throw new Error('Department and admission year are required.');
+      if (!form.admissionAcademicYear) {
+        throw new Error('Admission academic year is required.');
       }
       if (!form.programs?.length) throw new Error('Choose at least one programme.');
       const payload = cleanPayload({
@@ -327,7 +320,6 @@ function BatchFormModal({ open, options, onClose, onSaved }) {
         durationYears: form.durationYears ? Number(form.durationYears) : undefined,
         currentLevel: Number(form.currentLevel) || 1,
         status: form.status,
-        department: form.department,
         programs: form.programs,
       });
       return (await api.post(`${REGISTRAR}/batches`, payload)).data;
@@ -346,8 +338,7 @@ function BatchFormModal({ open, options, onClose, onSaved }) {
   });
 
   const set = (field, value) => setForm((current) => ({ ...current, [field]: value }));
-  const programmes = (options?.programs || []).filter((row) => !form.department || row.department === form.department);
-  const chosen = programmes.filter((row) => (form.programs || []).includes(row.id));
+  const chosen = (form.programs || []).map((id) => (options?.programs || []).find((row) => row.id === id)).filter(Boolean);
   const categories = chosen.length
     ? chosen.reduce((allowed, row) => {
         const next = row.categories?.length ? row.categories : ['regular', 'extension'];
@@ -355,18 +346,14 @@ function BatchFormModal({ open, options, onClose, onSaved }) {
       }, ['regular', 'extension'])
     : ['regular', 'extension'];
 
-  const chooseDepartment = (department) => {
-    setForm((current) => ({ ...current, department, programs: [], category: 'regular' }));
-  };
-
   const toggleProgram = (programId) => {
-    const program = programmes.find((row) => row.id === programId);
+    const program = (options?.programs || []).find((row) => row.id === programId);
     setForm((current) => {
       const programs = current.programs.includes(programId)
         ? current.programs.filter((id) => id !== programId)
         : [...current.programs, programId];
       const allowed = programs.length
-        ? programmes
+        ? (options?.programs || [])
             .filter((row) => programs.includes(row.id))
             .reduce((values, row) => values.filter((category) => (row.categories?.length ? row.categories : ['regular', 'extension']).includes(category)), ['regular', 'extension'])
         : ['regular', 'extension'];
@@ -384,7 +371,7 @@ function BatchFormModal({ open, options, onClose, onSaved }) {
     <Modal
       open={open}
       title="New batch"
-      subtitle="Choose a department and every programme that shares this intake. The code and name are generated when left blank."
+      subtitle="Choose a delivery stream and every programme that shares this intake. The code and name are generated when left blank."
       onClose={save.isPending ? undefined : onClose}
       dismissible={!save.isPending}
       footer={<><Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending}>Create batch</Button></>}
@@ -392,16 +379,24 @@ function BatchFormModal({ open, options, onClose, onSaved }) {
       <div className="grid gap-4">
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
         <FormGrid>
-          <Field label="Batch code" value={form.code || ''} onChange={(event) => set('code', event.target.value)} placeholder="Auto: BAT-2026" hint="Leave blank to use BAT-<admission year>." />
-          <Field label="Batch name" value={form.name || ''} onChange={(event) => set('name', event.target.value)} placeholder="Auto: 2026 Regular Students" hint="Leave blank to generate a stream-aware name." />
-          <SelectField label="Department" value={form.department || ''} onChange={(event) => chooseDepartment(event.target.value)} required>
-            <option value="">Choose a department</option>
-            {(options?.departments || []).map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
-          </SelectField>
+          <Field
+            label="Batch code"
+            value={form.code || ''}
+            onChange={(event) => set('code', event.target.value)}
+            placeholder="Auto: BAT-2026"
+            hint="Leave blank to use BAT-<admission year>."
+          />
+          <Field
+            label="Batch name"
+            value={form.name || ''}
+            onChange={(event) => set('name', event.target.value)}
+            placeholder="Auto: 2026 Regular Students"
+            hint="Leave blank to generate a stream-aware name."
+          />
           <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3 sm:col-span-2">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Programmes in this batch</p>
             <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-100 bg-white p-2">
-              {programmes.map((row) => (
+              {(options?.programs || []).map((row) => (
                 <label key={row.id} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
                   <input
                     type="checkbox"
@@ -412,7 +407,7 @@ function BatchFormModal({ open, options, onClose, onSaved }) {
                   <span className="min-w-0 flex-1 truncate">{row.code} · {row.name}</span>
                 </label>
               ))}
-              {!programmes.length ? <p className="px-2 py-3 text-sm text-slate-500">Choose a department with active programmes.</p> : null}
+              {!options?.programs?.length ? <p className="px-2 py-3 text-sm text-slate-500">No programmes available.</p> : null}
             </div>
           </div>
           <SelectField label="Delivery stream" value={form.category || 'regular'} onChange={(event) => set('category', event.target.value)} required>

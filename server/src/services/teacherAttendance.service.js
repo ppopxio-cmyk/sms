@@ -15,6 +15,73 @@ import {
 import { AppError } from '../utils/AppError.js';
 import { ownFilter } from './registrar.helpers.js';
 
+// Load attendance history for a given assignment (for the grid/history view)
+export async function attendanceHistory(teacherId, assignmentId, query) {
+  const assignment = await assignmentForTeacher(teacherId, assignmentId);
+  const period = query.period || 'month';
+  const month = query.month || '';
+
+  let dateFilter = {};
+  if (period === 'month' && month) {
+    const [yearStr, monthStr] = month.split('-');
+    const start = new Date(`${yearStr}-${monthStr}-01T00:00:00+03:00`);
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + 1);
+    dateFilter = { $gte: start, $lt: end };
+  } else {
+    const year = query.year || new Date().getFullYear();
+    const start = new Date(`${year}-01-01T00:00:00+03:00`);
+    const end = new Date(`${year}-12-31T00:00:00+03:00`);
+    dateFilter = { $gte: start, $lte: end };
+  }
+
+  const sheets = await AttendanceSheet.find(
+    ownFilter({
+      offering: assignmentId,
+      status: 'finalized',
+      date: dateFilter,
+    }),
+  )
+    .select('dateKey date period finalizedAt')
+    .sort({ dateKey: 1 })
+    .lean();
+
+  if (!sheets.length) return { sessions: [], deliveryStream: assignment.batch?.category || 'regular' };
+
+  const records = await AttendanceRecord.find(
+    ownFilter({
+      offering: assignmentId,
+      date: { $in: sheets.map((s) => s.date) },
+    }),
+  )
+    .lean();
+
+  const sessions = sheets.map((sheet) => {
+    const sheetRecords = records.filter(
+      (r) =>
+        String(r.offering) === String(sheet.offering) &&
+        r.period === sheet.period &&
+        new Date(r.date).getTime() === new Date(sheet.date).getTime(),
+    );
+    return {
+      id: String(sheet._id),
+      dateKey: sheet.dateKey,
+      period: sheet.period,
+      present: sheetRecords.filter((r) => r.status === 'present').length,
+      absent: sheetRecords.filter((r) => r.status === 'absent').length,
+      late: sheetRecords.filter((r) => r.status === 'late').length,
+      excused: sheetRecords.filter((r) => r.status === 'excused').length,
+      total: sheetRecords.length,
+      status: sheet.status,
+    };
+  });
+
+  return {
+    sessions,
+    deliveryStream: assignment.batch?.category || 'regular',
+  };
+}
+
 function assertNotFuture(dateKey) {
   if (dateKey > dayKey()) {
     throw new AppError(400, 'FUTURE_ATTENDANCE', 'You cannot mark attendance for a future date.');

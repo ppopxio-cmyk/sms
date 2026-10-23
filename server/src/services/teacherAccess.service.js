@@ -1,5 +1,6 @@
 import { Program } from '../models/AcademicStructure.js';
 import { TeacherProgramAssignment } from '../models/Teaching.js';
+import { CourseAssignment } from '../models/CourseAssignment.js';
 import { notifyUser } from './notification.service.js';
 import { ownFilter } from './registrar.helpers.js';
 import { AppError } from '../utils/AppError.js';
@@ -15,8 +16,6 @@ export async function activeProgramIdsForTeacher(teacherId) {
 
   let ids = rows.map((row) => idOf(row.program)).filter(Boolean);
 
-  // Existing databases were written before the assignment model existed. Keep those
-  // teachers working until the one-time backfill has run.
   if (!ids.length) {
     const legacy = await Program.find(
       ownFilter({ teachers: teacherId, active: { $ne: false } }),
@@ -29,6 +28,15 @@ export async function activeProgramIdsForTeacher(teacherId) {
   return [...new Set(ids)];
 }
 
+export async function programAssignmentPrograms(teacherId) {
+  const rows = await CourseAssignment.find(
+    ownFilter({ teacher: teacherId, status: 'active' }),
+  )
+    .select('program')
+    .lean();
+  return [...new Set(rows.map((row) => idOf(row.program)).filter(Boolean))];
+}
+
 export async function activeProgramsForTeacher(teacherId) {
   const ids = await activeProgramIdsForTeacher(teacherId);
   if (!ids.length) return [];
@@ -39,9 +47,6 @@ export async function activeProgramsForTeacher(teacherId) {
     .lean();
 }
 
-// A student is admitted into a programme, so the teacher(s) on that programme's
-// assignment are the ones who must see the student. If the registrar has not assigned a
-// teacher yet, admission fails loudly instead of silently handing the student to nobody.
 export async function resolveTeacherIdsForPlacement(programId, { batchId = null } = {}) {
   const ids = await programTeacherIds(programId);
   if (!ids.length) {
@@ -77,8 +82,10 @@ export function canManageOffering(teacherId, offering) {
 
 export async function teacherOfferingFilter(teacherId, { write = false } = {}) {
   const programIds = write ? [] : await activeProgramIdsForTeacher(teacherId);
+  const assignmentPrograms = write ? [] : await programAssignmentPrograms(teacherId);
+  const allPrograms = [...new Set([...programIds, ...assignmentPrograms])];
   const branches = [{ teacher: teacherId }];
-  if (programIds.length) branches.push({ program: { $in: programIds } });
+  if (allPrograms.length) branches.push({ program: { $in: allPrograms } });
   return ownFilter({ $or: branches });
 }
 

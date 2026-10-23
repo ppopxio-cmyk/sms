@@ -4,7 +4,9 @@ import {
   attendanceReportData,
   buildReportExport,
   competencyReportData,
+  gradeDistributionData,
   gradeSheetData,
+  performanceReportData,
   reportOptions,
   rosterData,
 } from '../services/teacherReport.service.js';
@@ -27,6 +29,14 @@ export const roster = asyncHandler(async (req, res) => {
 
 export const competency = asyncHandler(async (req, res) => {
   res.json(await competencyReportData(req.user.id, req.valid.query));
+});
+
+export const performance = asyncHandler(async (req, res) => {
+  res.json(await performanceReportData(req.user.id, req.valid.query));
+});
+
+export const gradeDistribution = asyncHandler(async (req, res) => {
+  res.json(await gradeDistributionData(req.user.id, req.valid.query));
 });
 
 export const exportReport = (type) =>

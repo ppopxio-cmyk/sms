@@ -5,6 +5,7 @@ import {
   attendanceRoster,
   finalizeAttendance,
   saveAttendance,
+  attendanceHistory,
 } from '../services/teacherAttendance.service.js';
 
 export const overview = asyncHandler(async (req, res) => {
@@ -52,4 +53,8 @@ export const finalize = asyncHandler(async (req, res) => {
     },
   });
   res.json(data);
+});
+
+export const history = asyncHandler(async (req, res) => {
+  res.json(await attendanceHistory(req.user.id, req.valid.params.assignmentId, req.valid.query));
 });

@@ -168,6 +168,9 @@ const batchSchema = new Schema(
   {
     code: { type: String, required: true, trim: true, uppercase: true, maxlength: 30 },
     name: { type: String, required: true, trim: true, maxlength: 120 },
+    // A batch can span multiple programmes, but each Batch document is still tied to
+    // exactly one programme for data-model simplicity. The UI groups them by code +
+    // category so the registrar sees a single "batch group".
     program: { type: Schema.Types.ObjectId, ref: 'Program', required: true, index: true },
     department: { type: Schema.Types.ObjectId, ref: 'Department', required: true, index: true },
     // Intake streams are separated so a regular and an extension batch of the same
@@ -185,6 +188,7 @@ const batchSchema = new Schema(
 );
 
 batchSchema.index({ program: 1, code: 1, category: 1 }, { unique: true });
+batchSchema.index({ code: 1, category: 1 });
 
 export const Department = mongoose.model('Department', departmentSchema);
 export const Program = mongoose.model('Program', programSchema);

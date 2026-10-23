@@ -104,7 +104,16 @@ function validateLevel(program, level) {
 }
 
 async function nextStudentId({ program, batch }) {
-  if (!batch) throw new AppError(409, 'BATCH_REQUIRED', 'Create a batch for this programme before admitting students.');
+  if (!batch) {
+    // If no batch was explicitly selected, find the latest batch for this program (any status)
+    const existingBatch = await Batch.findOne(ownFilter({ program: program._id }))
+      .sort({ createdAt: -1 })
+      .lean();
+    if (!existingBatch) {
+      throw new AppError(409, 'BATCH_REQUIRED', 'Create a batch for this programme before admitting students.');
+    }
+    batch = existingBatch;
+  }
   const programCode = String(program.code || '').trim().toUpperCase();
   const rawBatchCode = String(batch.code || '').trim().toUpperCase();
   const batchCode = rawBatchCode.startsWith('BAT')
@@ -304,6 +313,16 @@ export const createStudent = asyncHandler(async (req, res) => {
     });
   }
 
+  // Auto-assign teachers from CourseAssignment records
+  const { CourseAssignment } = await import('../models/CourseAssignment.js');
+  const courseAssignments = await CourseAssignment.find(ownFilter({ program: program._id, status: 'active' }))
+    .populate('teacher', 'name email')
+    .lean();
+  const courseAssignmentTeacherIds = [...new Set(courseAssignments.map((ca) => String(ca.teacher._id)))];
+  if (courseAssignmentTeacherIds.length && !teacherIds.some((id) => courseAssignmentTeacherIds.includes(id))) {
+    teacherIds = [...new Set([...teacherIds, ...courseAssignmentTeacherIds])];
+  }
+
   audit({
     req,
     action: 'registrar.student.create',
@@ -314,7 +333,7 @@ export const createStudent = asyncHandler(async (req, res) => {
   void notifyUsers(teacherIds, {
     type: 'student_admitted',
     title: 'New student admitted',
-    body: `${student.studentId} · ${student.fullName} · ${program.code}`,
+    body: `${student.studentId} Â· ${student.fullName} Â· ${program.code}`,
     actorId: req.user.id,
     actorName: req.user.name || 'Registrar',
     meta: { studentId: student.studentId, program: program.code, batch: batch?.code ?? null },
@@ -520,7 +539,7 @@ export const deleteStudent = asyncHandler(async (req, res) => {
   await notifyAdmins({
     type: 'student_deleted',
     title: `${student.fullName} was permanently deleted`,
-    body: `${student.studentId} · ${student.program?.name || 'Programme not set'} · deleted by ${user.name || user.email}`,
+    body: `${student.studentId} Â· ${student.program?.name || 'Programme not set'} Â· deleted by ${user.name || user.email}`,
     actorId: user._id,
     actorName: user.name || user.email,
     meta: { studentId: student.studentId, student: String(student._id) },
@@ -549,6 +568,58 @@ export const exportStudentProfile = asyncHandler(async (req, res) => {
   res.setHeader('Content-Length', String(result.buffer.length));
   res.setHeader('Cache-Control', 'no-store');
   res.send(result.buffer);
+});
+
+export const studentSummary = asyncHandler(async (_req, res) => {
+  // The summary is only ever shown on the unfiltered register, so it aggregates
+  // every student without applying the search / filter parameters.
+  const [byDepartment, byProgram, byBatch, total] = await Promise.all([
+    Student.aggregate([
+      { $group: { _id: '$department', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 12 },
+      { $lookup: { from: 'departments', localField: '_id', foreignField: '_id', as: 'record' } },
+      { $unwind: { path: '$record', preserveNullAndEmptyArrays: true } },
+    ]),
+    Student.aggregate([
+      { $group: { _id: '$program', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 12 },
+      { $lookup: { from: 'programs', localField: '_id', foreignField: '_id', as: 'record' } },
+      { $unwind: { path: '$record', preserveNullAndEmptyArrays: true } },
+    ]),
+    Student.aggregate([
+      { $group: { _id: '$batch', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 12 },
+      { $lookup: { from: 'batches', localField: '_id', foreignField: '_id', as: 'record' } },
+      { $unwind: { path: '$record', preserveNullAndEmptyArrays: true } },
+    ]),
+    Student.countDocuments({}),
+  ]);
+
+  const label = (record) => record?.name || record?.code || 'Not assigned';
+  res.json({
+    total,
+    byDepartment: byDepartment.map((row) => ({
+      id: row._id ? String(row._id) : null,
+      name: label(row.record),
+      code: row.record?.code || '',
+      count: row.count,
+    })),
+    byProgram: byProgram.map((row) => ({
+      id: row._id ? String(row._id) : null,
+      name: label(row.record),
+      code: row.record?.code || '',
+      count: row.count,
+    })),
+    byBatch: byBatch.map((row) => ({
+      id: row._id ? String(row._id) : null,
+      name: label(row.record),
+      code: row.record?.code || '',
+      count: row.count,
+    })),
+  });
 });
 
 export const studentOptions = asyncHandler(async (_req, res) => {
@@ -591,3 +662,6 @@ export const studentOptions = asyncHandler(async (_req, res) => {
     })),
   });
 });
+
+
+

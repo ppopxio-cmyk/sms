@@ -5,10 +5,10 @@ export const REGISTRAR = '/registrar';
 export const registrarPath = (path) => `/registrar${path}`;
 
 export const qualificationLabel = (type) =>
-  ({ degree: 'Degree', diploma: 'Diploma', 'short-term': 'Short-term' }[type] ?? type ?? '—');
+  ({ degree: 'Degree', diploma: 'Diploma', 'short-term': 'Short-term' }[type] ?? type ?? 'â€”');
 
 export const levelLabel = (level, qualificationType) => {
-  if (!level) return '—';
+  if (!level) return 'â€”';
   if (qualificationType === 'degree') return `Year ${level}`;
   return `Level ${level}`;
 };
@@ -28,10 +28,10 @@ export const dateTimeInput = (value) => {
   return local.toISOString().slice(0, 16);
 };
 
-export const displayDate = (value) => (value ? formatEthiopian(value) : '—');
+export const displayDate = (value) => (value ? formatEthiopian(value) : 'â€”');
 
 export const displayDateTime = (value) =>
-  value ? formatEthiopian(value, { time: true }) : '—';
+  value ? formatEthiopian(value, { time: true }) : 'â€”';
 
 export const toneForStatus = (status) => {
   switch (status) {
@@ -74,7 +74,7 @@ export const toneForStatus = (status) => {
 export const humanStatus = (status) =>
   String(status || '')
     .replaceAll('_', ' ')
-    .replace(/\b\w/g, (letter) => letter.toUpperCase()) || '—';
+    .replace(/\b\w/g, (letter) => letter.toUpperCase()) || 'â€”';
 
 export function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -183,7 +183,7 @@ export function phoneError(value) {
 }
 
 export const studentOptionLabel = (student) =>
-  [student?.fullName, student?.studentId].filter(Boolean).join(' · ');
+  [student?.fullName, student?.studentId].filter(Boolean).join(' Â· ');
 
 export async function fetchAllOptions() {
   return (await api.get(`${REGISTRAR}/students/options`)).data;
@@ -200,4 +200,5 @@ export const cleanPayload = (value) =>
   Object.fromEntries(
     Object.entries(value).filter(([, field]) => field !== undefined && field !== ''),
   );
+
 

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
-import { ArrowRight, GraduationCap, Users } from 'lucide-react';
+import { ArrowRight, Download, GraduationCap, Users } from 'lucide-react';
 import { api } from '../../lib/api';
 import { classTitle } from '../../lib/teacher';
 import { useDebounced } from '../../lib/useDebounced';
@@ -20,7 +20,8 @@ const studentSubtitle = (student) => [student.program, student.batch, student.le
 export default function TeacherStudents() {
   const [params, setParams] = useSearchParams();
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('active');
+  const [status] = useState('active');
+  const [program, setProgram] = useState('');
   const [assignmentId, setAssignmentId] = useState(params.get('assignmentId') || '');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
@@ -32,11 +33,11 @@ export default function TeacherStudents() {
   });
 
   const query = useQuery({
-    queryKey: ['teacher', 'students', { search: debounced, status, assignmentId, page, limit }],
+    queryKey: ['teacher', 'students', { search: debounced, status, program, assignmentId, page, limit }],
     queryFn: async () =>
       (
         await api.get('/teacher/students', {
-          params: { search: debounced || undefined, status, assignmentId: assignmentId || undefined, page, limit },
+          params: { search: debounced || undefined, status, program: program || undefined, assignmentId: assignmentId || undefined, page, limit },
         })
       ).data,
     placeholderData: keepPreviousData,
@@ -44,6 +45,7 @@ export default function TeacherStudents() {
 
   const students = query.data?.students ?? [];
   const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0 };
+  const programs = classes.data?.programs ?? [];
 
   return (
     <div className="space-y-6">
@@ -55,6 +57,31 @@ export default function TeacherStudents() {
 
       <Card>
         <CardBody className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <FilterTabs
+              label="Programme"
+              value={program}
+              onChange={(next) => {
+                setProgram(next);
+                setPage(1);
+              }}
+              tabs={[
+                { key: '', label: 'All programmes' },
+                ...programs.map((p) => ({ key: p.id, label: p.code })),
+              ]}
+            />
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-slate-500">{pagination.total} student{pagination.total === 1 ? '' : 's'}</p>
+              <button
+                type="button"
+                className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-600 hover:bg-slate-50"
+                title="Export student list"
+              >
+                <Download className="h-3.5 w-3.5" /> Export
+              </button>
+            </div>
+          </div>
+
           <div className="grid gap-3 lg:grid-cols-[1fr_280px]">
             <SearchInput
               value={search}
@@ -77,24 +104,6 @@ export default function TeacherStudents() {
                 else setParams({});
               }}
             />
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <FilterTabs
-              label="Registration status"
-              value={status}
-              onChange={(next) => {
-                setStatus(next);
-                setPage(1);
-              }}
-              tabs={[
-                { key: 'active', label: 'Active' },
-                { key: 'all', label: 'All registrations' },
-              ]}
-            />
-            <p className="text-xs text-slate-500">
-              {pagination.total} student{pagination.total === 1 ? '' : 's'}
-            </p>
           </div>
 
           {query.isError ? (
@@ -129,10 +138,21 @@ export default function TeacherStudents() {
                     {students.map((student) => (
                       <tr key={student.id} className="group">
                         <td className="py-3.5 pr-4">
-                          <Link to={`/teacher/students/${student.id}`} className="font-semibold text-slate-800 hover:text-brand-700">
-                            {student.name}
-                          </Link>
-                          <p className="mt-0.5 text-xs text-slate-500">{student.sex === 'unspecified' ? '' : student.sex}</p>
+                          <div className="flex items-center gap-3">
+                            {student.photo?.thumbnailUrl ? (
+                              <img src={student.photo.thumbnailUrl} alt="" className="h-9 w-9 rounded-full object-cover ring-1 ring-slate-100" />
+                            ) : (
+                              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-700 text-xs font-bold">
+                                {student.name?.slice(0, 2)?.toUpperCase() || 'S'}
+                              </span>
+                            )}
+                            <div>
+                              <Link to={`/teacher/students/${student.id}`} className="font-semibold text-slate-800 hover:text-brand-700">
+                                {student.name}
+                              </Link>
+                              <p className="mt-0.5 text-xs text-slate-500">{student.sex === 'unspecified' ? '' : student.sex}</p>
+                            </div>
+                          </div>
                         </td>
                         <td className="py-3.5 pr-4 font-mono text-xs text-slate-600">{student.studentNumber || '—'}</td>
                         <td className="py-3.5 pr-4 text-slate-600">{student.program || '—'}</td>

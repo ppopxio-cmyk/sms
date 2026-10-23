@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { BookOpen, Building2, GraduationCap, Pencil, Plus, ShieldCheck, Trash2, UserRoundCheck } from 'lucide-react';
+import { ArrowRight, BookOpen, Building2, GraduationCap, Pencil, Plus, ShieldCheck, Trash2, UserRoundCheck } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import { REGISTRAR, humanStatus, levelLabel, qualificationLabel } from '../../lib/registrar';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
@@ -243,6 +243,12 @@ export default function RegistrarAcademicStructure() {
                   </div>
                   {row.description ? <p className="mt-2 text-xs leading-relaxed text-slate-500">{row.description}</p> : null}
                   <p className="mt-3 text-xs text-slate-500">{row.programCount} programme{row.programCount === 1 ? '' : 's'} · {row.courseCount} course{row.courseCount === 1 ? '' : 's'}</p>
+                  <Link
+                    to={`${REGISTRAR}/academic-structure/departments/${row.id}`}
+                    className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-brand-600 hover:text-brand-800"
+                  >
+                    View programmes <ArrowRight className="h-3 w-3" />
+                  </Link>
                 </div>
               ))}
               {!departments.length ? <p className="text-sm text-slate-500">No department matches that search.</p> : null}

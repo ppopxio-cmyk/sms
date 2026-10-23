@@ -1,4 +1,4 @@
-﻿import { Department, Program, Course, AcademicYear, AcademicTerm, CalendarEvent, Batch } from '../models/AcademicStructure.js';
+import { Department, Program, Course, AcademicYear, AcademicTerm, CalendarEvent, Batch } from '../models/AcademicStructure.js';
 import { Student, Enrollment, ProgressionRecord } from '../models/Student.js';
 import { CurriculumPlan, CurriculumCourse } from '../models/Curriculum.js';
 import { CourseOffering, CourseRegistration } from '../models/Offering.js';
@@ -923,7 +923,7 @@ export const planOptions = asyncHandler(async (_req, res) => {
   const [programs, years, courses, terms] = await Promise.all([
     Program.find({ active: true }).populate('department', 'code name').sort({ name: 1 }).lean(),
     AcademicYear.find().sort({ startDate: -1 }).lean(),
-    Course.find({ active: { $ne: false } })
+    Course.find({ active: true })
       .populate('department', 'code name')
       .populate('prerequisites', 'code title')
       .sort({ code: 1 })
@@ -1929,4 +1929,5 @@ export const dropRegistration = asyncHandler(async (req, res) => {
   audit({ req, action: 'registrar.registration.drop', targetType: 'CourseRegistration', targetId: registration._id });
   res.json({ registration });
 });
+
 

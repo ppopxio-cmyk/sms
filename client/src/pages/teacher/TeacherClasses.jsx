@@ -103,12 +103,8 @@ export default function TeacherClasses() {
           ) : !rows.length ? (
             <EmptyState
               icon={GraduationCap}
-              title={search || status !== 'all' ? 'No classes match these filters' : 'No classes assigned yet'}
-              message={
-                search || status !== 'all'
-                  ? 'Try a different search or show every class.'
-                  : 'The registrar assigns courses to teachers. Your classes will appear here once assigned.'
-              }
+              title="No classes assigned yet"
+              message="The registrar assigns courses to teachers. Your classes will appear here once assigned."
             />
           ) : (
             <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
@@ -187,4 +183,3 @@ export default function TeacherClasses() {
     </div>
   );
 }
-

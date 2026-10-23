@@ -39,6 +39,7 @@ const GROUPS = [
       { to: '/registrar/academic-structure', label: 'Academic structure', icon: BookOpen },
       { to: '/registrar/academic-calendar', label: 'Academic calendar', icon: CalendarDays },
       { to: '/registrar/curriculum', label: 'Curriculum', icon: ScrollText },
+      { to: '/registrar/course-offering', label: 'Course offerings', icon: BookOpen },
       { to: '/registrar/course-registration', label: 'Course registration', icon: ClipboardCheck },
     ],
   },
