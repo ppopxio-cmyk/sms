@@ -42,6 +42,7 @@ export default function RegistrarCourseRegistration() {
   const [materialSearch, setMaterialSearch] = useState('');
   const [materialModal, setMaterialModal] = useState(false);
   const [removingMaterial, setRemovingMaterial] = useState(null);
+  const [offeringModal, setOfferingModal] = useState(false);
 
   const options = useQuery({
     queryKey: ['registrar', 'offering-options'],
@@ -107,6 +108,7 @@ export default function RegistrarCourseRegistration() {
     queryClient.invalidateQueries({ queryKey: ['registrar', 'offerings'] });
     queryClient.invalidateQueries({ queryKey: ['registrar', 'dashboard'] });
     queryClient.invalidateQueries({ queryKey: ['registrar', 'registration-candidates'] });
+    queryClient.invalidateQueries({ queryKey: ['registrar', 'plan-offerings'] });
   };
 
   const drop = useMutation({
@@ -284,6 +286,12 @@ export default function RegistrarCourseRegistration() {
       <RegistrarPageHeader
         title="Course registration"
         subtitle="Register students against open offerings and keep each programme's course materials in one place."
+        actions={
+          <Button onClick={() => setOfferingModal(true)}>
+            <Plus className="h-4 w-4" />
+            New offering
+          </Button>
+        }
       />
 
       <Card>
@@ -427,6 +435,13 @@ export default function RegistrarCourseRegistration() {
         </div>
       </Card>
 
+      <CreateOfferingModal
+        open={offeringModal}
+        plans={options.data?.plans || []}
+        teachers={options.data?.teachers || []}
+        onClose={() => setOfferingModal(false)}
+        onSaved={invalidate}
+      />
       <RegisterOfferingModal
         offering={registering}
         options={options.data}
@@ -541,6 +556,168 @@ function CourseMaterialModal({ open, options, initialProgram, onClose, onSaved }
           <Field label="Course code" value={form.courseCode} onChange={(event) => set('courseCode', event.target.value)} placeholder="e.g. CS101" required />
           <Field label="Course name" value={form.courseName} onChange={(event) => set('courseName', event.target.value)} placeholder="e.g. Introduction to Computing" required />
           <Field label="PDF or Word document" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => setFile(event.target.files?.[0] || null)} hint="Maximum 10 MB. PDF, DOC or DOCX." required />
+        </FormGrid>
+      </div>
+    </Modal>
+  );
+}
+
+function CreateOfferingModal({ open, plans, teachers, onClose, onSaved }) {
+  const [planId, setPlanId] = useState('');
+  const [curriculumCourse, setCurriculumCourse] = useState('');
+  const [teacher, setTeacher] = useState('');
+  const [capacity, setCapacity] = useState('60');
+  const [schedule, setSchedule] = useState('');
+  const [status, setStatus] = useState('draft');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setPlanId('');
+    setCurriculumCourse('');
+    setTeacher('');
+    setCapacity('60');
+    setSchedule('');
+    setStatus('draft');
+    setError('');
+  }, [open]);
+
+  const entries = useQuery({
+    queryKey: ['registrar', 'plan-offerings', planId],
+    queryFn: async () => (await api.get(`${REGISTRAR}/curriculum/${planId}/offerings`)).data,
+    enabled: open && Boolean(planId),
+  });
+
+  const plan = plans.find((row) => row.id === planId);
+  const allEntries = entries.data?.entries || [];
+  const available = allEntries.filter((row) => !row.hasOffering && row.term);
+  const missingTerm = allEntries.filter((row) => !row.hasOffering && !row.term).length;
+  const selected = available.find((row) => row.id === curriculumCourse);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      if (!planId) throw new Error('Choose a published curriculum plan.');
+      if (!curriculumCourse) throw new Error('Choose the curriculum course to offer.');
+      const seats = Number(capacity);
+      if (!Number.isInteger(seats) || seats < 1 || seats > 500) {
+        throw new Error('Capacity must be a whole number between 1 and 500.');
+      }
+      return (
+        await api.post(`${REGISTRAR}/offerings`, {
+          curriculumCourse,
+          ...(teacher ? { teacher } : {}),
+          capacity: seats,
+          ...(schedule.trim() ? { schedule: schedule.trim() } : {}),
+          status,
+        })
+      ).data;
+    },
+    onSuccess: () => {
+      toast.success(
+        `${selected?.course?.code || 'The course'} offering created${
+          status === 'open' ? ' and open for registration.' : ' as a draft.'
+        }`,
+      );
+      onSaved();
+      onClose();
+    },
+    onError: (saveError) => setError(errorMessage(saveError, 'The offering could not be created.')),
+  });
+
+  return (
+    <Modal
+      open={open}
+      title="Create a course offering"
+      subtitle="Offer a course from a published curriculum plan, then assign a teacher and open registration."
+      size="lg"
+      onClose={save.isPending ? undefined : onClose}
+      dismissible={!save.isPending}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button>
+          <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!planId || !curriculumCourse}>
+            Create offering
+          </Button>
+        </>
+      }
+    >
+      <div className="grid gap-4">
+        {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
+        <SelectField
+          label="Published curriculum plan"
+          value={planId}
+          onChange={(event) => {
+            setPlanId(event.target.value);
+            setCurriculumCourse('');
+            setError('');
+          }}
+          hint={plans.length ? 'Only published plans can produce offerings.' : 'Publish a curriculum plan first.'}
+          required
+        >
+          <option value="">Choose a plan</option>
+          {plans.map((row) => (
+            <option key={row.id} value={row.id}>
+              {row.title} · {row.program?.code || 'Programme'} · {row.academicYear?.label || 'Year'}
+            </option>
+          ))}
+        </SelectField>
+
+        {plan ? (
+          <div className="rounded-2xl bg-slate-50 px-4 py-3 text-xs text-slate-600">
+            <span className="font-semibold text-slate-800">{plan.program?.name || 'Programme'}</span>
+            <span className="mx-1.5">·</span>
+            {plan.academicYear?.label || 'Academic year'}
+            <span className="mx-1.5">·</span>
+            {available.length} course{available.length === 1 ? '' : 's'} still to offer
+          </div>
+        ) : null}
+
+        <SelectField
+          label="Curriculum course"
+          value={curriculumCourse}
+          onChange={(event) => setCurriculumCourse(event.target.value)}
+          disabled={!planId || entries.isLoading}
+          hint={
+            planId && !entries.isLoading && !available.length
+              ? missingTerm
+                ? `${missingTerm} course${missingTerm === 1 ? '' : 's'} need a term before they can be offered.`
+                : 'Every course in this plan already has an offering.'
+              : 'Only active curriculum courses with a term can be offered.'
+          }
+          required
+        >
+          <option value="">{entries.isLoading ? 'Loading courses...' : 'Choose a course'}</option>
+          {available.map((row) => (
+            <option key={row.id} value={row.id}>
+              {row.course?.code || 'Course'} · {row.course?.title || ''} · {row.term} · {levelLabel(row.level, plan?.program?.qualificationType)}
+            </option>
+          ))}
+        </SelectField>
+
+        {entries.isError ? (
+          <p className="rounded-xl bg-amber-50 px-3.5 py-2.5 text-sm text-amber-900">
+            {errorMessage(entries.error, 'The curriculum courses could not be loaded.')}
+          </p>
+        ) : selected ? (
+          <div className="grid gap-2 rounded-2xl border border-slate-100 px-4 py-3 text-xs text-slate-600 sm:grid-cols-3">
+            <span><span className="font-semibold text-slate-800">{selected.course?.code}</span> {selected.course?.title}</span>
+            <span>Term: {selected.term}</span>
+            <span>{selected.creditHours} credit hour{selected.creditHours === 1 ? '' : 's'}</span>
+          </div>
+        ) : null}
+
+        <FormGrid>
+          <SelectField label="Teacher" value={teacher} onChange={(event) => setTeacher(event.target.value)} hint="Optional. An active teacher can be assigned now or later.">
+            <option value="">Assign later</option>
+            {teachers.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+          </SelectField>
+          <Field label="Capacity" type="number" min="1" max="500" value={capacity} onChange={(event) => setCapacity(event.target.value)} required />
+          <Field label="Schedule" value={schedule} onChange={(event) => setSchedule(event.target.value)} placeholder="e.g. Mon 8:00-10:00, Room 4" />
+          <SelectField label="Status" value={status} onChange={(event) => setStatus(event.target.value)}>
+            {['draft', 'open', 'in_progress', 'completed', 'cancelled'].map((value) => (
+              <option key={value} value={value}>{humanStatus(value)}</option>
+            ))}
+          </SelectField>
         </FormGrid>
       </div>
     </Modal>

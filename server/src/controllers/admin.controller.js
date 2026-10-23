@@ -344,7 +344,7 @@ export const getOverview = asyncHandler(async (req, res) => {
 });
 
 export const listAuditLogs = asyncHandler(async (req, res) => {
-  const { search, category, status, range, page, limit } = req.valid.query;
+  const { search, category, status, role, range, page, limit } = req.valid.query;
   const now = new Date();
   const since = range === 'all' ? null : new Date(now.getTime() - Number(range) * DAY_MS);
 
@@ -357,6 +357,7 @@ export const listAuditLogs = asyncHandler(async (req, res) => {
       $addFields: {
         category: auditCategoryExpression,
         actorName: { $ifNull: ['$actor.name', '$actor.email'] },
+        effectiveRole: { $ifNull: ['$actor.role', '$actorRole'] },
       },
     },
   );
@@ -383,6 +384,7 @@ export const listAuditLogs = asyncHandler(async (req, res) => {
 
   const statusStages = status === 'all' ? [] : [{ $match: { status } }];
   const categoryStages = category === 'all' ? [] : [{ $match: { category } }];
+  const roleStages = role === 'all' ? [] : [{ $match: { effectiveRole: role } }];
 
   const project = {
     $project: {
@@ -408,9 +410,10 @@ export const listAuditLogs = asyncHandler(async (req, res) => {
     },
   };
 
-  const [rows, totalRows, categoryRows, statusRows] = await Promise.all([
+  const [rows, totalRows, categoryRows, statusRows, roleRows] = await Promise.all([
     AuditLog.aggregate([
       ...base,
+      ...roleStages,
       ...statusStages,
       ...categoryStages,
       { $sort: { createdAt: -1, _id: -1 } },
@@ -418,9 +421,10 @@ export const listAuditLogs = asyncHandler(async (req, res) => {
       { $limit: limit },
       project,
     ]),
-    AuditLog.aggregate([...base, ...statusStages, ...categoryStages, { $count: 'total' }]),
-    AuditLog.aggregate([...base, ...statusStages, { $group: { _id: '$category', count: { $sum: 1 } } }]),
-    AuditLog.aggregate([...base, ...categoryStages, { $group: { _id: '$status', count: { $sum: 1 } } }]),
+    AuditLog.aggregate([...base, ...roleStages, ...statusStages, ...categoryStages, { $count: 'total' }]),
+    AuditLog.aggregate([...base, ...roleStages, ...statusStages, { $group: { _id: '$category', count: { $sum: 1 } } }]),
+    AuditLog.aggregate([...base, ...roleStages, ...categoryStages, { $group: { _id: '$status', count: { $sum: 1 } } }]),
+    AuditLog.aggregate([...base, ...statusStages, ...categoryStages, { $group: { _id: '$effectiveRole', count: { $sum: 1 } } }]),
   ]);
 
   const categories = emptyCategoryCounts();
@@ -431,6 +435,11 @@ export const listAuditLogs = asyncHandler(async (req, res) => {
   const statuses = { success: 0, fail: 0 };
   for (const row of statusRows) {
     if (row._id && statuses[row._id] !== undefined) statuses[row._id] = row.count;
+  }
+
+  const roles = emptyRoleCounts();
+  for (const row of roleRows) {
+    if (row._id && roles[row._id] !== undefined) roles[row._id] = row.count;
   }
 
   const total = totalRows[0]?.total ?? 0;
@@ -451,6 +460,7 @@ export const listAuditLogs = asyncHandler(async (req, res) => {
       all: Object.values(categories).reduce((sum, value) => sum + value, 0),
       categories,
       statuses,
+      roles,
     },
   });
 });

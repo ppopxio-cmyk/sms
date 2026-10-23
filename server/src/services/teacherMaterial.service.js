@@ -1,13 +1,17 @@
 import { Material } from '../models/Material.js';
+import { CourseResource } from '../models/CourseResource.js';
+import { CourseOffering } from '../models/Offering.js';
 import { AppError } from '../utils/AppError.js';
 import { escapeRegex } from '../utils/text.js';
 import {
   ASSIGNMENT_POPULATE,
+  READ_STATUSES,
   assignmentForTeacher,
   assignmentIdsForTeacher,
   materialForTeacher,
 } from './teacherScope.service.js';
-import { ownFilter } from './registrar.helpers.js';
+import { ownFilter, searchFilter } from './registrar.helpers.js';
+import { signedImageUrl } from './imagekit.service.js';
 
 function materialDto(row) {
   const assignment = row.offering && typeof row.offering === 'object' ? row.offering : null;
@@ -65,6 +69,54 @@ export async function listMaterials(teacherId, query) {
     materials: rows.filter((row) => row.offering).map(materialDto),
     pagination: { page: query.page, limit: query.limit, total, pages: Math.max(1, Math.ceil(total / query.limit)) },
   };
+}
+
+function courseResourceDto(row) {
+  return {
+    id: String(row._id),
+    program: row.program
+      ? { id: String(row.program._id), code: row.program.code, name: row.program.name }
+      : null,
+    department: row.department
+      ? { id: String(row.department._id), code: row.department.code, name: row.department.name }
+      : null,
+    courseName: row.courseName,
+    courseCode: row.courseCode,
+    fileName: row.fileName,
+    contentType: row.contentType,
+    bytes: row.bytes,
+    url: signedImageUrl(row.filePath, { expiresIn: 21600 }),
+    createdAt: row.createdAt,
+  };
+}
+
+export async function listCourseResources(teacherId, query = {}) {
+  const match = { teacher: teacherId, status: { $in: READ_STATUSES } };
+  if (query.assignmentId) match._id = query.assignmentId;
+  const assignments = await CourseOffering.find(ownFilter(match))
+    .select('program course')
+    .populate('course', 'code')
+    .lean();
+
+  const pairs = new Map();
+  for (const row of assignments) {
+    const code = String(row.course?.code || '').trim().toUpperCase();
+    if (row.program && code) pairs.set(`${row.program}:${code}`, { program: row.program, courseCode: code });
+  }
+  if (!pairs.size) return { resources: [] };
+
+  const filters = [{ $or: [...pairs.values()] }];
+  const search = searchFilter(query.search, ['courseName', 'courseCode', 'fileName']);
+  if (search) filters.push(search);
+
+  const rows = await CourseResource.find(ownFilter({ deletedAt: null, $and: filters }))
+    .populate('program', 'code name')
+    .populate('department', 'code name')
+    .sort({ updatedAt: -1 })
+    .limit(300)
+    .lean();
+
+  return { resources: rows.map(courseResourceDto) };
 }
 
 export async function createMaterial(teacherId, payload) {

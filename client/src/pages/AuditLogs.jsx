@@ -92,11 +92,19 @@ const CATEGORY = {
 
 const RANGE_LABEL = { 1: 'Last 24 hours', 7: 'Last 7 days', 30: 'Last 30 days', all: 'All time' };
 
+const ROLE_TABS = [
+  { key: 'ADMIN', label: 'Admins', dot: 'bg-violet-500' },
+  { key: 'REGISTRAR', label: 'Registrars', dot: 'bg-emerald-500' },
+  { key: 'TEACHER', label: 'Teachers', dot: 'bg-sky-500' },
+  { key: 'ACCOUNTANT', label: 'Accountants', dot: 'bg-amber-500' },
+];
+
 const styleFor = (key) => CATEGORY[key] ?? CATEGORY.other;
 
 export default function AuditLogs() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
+  const [role, setRole] = useState('all');
   const [status, setStatus] = useState('all');
   const [range, setRange] = useState('7');
   const [page, setPage] = useState(1);
@@ -107,11 +115,12 @@ export default function AuditLogs() {
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, category, status, range, limit]);
+  }, [debouncedSearch, category, role, status, range, limit]);
 
   const params = {
     search: debouncedSearch || undefined,
     category,
+    role,
     status,
     range,
     page,
@@ -121,6 +130,7 @@ export default function AuditLogs() {
   const exportParams = {
     search: debouncedSearch || undefined,
     category,
+    role,
     status,
     range,
   };
@@ -139,6 +149,17 @@ export default function AuditLogs() {
   useEffect(() => {
     if (list.data && page > list.data.pages) setPage(list.data.pages);
   }, [page, list.data]);
+
+  const roleCounts = counts?.roles ?? {};
+  const roleTabs = [
+    {
+      key: 'all',
+      label: 'Everyone',
+      count: Object.values(roleCounts).reduce((sum, value) => sum + value, 0),
+      dot: 'bg-slate-400',
+    },
+    ...ROLE_TABS.map((tab) => ({ ...tab, count: roleCounts[tab.key] ?? 0 })),
+  ];
 
   const tabs = [
     { key: 'all', label: 'All', count: counts?.all, dot: 'bg-slate-400' },
@@ -255,6 +276,16 @@ export default function AuditLogs() {
             label="Filter audit events by category"
           />
 
+          <FilterTabs
+            tabs={roleTabs}
+            value={role}
+            onChange={(value) => {
+              setRole(value);
+              setPage(1);
+            }}
+            label="Filter audit events by actor role"
+          />
+
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
             <SearchInput
               id="audit-search"
@@ -299,8 +330,8 @@ export default function AuditLogs() {
               icon={ScrollText}
               title="No events match"
               message={
-                search || category !== 'all' || status !== 'all' || range !== 'all'
-                  ? 'Try a wider time range, another category, or a different search.'
+                search || category !== 'all' || role !== 'all' || status !== 'all' || range !== 'all'
+                  ? 'Try a wider time range, another category or role, or a different search.'
                   : 'Actions will be recorded here as soon as people start using the system.'
               }
             />

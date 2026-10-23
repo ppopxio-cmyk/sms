@@ -14,6 +14,20 @@ export const ASSESSMENT_TYPES = [
 
 export const ASSESSMENT_STATUSES = ['draft', 'published', 'closed', 'submitted'];
 
+const portalDocumentSchema = new mongoose.Schema(
+  {
+    provider: { type: String, enum: ['imagekit'], default: 'imagekit' },
+    fileId: { type: String, required: true },
+    filePath: { type: String, required: true },
+    fileName: { type: String, required: true, trim: true, maxlength: 255 },
+    contentType: { type: String, required: true, trim: true, maxlength: 120 },
+    bytes: { type: Number, required: true, min: 1 },
+    uploadedAt: { type: Date, default: Date.now },
+    uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  },
+  { _id: false },
+);
+
 // A mark column belongs to one course offering. The score itself lives in the registrar's
 // Result document, in the shared `components` array, so the teacher screen and the
 // registrar review screen read the same numbers.
@@ -35,12 +49,24 @@ const assessmentSchema = new mongoose.Schema(
     closedAt: { type: Date, default: null },
     submittedAt: { type: Date, default: null },
     submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    portalEnabled: { type: Boolean, default: false, index: true },
+    publicHash: { type: String, trim: true, maxlength: 64, default: null },
+    accessCodeEncrypted: { type: String, select: false, default: null },
+    portalOpensAt: { type: Date, default: null },
+    portalClosesAt: { type: Date, default: null },
+    allowResubmission: { type: Boolean, default: true },
+    portalDocument: { type: portalDocumentSchema, default: null },
+    submissionCount: { type: Number, min: 0, default: 0 },
   },
   { timestamps: true },
 );
 
 assessmentSchema.index({ offering: 1, titleKey: 1 }, { unique: true });
 assessmentSchema.index({ offering: 1, status: 1, createdAt: -1 });
+assessmentSchema.index(
+  { publicHash: 1 },
+  { unique: true, partialFilterExpression: { publicHash: { $type: 'string' } } },
+);
 
 assessmentSchema.pre('validate', function setTitleKey() {
   if (this.isModified('title') || !this.titleKey) {

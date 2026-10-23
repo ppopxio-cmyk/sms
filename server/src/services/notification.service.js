@@ -43,11 +43,21 @@ async function deliver(entry, { exceptSid, exceptDeviceKey } = {}) {
   }
 }
 
+export async function notifyUser(userId, entry) {
+  if (!userId) return null;
+  return deliver({ ...entry, userId });
+}
+
 export async function notifyAdmins(entry) {
   const admins = await User.find({ role: 'ADMIN', status: 'active', deletedAt: null })
     .select('_id')
     .lean();
   await Promise.all(admins.map((admin) => deliver({ ...entry, userId: admin._id })));
+}
+
+export async function notifyRole(role, entry) {
+  const users = await User.find({ role, status: 'active', deletedAt: null }).select('_id').lean();
+  await Promise.all(users.map((user) => deliver({ ...entry, userId: user._id })));
 }
 
 export async function notifyProgramTeachers(programId, entry) {

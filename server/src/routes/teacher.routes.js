@@ -1,15 +1,20 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { authenticate, requirePasswordChanged } from '../middleware/authenticate.js';
 import { requirePermission, requireRole } from '../middleware/authorize.js';
 import { validate } from '../middleware/validate.js';
-import { exportLimiter } from '../middleware/rateLimit.js';
+import { exportLimiter, uploadLimiter } from '../middleware/rateLimit.js';
 import {
-  assignmentParamSchema,
   assessmentParamSchema,
+  assessmentPortalDocumentQuerySchema,
+  assessmentPortalSchema,
+  assessmentSubmissionParamSchema,
+  assignmentParamSchema,
   attendanceOverviewQuerySchema,
   attendanceReportQuerySchema,
   attendanceRosterQuerySchema,
   competencyReportQuerySchema,
+  courseMarkPolicySchema,
+  courseMarksExportQuerySchema,
   createAssessmentSchema,
   createMaterialSchema,
   finalizeAttendanceSchema,
@@ -17,15 +22,21 @@ import {
   gradeSheetQuerySchema,
   gradesQuerySchema,
   listAssessmentsQuerySchema,
+  listAssessmentSubmissionsQuerySchema,
   listAssignmentsQuerySchema,
+  listCourseMarksQuerySchema,
+  listCourseResourcesQuerySchema,
   listMaterialsQuerySchema,
   listStudentsQuerySchema,
   materialParamSchema,
   reportOptionsQuerySchema,
+  reviewAssessmentSubmissionSchema,
   rosterReportQuerySchema,
   saveAttendanceSchema,
+  saveCourseMarksSchema,
   saveGradesSchema,
   studentParamSchema,
+  submitCourseMarksSchema,
   updateAssessmentSchema,
   updateMaterialSchema,
 } from '../validators/teacher.schemas.js';
@@ -48,15 +59,22 @@ import {
   detail as assessmentDetail,
   grades,
   list as listAssessments,
+  portal,
   publish,
+  removeDocument,
+  reviewSubmissionController,
   save as saveGradesController,
+  submissions,
   submit,
   update as updateAssessment,
+  updatePortal,
+  uploadDocument,
 } from '../controllers/teacherAssessments.controller.js';
 import {
   create as createMaterial,
   list as listMaterials,
   remove as removeMaterial,
+  sharedResources,
   update as updateMaterial,
 } from '../controllers/teacherMaterials.controller.js';
 import {
@@ -67,6 +85,16 @@ import {
   options as reportOptions,
   roster as reportRoster,
 } from '../controllers/teacherReports.controller.js';
+import {
+  calculate as calculateCourseMarksController,
+  courses as courseMarkCourses,
+  detail as courseMarksDetailController,
+  exportMarks as exportCourseMarksController,
+  policy as courseMarkPolicyController,
+  save as saveCourseMarksController,
+  savePolicy as saveCourseMarkPolicyController,
+  submit as submitCourseMarksController,
+} from '../controllers/teacherCourseMarks.controller.js';
 
 const r = Router();
 
@@ -129,6 +157,56 @@ r.get(
   validate(assessmentParamSchema, 'params'),
   assessmentDetail,
 );
+r.get(
+  '/assessments/:assessmentId/portal',
+  requirePermission('teacher:assessments:manage'),
+  validate(assessmentParamSchema, 'params'),
+  portal,
+);
+r.put(
+  '/assessments/:assessmentId/portal',
+  requirePermission('teacher:assessments:manage'),
+  validate(assessmentParamSchema, 'params'),
+  validate(assessmentPortalSchema),
+  updatePortal,
+);
+r.post(
+  '/assessments/:assessmentId/portal/document',
+  uploadLimiter,
+  requirePermission('teacher:assessments:manage'),
+  validate(assessmentParamSchema, 'params'),
+  validate(assessmentPortalDocumentQuerySchema, 'query'),
+  express.raw({
+    type: [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/octet-stream',
+    ],
+    limit: '10mb',
+  }),
+  uploadDocument,
+);
+r.delete(
+  '/assessments/:assessmentId/portal/document',
+  requirePermission('teacher:assessments:manage'),
+  validate(assessmentParamSchema, 'params'),
+  removeDocument,
+);
+r.get(
+  '/assessments/:assessmentId/submissions',
+  requirePermission('teacher:assessments:manage'),
+  validate(assessmentParamSchema, 'params'),
+  validate(listAssessmentSubmissionsQuerySchema, 'query'),
+  submissions,
+);
+r.patch(
+  '/assessment-submissions/:submissionId',
+  requirePermission('teacher:assessments:manage'),
+  validate(assessmentSubmissionParamSchema, 'params'),
+  validate(reviewAssessmentSubmissionSchema),
+  reviewSubmissionController,
+);
 r.patch(
   '/assessments/:assessmentId',
   requirePermission('teacher:assessments:manage'),
@@ -170,6 +248,12 @@ r.post(
 );
 
 r.get('/materials', requirePermission('teacher:materials:manage'), validate(listMaterialsQuerySchema, 'query'), listMaterials);
+r.get(
+  '/materials/course-resources',
+  requirePermission('teacher:materials:manage'),
+  validate(listCourseResourcesQuerySchema, 'query'),
+  sharedResources,
+);
 r.post('/materials', requirePermission('teacher:materials:manage'), validate(createMaterialSchema), createMaterial);
 r.patch(
   '/materials/:materialId',
@@ -183,6 +267,59 @@ r.delete(
   requirePermission('teacher:materials:manage'),
   validate(materialParamSchema, 'params'),
   removeMaterial,
+);
+
+r.get(
+  '/course-marks',
+  requirePermission('teacher:assessments:manage'),
+  validate(listCourseMarksQuerySchema, 'query'),
+  courseMarkCourses,
+);
+r.post(
+  '/course-marks/submit',
+  requirePermission('teacher:assessments:manage'),
+  validate(submitCourseMarksSchema),
+  submitCourseMarksController,
+);
+r.get(
+  '/courses/:assignmentId/mark-policy',
+  requirePermission('teacher:assessments:manage'),
+  validate(assignmentParamSchema, 'params'),
+  courseMarkPolicyController,
+);
+r.put(
+  '/courses/:assignmentId/mark-policy',
+  requirePermission('teacher:assessments:manage'),
+  validate(assignmentParamSchema, 'params'),
+  validate(courseMarkPolicySchema),
+  saveCourseMarkPolicyController,
+);
+r.get(
+  '/courses/:assignmentId/marks',
+  requirePermission('teacher:assessments:manage'),
+  validate(assignmentParamSchema, 'params'),
+  courseMarksDetailController,
+);
+r.put(
+  '/courses/:assignmentId/marks',
+  requirePermission('teacher:assessments:manage'),
+  validate(assignmentParamSchema, 'params'),
+  validate(saveCourseMarksSchema),
+  saveCourseMarksController,
+);
+r.post(
+  '/courses/:assignmentId/marks/calculate',
+  requirePermission('teacher:assessments:manage'),
+  validate(assignmentParamSchema, 'params'),
+  calculateCourseMarksController,
+);
+r.get(
+  '/courses/:assignmentId/marks/export',
+  exportLimiter,
+  requirePermission('teacher:assessments:manage'),
+  validate(assignmentParamSchema, 'params'),
+  validate(courseMarksExportQuerySchema, 'query'),
+  exportCourseMarksController,
 );
 
 r.get('/reports/options', requirePermission('teacher:reports:read'), validate(reportOptionsQuerySchema, 'query'), reportOptions);

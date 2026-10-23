@@ -6,7 +6,7 @@ const SIZES = {
   lg: { box: 'h-14 w-14 rounded-2xl', icon: 'h-7 w-7', title: 'text-lg', sub: 'text-sm' },
 };
 
-export default function Brand({ size = 'md', subtitle = 'School Management System', layout = 'row' }) {
+export default function Brand({ size = 'md', subtitle = 'School Management System', layout = 'row', compact = false }) {
   const s = SIZES[size] ?? SIZES.md;
 
   return (
@@ -14,14 +14,16 @@ export default function Brand({ size = 'md', subtitle = 'School Management Syste
       <span className={`brand-gradient flex ${s.box} shrink-0 items-center justify-center text-white shadow-lg shadow-brand-600/25`}>
         <GraduationCap className={s.icon} />
       </span>
-      <div>
-        <p className={`${s.title} font-bold tracking-tight`}>
-          <span className="text-brand-gradient">SMS</span>
-          <span className="text-slate-300"> - </span>
-          <span className="text-slate-700">PORTAL</span>
-        </p>
-        <p className={`${s.sub} text-slate-500`}>{subtitle}</p>
-      </div>
+      {compact ? null : (
+        <div>
+          <p className={`${s.title} font-bold tracking-tight`}>
+            <span className="text-brand-gradient">SMS</span>
+            <span className="text-slate-300"> - </span>
+            <span className="text-slate-700">PORTAL</span>
+          </p>
+          <p className={`${s.sub} text-slate-500`}>{subtitle}</p>
+        </div>
+      )}
     </div>
   );
 }

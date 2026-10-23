@@ -744,7 +744,7 @@ export const planOptions = asyncHandler(async (_req, res) => {
   const [programs, years, courses, terms] = await Promise.all([
     Program.find({ active: true }).populate('department', 'code name').sort({ name: 1 }).lean(),
     AcademicYear.find().sort({ startDate: -1 }).lean(),
-    Course.find({ active: true }).populate('department', 'code name').sort({ code: 1 }).lean(),
+    Course.find({ active: { $ne: false } }).populate('department', 'code name').sort({ code: 1 }).lean(),
     AcademicTerm.find().populate('academicYear', 'label').sort({ sequence: 1 }).lean(),
   ]);
   res.json({
@@ -1082,7 +1082,7 @@ export const offeringOptions = asyncHandler(async (_req, res) => {
     AcademicYear.find().sort({ startDate: -1 }).lean(),
     User.find({ role: 'TEACHER', status: 'active', deletedAt: null }).select('name email').sort({ name: 1 }).lean(),
     CurriculumPlan.find({ status: 'published' })
-      .populate('program', 'code name')
+      .populate('program', 'code name qualificationType')
       .populate('academicYear', 'label')
       .sort({ createdAt: -1 })
       .lean(),
@@ -1095,7 +1095,14 @@ export const offeringOptions = asyncHandler(async (_req, res) => {
     plans: plans.map((row) => ({
       id: String(row._id),
       title: row.title,
-      program: row.program ? { id: String(row.program._id), code: row.program.code, name: row.program.name } : null,
+      program: row.program
+        ? {
+            id: String(row.program._id),
+            code: row.program.code,
+            name: row.program.name,
+            qualificationType: row.program.qualificationType,
+          }
+        : null,
       academicYear: row.academicYear ? { id: String(row.academicYear._id), label: row.academicYear.label } : null,
     })),
     batches: batches.map((row) => ({

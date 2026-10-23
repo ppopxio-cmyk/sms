@@ -1,6 +1,14 @@
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { audit } from '../services/audit.service.js';
 import {
+  configurePortal,
+  listSubmissions,
+  portalConfiguration,
+  removePortalDocument,
+  reviewSubmission,
+  uploadPortalDocument,
+} from '../services/assessmentPortal.service.js';
+import {
   assessmentDetail,
   closeAssessment,
   createAssessment,
@@ -92,6 +100,75 @@ export const submit = asyncHandler(async (req, res) => {
     targetType: 'assessment',
     targetId: data.id,
     meta: { assignmentId: data.assignmentId, title: data.title, students: data.studentCount },
+  });
+  res.json(data);
+});
+
+export const portal = asyncHandler(async (req, res) => {
+  res.json(await portalConfiguration(req.user.id, req.valid.params.assessmentId));
+});
+
+export const updatePortal = asyncHandler(async (req, res) => {
+  const data = await configurePortal(req.user.id, req.valid.params.assessmentId, req.body);
+  audit({
+    req,
+    action: data.enabled ? 'teacher.assessment_portal_enabled' : 'teacher.assessment_portal_disabled',
+    targetType: 'assessment',
+    targetId: req.valid.params.assessmentId,
+    meta: {
+      enabled: data.enabled,
+      status: data.status,
+      codeRotated: Boolean(req.body.rotateCode),
+      closesAt: data.closesAt,
+    },
+  });
+  res.json(data);
+});
+
+export const uploadDocument = asyncHandler(async (req, res) => {
+  const data = await uploadPortalDocument(
+    req.user.id,
+    req.valid.params.assessmentId,
+    req.body,
+    req.valid.query.filename,
+  );
+  audit({
+    req,
+    action: 'teacher.assessment_document_uploaded',
+    targetType: 'assessment',
+    targetId: req.valid.params.assessmentId,
+    meta: { fileName: data.document?.fileName, bytes: data.document?.bytes },
+  });
+  res.status(201).json(data);
+});
+
+export const removeDocument = asyncHandler(async (req, res) => {
+  const data = await removePortalDocument(req.user.id, req.valid.params.assessmentId);
+  audit({
+    req,
+    action: 'teacher.assessment_document_removed',
+    targetType: 'assessment',
+    targetId: req.valid.params.assessmentId,
+  });
+  res.json(data);
+});
+
+export const submissions = asyncHandler(async (req, res) => {
+  res.json(await listSubmissions(req.user.id, req.valid.params.assessmentId, req.valid.query));
+});
+
+export const reviewSubmissionController = asyncHandler(async (req, res) => {
+  const data = await reviewSubmission(req.user.id, req.valid.params.submissionId, req.body);
+  audit({
+    req,
+    action: 'teacher.assessment_submission_reviewed',
+    targetType: 'AssessmentSubmission',
+    targetId: req.valid.params.submissionId,
+    meta: {
+      status: data.submission.status,
+      score: data.submission.score,
+      studentNumber: data.submission.student?.studentNumber,
+    },
   });
   res.json(data);
 });

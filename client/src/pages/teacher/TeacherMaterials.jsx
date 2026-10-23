@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { ExternalLink, FolderOpen, Link2, Pencil, Plus, StickyNote, Trash2 } from 'lucide-react';
+import { ExternalLink, FileText, FolderOpen, Link2, Pencil, Plus, StickyNote, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../../lib/api';
 import { formatEthiopian } from '../../lib/ethiopianDate';
@@ -30,6 +30,13 @@ const EMPTY_FORM = {
 };
 const inputClass =
   'focus-ring h-11 w-full rounded-xl border border-slate-200 bg-white/85 px-3.5 text-sm text-slate-800 transition placeholder:text-slate-400';
+
+const formatBytes = (bytes) => {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+};
 
 export default function TeacherMaterials() {
   const [params, setParams] = useSearchParams();
@@ -69,10 +76,21 @@ export default function TeacherMaterials() {
     placeholderData: keepPreviousData,
   });
 
+  const courseResources = useQuery({
+    queryKey: ['teacher', 'course-resources', { assignmentId, search: debounced }],
+    queryFn: async () =>
+      (
+        await api.get('/teacher/materials/course-resources', {
+          params: { assignmentId: assignmentId || undefined, search: debounced || undefined },
+        })
+      ).data,
+  });
+
   const assignments = classes.data?.assignments ?? [];
   const activeClasses = assignments.filter((row) => ['open', 'in_progress'].includes(row.status));
   const activeIds = useMemo(() => new Set(activeClasses.map((row) => row.id)), [activeClasses]);
   const materials = query.data?.materials ?? [];
+  const sharedFiles = courseResources.data?.resources ?? [];
   const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0 };
 
   const invalidate = () => {
@@ -157,7 +175,7 @@ export default function TeacherMaterials() {
       <TeacherPageHeader
         eyebrow="Teaching"
         title="Materials"
-        subtitle="Share a written note or a link with your classes. File uploads are not supported."
+        subtitle="Share notes and links with your classes, and open course documents added by the registrar."
         actions={
           <Button onClick={openCreate} disabled={!activeClasses.length}>
             <Plus className="h-4 w-4" />
@@ -175,7 +193,7 @@ export default function TeacherMaterials() {
                 setSearch(event.target.value);
                 setPage(1);
               }}
-              placeholder="Search title or description"
+              placeholder="Search materials and documents"
               loading={query.isFetching}
             />
             <ClassSelect
@@ -326,6 +344,74 @@ export default function TeacherMaterials() {
               }}
             />
           ) : null}
+        </CardBody>
+      </Card>
+
+      <Card>
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Course documents</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Files the registrar shared for the courses you teach.
+            </p>
+          </div>
+          <Badge tone="neutral">
+            {sharedFiles.length} file{sharedFiles.length === 1 ? '' : 's'}
+          </Badge>
+        </div>
+        <CardBody>
+          {courseResources.isError ? (
+            <ErrorState message="We could not load course documents." onRetry={courseResources.refetch} />
+          ) : courseResources.isLoading ? (
+            <SkeletonRows rows={3} />
+          ) : !sharedFiles.length ? (
+            <EmptyState
+              icon={FileText}
+              title="No course documents yet"
+              message="The registrar has not uploaded a PDF or Word document for these courses."
+            />
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {sharedFiles.map((resource) => (
+                <article key={resource.id} className="flex flex-col rounded-2xl border border-slate-100 bg-white/70 p-5">
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-slate-500">
+                      <FileText className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-900">
+                        {resource.courseCode || 'Course'}
+                      </p>
+                      <p className="truncate text-xs text-slate-500">{resource.courseName}</p>
+                    </div>
+                  </div>
+                  <p className="mt-3 truncate text-sm text-slate-700">{resource.fileName}</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {formatBytes(resource.bytes)}
+                    {resource.program?.code ? <> &middot; {resource.program.code}</> : null}
+                  </p>
+                  <div className="mt-auto flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                    <p className="text-[11px] text-slate-400">
+                      {resource.createdAt ? formatEthiopian(new Date(resource.createdAt)) : ''}
+                    </p>
+                    {resource.url ? (
+                      <a
+                        href={resource.url}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="focus-ring inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold text-brand-700 hover:bg-brand-50"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Open document
+                      </a>
+                    ) : (
+                      <span className="text-[11px] text-slate-400">File unavailable</span>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </CardBody>
       </Card>
 

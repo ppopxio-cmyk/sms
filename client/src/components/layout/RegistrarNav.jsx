@@ -88,28 +88,33 @@ function matches(pathname, to) {
   return pathname === to || pathname.startsWith(`${to}/`);
 }
 
-export default function RegistrarNav({ onNavigate }) {
+export default function RegistrarNav({ onNavigate, collapsed = false, onExpand }) {
   const { pathname } = useLocation();
   const [openGroups, setOpenGroups] = useState(() => new Set());
   const root = useRef(null);
+  const activeGroup = GROUPS.find((group) => group.items.some((item) => matches(pathname, item.to)));
+  const activeId = activeGroup?.id;
 
   useEffect(() => {
-    const active = GROUPS.find((group) => group.items.some((item) => matches(pathname, item.to)));
-    if (!active) return;
+    if (!activeId) return;
     setOpenGroups((current) => {
-      if (current.has(active.id)) return current;
+      if (current.has(activeId)) return current;
       const next = new Set(current);
-      next.add(active.id);
+      next.add(activeId);
       return next;
     });
-  }, [pathname]);
+  }, [pathname, activeId]);
 
   useEffect(() => {
+    const keepActive = () => {
+      if (!activeId) return new Set();
+      return new Set([activeId]);
+    };
     const onPointerDown = (event) => {
-      if (!root.current?.contains(event.target)) setOpenGroups(new Set());
+      if (!root.current?.contains(event.target)) setOpenGroups(keepActive());
     };
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') setOpenGroups(new Set());
+      if (event.key === 'Escape') setOpenGroups(keepActive());
     };
     document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
@@ -117,16 +122,66 @@ export default function RegistrarNav({ onNavigate }) {
       document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, []);
+  }, [activeId]);
 
   const toggle = (id) => {
     setOpenGroups((current) => {
       const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        if (id === activeId) return current;
+        next.delete(id);
+      } else next.add(id);
       return next;
     });
   };
+
+  if (collapsed) {
+    const railClass = 'focus-ring group flex h-11 w-11 items-center justify-center rounded-2xl transition';
+    return (
+      <div className="flex flex-col items-center gap-1.5">
+        <NavLink
+          to="/registrar/dashboard"
+          end
+          onClick={onNavigate}
+          title="Dashboard"
+          className={({ isActive }) =>
+            `${railClass} ${isActive ? 'brand-gradient text-white shadow-lg shadow-brand-600/25' : 'text-slate-500 hover:bg-white hover:text-brand-700'}`
+          }
+        >
+          <LayoutDashboard className="h-5 w-5" />
+        </NavLink>
+        <NavLink
+          to="/registrar/analytics"
+          onClick={onNavigate}
+          title="Analytics"
+          className={({ isActive }) =>
+            `${railClass} ${isActive ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100' : 'text-slate-500 hover:bg-white hover:text-brand-700'}`
+          }
+        >
+          <BarChart3 className="h-5 w-5" />
+        </NavLink>
+        {GROUPS.map((group) => (
+          <button
+            key={group.id}
+            type="button"
+            title={group.label}
+            aria-label={group.label}
+            onClick={() => {
+              onExpand?.();
+              setOpenGroups((current) => new Set(current).add(group.id));
+            }}
+            className={`${railClass} ${
+              group.id === activeId
+                ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100'
+                : 'text-slate-500 hover:bg-white hover:text-brand-700'
+            }`}
+          >
+            <group.icon className="h-5 w-5" />
+          </button>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div ref={root} className="space-y-1.5" data-registrar-nav>

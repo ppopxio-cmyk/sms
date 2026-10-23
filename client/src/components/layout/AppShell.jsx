@@ -18,6 +18,13 @@ import Breadcrumbs from './Breadcrumbs';
 // the three things that are always wanted within reach: search, notices and the account.
 export default function AppShell() {
   const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('sms.sidebar') === 'collapsed';
+    } catch {
+      return false;
+    }
+  });
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
   const navigate = useNavigate();
@@ -66,14 +73,36 @@ export default function AppShell() {
 
   const close = () => setOpen(false);
 
+  const toggleCollapsed = () => {
+    setCollapsed((current) => {
+      const next = !current;
+      try {
+        localStorage.setItem('sms.sidebar', next ? 'collapsed' : 'expanded');
+      } catch {
+        // the preference simply does not persist
+      }
+      return next;
+    });
+  };
+
   return (
     <div className="min-h-screen">
       {/* Wide screens: a column that never moves and never scrolls with the page. */}
-      <aside className="glass-header fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-white/70 lg:block">
-        <Sidebar role={user?.role} user={user} onSignOut={signOut} />
+      <aside
+        className={`glass-header fixed inset-y-0 left-0 z-30 hidden border-r border-white/70 transition-[width] duration-300 lg:block ${
+          collapsed ? 'w-20' : 'w-64'
+        }`}
+      >
+        <Sidebar
+          role={user?.role}
+          user={user}
+          onSignOut={signOut}
+          collapsed={collapsed}
+          onToggleCollapse={toggleCollapsed}
+        />
       </aside>
 
-      <div className="lg:pl-64">
+      <div className={`transition-[padding] duration-300 ${collapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
         <header className="glass-header sticky top-0 z-30">
           <div className="flex h-16 items-center gap-3 px-4 sm:px-6">
             <button

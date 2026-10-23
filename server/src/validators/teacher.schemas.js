@@ -17,6 +17,7 @@ const score = z
 
 export const assignmentParamSchema = z.strictObject({ assignmentId: objectId });
 export const assessmentParamSchema = z.strictObject({ assessmentId: objectId });
+export const assessmentSubmissionParamSchema = z.strictObject({ submissionId: objectId });
 export const attendanceParamSchema = z.strictObject({ attendanceId: objectId });
 export const finalizeAttendanceParamSchema = z.strictObject({ assignmentId: objectId, attendanceId: objectId });
 export const materialParamSchema = z.strictObject({ materialId: objectId });
@@ -111,6 +112,52 @@ export const updateAssessmentSchema = z
   })
   .refine((value) => Object.keys(value).length > 0, 'Change at least one field.');
 
+const portalDate = z.union([z.null(), z.coerce.date()]).optional();
+
+export const assessmentPortalSchema = z
+  .strictObject({
+    enabled: z.boolean(),
+    opensAt: portalDate,
+    closesAt: portalDate,
+    allowResubmission: z.boolean().optional(),
+    rotateCode: z.boolean().optional().default(false),
+  })
+  .superRefine((value, ctx) => {
+    if (value.opensAt && value.closesAt && value.opensAt >= value.closesAt) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['closesAt'],
+        message: 'The closing time must be after the opening time.',
+      });
+    }
+  });
+
+export const assessmentPortalDocumentQuerySchema = z.strictObject({
+  filename: z.string().trim().min(1).max(255),
+});
+
+export const listAssessmentSubmissionsQuerySchema = z.strictObject({
+  search: z.string().trim().max(100).optional(),
+  status: z.enum(['all', 'submitted', 'graded', 'returned']).default('all'),
+  page,
+  limit,
+});
+
+export const reviewAssessmentSubmissionSchema = z
+  .strictObject({
+    status: z.enum(['submitted', 'graded', 'returned']),
+    score: z.coerce.number().finite().min(0).max(1000).nullable().optional(),
+    feedback: z.string().trim().max(2000).default(''),
+  })
+  .superRefine((value, ctx) => {
+    if (value.status === 'graded' && value.score === null) {
+      ctx.addIssue({ code: 'custom', path: ['score'], message: 'Enter a score before marking this submission as graded.' });
+    }
+    if (value.status === 'returned' && !value.feedback) {
+      ctx.addIssue({ code: 'custom', path: ['feedback'], message: 'Explain what the student needs to change.' });
+    }
+  });
+
 export const gradesQuerySchema = z.strictObject({
   search: z.string().trim().max(100).optional(),
   page,
@@ -148,6 +195,11 @@ export const listMaterialsQuerySchema = z.strictObject({
   search: z.string().trim().max(100).optional(),
   page,
   limit,
+});
+
+export const listCourseResourcesQuerySchema = z.strictObject({
+  assignmentId: objectId.optional(),
+  search: z.string().trim().max(100).optional(),
 });
 
 const materialFields = {
@@ -216,4 +268,49 @@ export const rosterReportQuerySchema = z.strictObject({
 
 export const competencyReportQuerySchema = z.strictObject({
   assignmentId: objectId,
+});
+
+const markComponent = z.coerce.number().finite().min(0).max(100).nullable().optional();
+
+export const courseMarkPolicySchema = z
+  .strictObject({
+    assessments: markComponent,
+    quizzes: markComponent,
+    bonus: markComponent,
+    attendance: markComponent,
+    presentation: markComponent,
+  })
+  .superRefine((value, ctx) => {
+    const total = ['assessments', 'quizzes', 'bonus', 'attendance', 'presentation'].reduce(
+      (sum, key) => sum + Number(value[key] || 0),
+      0,
+    );
+    if (Math.abs(total - 100) > 0.001) {
+      ctx.addIssue({ code: 'custom', message: 'The policy must add up to exactly 100 marks.' });
+    }
+  });
+
+export const listCourseMarksQuerySchema = z.strictObject({
+  program: objectId.optional(),
+});
+
+const courseMarkRow = z.strictObject({
+  studentId: objectId,
+  assessments: markComponent,
+  quizzes: markComponent,
+  bonus: markComponent,
+  attendance: markComponent,
+  presentation: markComponent,
+});
+
+export const saveCourseMarksSchema = z.strictObject({
+  students: z.array(courseMarkRow).min(1, 'Enter at least one student.').max(2000),
+});
+
+export const submitCourseMarksSchema = z.strictObject({
+  offeringIds: z.array(objectId).min(1, 'Choose at least one course.').max(100),
+});
+
+export const courseMarksExportQuerySchema = z.strictObject({
+  format: exportFormat,
 });

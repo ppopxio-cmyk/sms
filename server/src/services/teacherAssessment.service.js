@@ -11,6 +11,7 @@ import {
   enrollmentDto,
 } from './teacherScope.service.js';
 import { ownFilter } from './registrar.helpers.js';
+import { portalState } from './assessmentPortal.service.js';
 
 const titleKey = (title) => String(title || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const sameTitle = (left, right) => titleKey(left) === titleKey(right);
@@ -36,6 +37,10 @@ function assessmentDto(assessment, extra = {}) {
     publishedAt: assessment.publishedAt,
     closedAt: assessment.closedAt,
     submittedAt: assessment.submittedAt,
+    portalEnabled: Boolean(assessment.portalEnabled),
+    portalStatus: portalState(assessment),
+    publicHash: assessment.publicHash || null,
+    submissionCount: assessment.submissionCount || 0,
     createdAt: assessment.createdAt,
     updatedAt: assessment.updatedAt,
     ...extra,

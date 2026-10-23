@@ -8,7 +8,7 @@ import { formatEthiopian } from '../utils/ethiopianDate.js';
 import { audit } from '../services/audit.service.js';
 import { auditCategory, auditCategoryFilter } from '../services/auditCategory.service.js';
 import { buildExport, EXPORT_LIMIT } from '../services/export.service.js';
-import { after, atOrAfter, oneOf } from '../utils/mongo.js';
+import { after, atOrAfter, oneOf, trusted } from '../utils/mongo.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ONLINE_MS = 2 * 60 * 1000;
@@ -368,7 +368,7 @@ export const exportSessions = auditedExport('export.sessions', 'sessions', async
 });
 
 export const exportAuditLogs = auditedExport('export.audit_logs', 'audit_logs', async (req, res) => {
-  const { search, category, status, range, format } = req.valid.query;
+  const { search, category, status, role, range, format } = req.valid.query;
   const now = new Date();
   const since = range === 'all' ? null : new Date(now.getTime() - Number(range) * DAY_MS);
 
@@ -389,6 +389,19 @@ export const exportAuditLogs = auditedExport('export.audit_logs', 'audit_logs', 
       { ip: rx },
       ...(actors.length ? [{ actorId: oneOf(actors.map((actor) => actor._id)) }] : []),
     ];
+  }
+
+  if (role && role !== 'all') {
+    const actors = await User.find({ role }).select('_id').lean();
+    criteria.$and = trusted([
+      ...(criteria.$and || []),
+      {
+        $or: [
+          { actorRole: role },
+          ...(actors.length ? [{ actorId: oneOf(actors.map((actor) => actor._id)) }] : []),
+        ],
+      },
+    ]);
   }
 
   const failureCriteria = { ...criteria, status: 'fail' };

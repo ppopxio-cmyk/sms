@@ -3,12 +3,17 @@ import { audit } from '../services/audit.service.js';
 import {
   createMaterial,
   deleteMaterial,
+  listCourseResources,
   listMaterials,
   updateMaterial,
 } from '../services/teacherMaterial.service.js';
 
 export const list = asyncHandler(async (req, res) => {
   res.json(await listMaterials(req.user.id, req.valid.query));
+});
+
+export const sharedResources = asyncHandler(async (req, res) => {
+  res.json(await listCourseResources(req.user.id, req.valid.query));
 });
 
 export const create = asyncHandler(async (req, res) => {

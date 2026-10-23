@@ -18,6 +18,7 @@ import ForgotPassword from './pages/ForgotPassword.jsx';
 import Privacy from './pages/Privacy.jsx';
 import Terms from './pages/Terms.jsx';
 import Maintenance from './pages/Maintenance.jsx';
+import PublicAssessment from './pages/PublicAssessment.jsx';
 
 const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'));
@@ -41,6 +42,9 @@ const TeacherAttendance = lazy(() => import('./pages/teacher/TeacherAttendance.j
 const TeacherAttendanceMark = lazy(() => import('./pages/teacher/TeacherAttendanceMark.jsx'));
 const TeacherAssessments = lazy(() => import('./pages/teacher/TeacherAssessments.jsx'));
 const TeacherAssessment = lazy(() => import('./pages/teacher/TeacherAssessment.jsx'));
+const TeacherCourseMarkPolicy = lazy(() => import('./pages/teacher/TeacherCourseMarkPolicy.jsx'));
+const TeacherCourseMarks = lazy(() => import('./pages/teacher/TeacherCourseMarks.jsx'));
+const TeacherCourseMarkDetail = lazy(() => import('./pages/teacher/TeacherCourseMarkDetail.jsx'));
 const TeacherMaterials = lazy(() => import('./pages/teacher/TeacherMaterials.jsx'));
 const TeacherReports = lazy(() => import('./pages/teacher/TeacherReports.jsx'));
 const RegistrarDashboard = lazy(() => import('./pages/registrar/RegistrarDashboard.jsx'));
@@ -110,6 +114,8 @@ export default function App() {
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/maintenance" element={<Maintenance />} />
+        <Route path="/assesmets" element={<PublicAssessment />} />
+        <Route path="/assessments/:hash" element={<PublicAssessment />} />
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>
@@ -148,6 +154,9 @@ export default function App() {
               <Route path="/teacher/attendance/:assignmentId" element={<TeacherAttendanceMark />} />
               <Route path="/teacher/assessments" element={<TeacherAssessments />} />
               <Route path="/teacher/assessments/:assessmentId" element={<TeacherAssessment />} />
+              <Route path="/teacher/course-mark-policy" element={<TeacherCourseMarkPolicy />} />
+              <Route path="/teacher/course-marks" element={<TeacherCourseMarks />} />
+              <Route path="/teacher/course-marks/:assignmentId" element={<TeacherCourseMarkDetail />} />
               <Route path="/teacher/materials" element={<TeacherMaterials />} />
               <Route path="/teacher/reports" element={<TeacherReports />} />
             </Route>

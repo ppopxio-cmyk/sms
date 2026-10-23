@@ -26,10 +26,12 @@ import {
 import { useDebounced } from '../../lib/useDebounced';
 import EthiopianDateField from '../../components/teacher/EthiopianDateField';
 import TeacherPageHeader from '../../components/teacher/TeacherPageHeader';
+import TeacherAssessmentPortal from '../../components/teacher/TeacherAssessmentPortal';
 import Alert from '../../components/ui/Alert';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Card, { CardBody, CardHeader } from '../../components/ui/Card';
+import FilterTabs from '../../components/ui/FilterTabs';
 import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
 import SearchInput from '../../components/ui/SearchInput';
@@ -53,6 +55,7 @@ export default function TeacherAssessment() {
   const [confirmAction, setConfirmAction] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState(null);
+  const [tab, setTab] = useState('marks');
   const debounced = useDebounced(search);
   const queryClient = useQueryClient();
 
@@ -239,6 +242,33 @@ export default function TeacherAssessment() {
       button: 'Submit marks',
     },
   }[confirmAction];
+  const tabBar = (
+    <FilterTabs
+      label="Assessment workspace"
+      value={tab}
+      onChange={setTab}
+      tabs={[
+        { key: 'marks', label: 'Marks' },
+        { key: 'portal', label: 'Public portal' },
+        { key: 'submissions', label: 'Student submissions', count: assessment.submissionCount || undefined },
+      ]}
+    />
+  );
+
+  if (tab !== 'marks') {
+    return (
+      <div className="space-y-6">
+        <TeacherPageHeader
+          backTo="/teacher/assessments"
+          eyebrow="Assessment"
+          title={assessment.title}
+          subtitle={`${classTitle(assessment)}${assessment.academicYear ? ` · ${assessment.academicYear}` : ''}`}
+        />
+        {tabBar}
+        <TeacherAssessmentPortal assessmentId={assessmentId} maxScore={assessment.maxScore} section={tab} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -274,6 +304,8 @@ export default function TeacherAssessment() {
           </>
         }
       />
+
+      {tabBar}
 
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={statusTone(assessment.status)}>{statusLabel(assessment.status)}</Badge>
