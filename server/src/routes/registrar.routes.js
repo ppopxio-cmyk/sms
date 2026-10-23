@@ -145,7 +145,12 @@ r.delete('/students/:studentId', requirePermission('students:manage'), validate(
 
 // ---- Academic structure and calendar ---------------------------------------
 r.get('/academic-structure', requirePermission('structure:view'), structure);
-r.get('/academic-structure/programs/:id', requirePermission('structure:view'), validate(idParamSchema, 'params'), programDetail);
+r.get(
+  '/academic-structure/programs/:id',
+  requirePermission('structure:view'),
+  validate(idParamSchema, 'params'),
+  programDetail
+);
 r.post('/academic-structure/departments', requirePermission('structure:manage'), validate(departmentSchema), createDepartment);
 r.patch('/academic-structure/departments/:id', requirePermission('structure:manage'), validate(idParamSchema, 'params'), validate(departmentUpdateSchema), updateDepartment);
 r.delete('/academic-structure/departments/:id', requirePermission('structure:manage'), validate(idParamSchema, 'params'), deleteDepartment);
