@@ -189,6 +189,7 @@ export default function App() {
               <Route path="/registrar/certificates" element={<RegistrarCertificates />} />
               <Route path="/registrar/reports" element={<RegistrarReports />} />
               <Route path="/registrar/announcements" element={<RegistrarAnnouncements />} />
+              <Route path="/registrar/notifications" element={<RegistrarNotifications />} />
               <Route path="/registrar/grading-policy" element={<RegistrarGradingPolicy />} />
               <Route path="/registrar/my-account" element={<Me />} />
               <Route path="/registrar/my-devices" element={<Sessions />} />

@@ -13,6 +13,7 @@ import {
 } from './teacherScope.service.js';
 import { ownFilter } from './registrar.helpers.js';
 import { portalState } from './assessmentPortal.service.js';
+import { notifyRole, notifyUsers } from './notification.service.js';
 
 const titleKey = (title) => String(title || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const sameTitle = (left, right) => titleKey(left) === titleKey(right);
@@ -185,6 +186,12 @@ export async function createAssessment(teacherId, assignmentId, payload) {
   });
 
   const populated = await populateAssessment(created._id);
+  void notifyRole('REGISTRAR', {
+    type: 'assessment_created',
+    title: 'New assessment created',
+    body: `${created.title} · ${assignment?.course?.code || ''} · draft`,
+    actorId: teacherId,
+  });
   return assessmentDto(populated, { studentCount: 0, graded: 0, missing: 0 });
 }
 
@@ -250,6 +257,13 @@ export async function publishAssessment(teacherId, assessmentId) {
     .populate({ path: 'offering', populate: ASSIGNMENT_POPULATE })
     .lean();
   if (!updated) throw new AppError(409, 'ASSESSMENT_STATE', 'This assessment changed. Reload it and try again.');
+  const offering = updated.offering;
+  void notifyRole('REGISTRAR', {
+    type: 'assessment_published',
+    title: 'Assessment published',
+    body: `${updated.title} · ${offering?.course?.code || ''} · now open for submissions`,
+    actorId: teacherId,
+  });
   return assessmentDto(updated);
 }
 
@@ -451,5 +465,11 @@ export async function submitAssessment(teacherId, assessmentId) {
     );
   }
 
+  void notifyRole('REGISTRAR', {
+    type: 'assessment_marks_submitted',
+    title: 'Assessment marks submitted',
+    body: `${updated.title} · ${assignment?.course?.code || ''} · ${registrations.length} students`,
+    actorId: teacherId,
+  });
   return assessmentDto(updated, { studentCount: registrations.length, graded: registrations.length, missing: 0 });
 }

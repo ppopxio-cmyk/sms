@@ -14,6 +14,7 @@ import {
 } from './teacherScope.service.js';
 import { AppError } from '../utils/AppError.js';
 import { ownFilter } from './registrar.helpers.js';
+import { notifyRole } from './notification.service.js';
 
 // Load attendance history for a given assignment (for the grid/history view)
 export async function attendanceHistory(teacherId, assignmentId, query) {
@@ -309,6 +310,12 @@ export async function saveAttendance(teacherId, assignmentId, payload) {
 
   const records = await AttendanceRecord.find({ offering: assignmentId, date, period }).lean();
   const populated = await assignmentForTeacher(teacherId, assignmentId);
+  void notifyRole('REGISTRAR', {
+    type: 'attendance_saved',
+    title: 'Attendance draft saved',
+    body: `${populated?.course?.code || ''} · ${date} · ${period} · ${records.length} marked`,
+    actorId: teacherId,
+  });
   return sheetSummary(sheet, records, populated);
 }
 
@@ -357,5 +364,11 @@ export async function finalizeAttendance(teacherId, assignmentId, attendanceId, 
   }
 
   const populated = await assignmentForTeacher(teacherId, assignmentId);
+  void notifyRole('REGISTRAR', {
+    type: 'attendance_finalized',
+    title: 'Attendance finalized',
+    body: `${populated?.course?.code || ''} · ${updated.dateKey} · ${updated.period} · ${records.filter((r) => r.status === 'present').length} present`,
+    actorId: teacherId,
+  });
   return sheetSummary(updated, records, populated);
 }
