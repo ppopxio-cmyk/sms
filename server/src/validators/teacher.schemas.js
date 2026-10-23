@@ -27,6 +27,8 @@ export const listAssignmentsQuerySchema = z.strictObject({
   search: z.string().trim().max(100).optional(),
   status: z.enum(['all', 'active', 'completed']).default('all'),
   program: objectId.optional(),
+  batch: objectId.optional(),
+  category: z.enum(['regular', 'extension']).optional(),
   page,
   limit,
 });
@@ -34,7 +36,11 @@ export const listAssignmentsQuerySchema = z.strictObject({
 export const listStudentsQuerySchema = z.strictObject({
   search: z.string().trim().max(100).optional(),
   assignmentId: objectId.optional(),
-  status: z.enum(['all', 'active']).default('active'),
+  program: objectId.optional(),
+  batch: objectId.optional(),
+  category: z.enum(['regular', 'extension']).optional(),
+  level: z.coerce.number().int().min(1).max(20).optional(),
+  status: z.enum(['all', 'active', 'completed', 'withdrawn', 'cancelled', 'pending']).default('active'),
   page,
   limit,
 });
@@ -309,6 +315,7 @@ export const saveCourseMarksSchema = z.strictObject({
 
 export const submitCourseMarksSchema = z.strictObject({
   offeringIds: z.array(objectId).min(1, 'Choose at least one course.').max(100),
+  code: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code.'),
 });
 
 export const courseMarksExportQuerySchema = z.strictObject({

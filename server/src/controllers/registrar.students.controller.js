@@ -102,16 +102,16 @@ function validateLevel(program, level) {
   if (level !== 1) throw new AppError(400, 'LEVEL_INVALID', 'A short-term programme only has level 1.');
 }
 
-async function nextStudentId({ program, batch, category }) {
-  if (!batch) throw new AppError(409, 'BATCH_REQUIRED', 'Create a batch for this programme and stream before admitting students.');
-  const stream = category === 'extension' ? 'EXT' : 'REG';
-  const batchCode = String(batch.code || '').toUpperCase().startsWith('BAT')
-    ? String(batch.code).toUpperCase()
-    : `BAT${String(batch.code || '').toUpperCase()}`;
-  const fullPrefix = `${program.code}-${batchCode}-${stream}`;
-  const prefix = fullPrefix.length > 35 ? fullPrefix.slice(0, 35).replace(/-+$/, '') : fullPrefix;
+async function nextStudentId({ program, batch }) {
+  if (!batch) throw new AppError(409, 'BATCH_REQUIRED', 'Create a batch for this programme before admitting students.');
+  const programCode = String(program.code || '').trim().toUpperCase();
+  const rawBatchCode = String(batch.code || '').trim().toUpperCase();
+  const batchCode = rawBatchCode.startsWith('BAT')
+    ? rawBatchCode
+    : `BAT-${rawBatchCode || String(batch.admissionAcademicYear || '').slice(-4)}`;
+  const prefix = `${programCode}-${batchCode}`.slice(0, 45).replace(/-+$/, '');
   const counter = await Counter.findOneAndUpdate(
-    { key: `sid:${program._id}:${batch._id}:${stream}` },
+    { key: `sid:${program._id}:${batchCode}` },
     { $inc: { value: 1 } },
     { upsert: true, new: true, setDefaultsOnInsert: true },
   );
@@ -243,11 +243,9 @@ export const createStudent = asyncHandler(async (req, res) => {
     if (!academicYear) throw new AppError(400, 'ACADEMIC_YEAR_INVALID', 'Choose a valid academic year.');
   }
 
-  const studentId = await nextStudentId({ program, batch, category });
-  const student = await Student.create({
+  const base = {
     ...input,
     email,
-    studentId,
     studentCategory: category,
     department: department._id,
     program: program._id,
@@ -260,7 +258,25 @@ export const createStudent = asyncHandler(async (req, res) => {
     notes: '',
     createdBy: req.user.id,
     updatedBy: req.user.id,
-  });
+  };
+
+  let student;
+  let lastError;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      student = await Student.create({
+        ...base,
+        studentId: await nextStudentId({ program, batch, category }),
+      });
+      break;
+    } catch (error) {
+      const studentIdCollision = error?.code === 11000
+        && (error?.keyPattern?.studentId || error?.keyValue?.studentId || String(error?.message).includes('studentId'));
+      if (!studentIdCollision) throw error;
+      lastError = error;
+    }
+  }
+  if (!student) throw lastError;
 
   if (academicYear) {
     await Enrollment.create({

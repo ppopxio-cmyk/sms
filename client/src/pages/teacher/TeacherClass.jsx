@@ -52,6 +52,7 @@ export default function TeacherClass() {
   const counts = course.assessmentCounts ?? {};
   const totalAssessments = Object.values(counts).reduce((sum, value) => sum + value, 0);
   const active = ['open', 'in_progress'].includes(course.status);
+  const canEdit = active && course.canManage;
   const table = `?assignmentId=${course.id}`;
 
   return (
@@ -62,7 +63,7 @@ export default function TeacherClass() {
         title={classTitle(course)}
         subtitle={classMeta(course)}
         actions={
-          active ? (
+          canEdit ? (
             <>
               <Link to={`/teacher/attendance/${course.id}`} className={actionClass}>
                 <ClipboardCheck className="h-4 w-4" />
@@ -77,7 +78,12 @@ export default function TeacherClass() {
         }
       />
 
-      {!active ? (
+      {!course.canManage ? (
+        <Alert tone="info" title="Programme visibility">
+          You can see this class because you are assigned to its programme. It is taught by another teacher, so attendance,
+          assessments, marks and policies stay read-only. The class roster and programme materials are available to you.
+        </Alert>
+      ) : !active ? (
         <Alert tone="info" title="This class is read-only">
           The registrar has marked this class as {statusLabel(course.status).toLowerCase()}. You can still read its roster, marks and materials,
           but attendance and new marks are closed.
@@ -110,6 +116,8 @@ export default function TeacherClass() {
                 ['Academic year', course.academicYear || '—'],
                 ['Term', termLabel(course.term)],
                 ['Level', course.level ? `Level ${course.level}` : '—'],
+                ['Batch', course.batch || 'All batches'],
+                ['Stream', course.category || '—'],
                 ['Department', course.department || '—'],
                 ['Credit hours', course.creditHours ?? '—'],
                 ['Assessment mode', course.assessmentMode === 'competency' ? 'Competency' : 'Numeric marks'],
@@ -140,11 +148,19 @@ export default function TeacherClass() {
           <CardHeader title="Quick actions" subtitle="Tools for this class." icon={BookOpen} />
           <CardBody className="grid gap-2">
             {[
-              { to: `/teacher/attendance/${course.id}`, label: active ? 'Mark attendance' : 'View attendance', icon: ClipboardCheck },
-              { to: `/teacher/assessments${table}`, label: 'Assessments and marks', icon: ClipboardList },
-              { to: `/teacher/materials${table}`, label: 'Notes and links', icon: FolderOpen },
-              { to: `/teacher/reports${table}`, label: 'Reports and exports', icon: FileBarChart },
-              { to: `/teacher/students?assignmentId=${course.id}`, label: 'View roster', icon: Users },
+              ...(canEdit
+                ? [
+                    { to: `/teacher/attendance/${course.id}`, label: 'Mark attendance', icon: ClipboardCheck },
+                    { to: `/teacher/assessments${table}`, label: 'Assessments and marks', icon: ClipboardList },
+                  ]
+                : []),
+              { to: `/teacher/materials${table}`, label: 'Course documents', icon: FolderOpen },
+              ...(course.canManage
+                ? [
+                    { to: `/teacher/reports${table}`, label: 'Reports and exports', icon: FileBarChart },
+                    { to: `/teacher/students?assignmentId=${course.id}`, label: 'View roster', icon: Users },
+                  ]
+                : []),
             ].map((item) => (
               <Link
                 key={item.label}
@@ -165,9 +181,11 @@ export default function TeacherClass() {
           subtitle="The latest sheets for this class."
           icon={ClipboardCheck}
           action={
-            <Link to={`/teacher/attendance?assignmentId=${course.id}`} className="focus-ring text-xs font-semibold text-brand-600 hover:text-brand-800">
-              View all
-            </Link>
+            course.canManage ? (
+              <Link to={`/teacher/attendance?assignmentId=${course.id}`} className="focus-ring text-xs font-semibold text-brand-600 hover:text-brand-800">
+                View all
+              </Link>
+            ) : null
           }
         />
         <CardBody>
@@ -181,12 +199,14 @@ export default function TeacherClass() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge tone={statusTone(sheet.status)}>{statusLabel(sheet.status)}</Badge>
-                    <Link
-                      to={`/teacher/attendance/${course.id}?date=${sheet.dateKey}&period=${sheet.period}`}
-                      className="focus-ring rounded-lg px-2 py-1 text-xs font-semibold text-brand-600 hover:bg-brand-50"
-                    >
-                      Open
-                    </Link>
+                    {course.canManage ? (
+                      <Link
+                        to={`/teacher/attendance/${course.id}?date=${sheet.dateKey}&period=${sheet.period}`}
+                        className="focus-ring rounded-lg px-2 py-1 text-xs font-semibold text-brand-600 hover:bg-brand-50"
+                      >
+                        Open
+                      </Link>
+                    ) : null}
                   </div>
                 </li>
               ))}

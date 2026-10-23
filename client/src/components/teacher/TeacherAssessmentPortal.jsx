@@ -171,7 +171,7 @@ export default function TeacherAssessmentPortal({ assessmentId, maxScore, sectio
 
   const publicUrl = useMemo(() => {
     if (!data?.enabled || !data.publicHash) return '';
-    return `${window.location.origin}/assesmets?hash=${data.publicHash}`;
+    return `${window.location.origin}/assessments?hash=${data.publicHash}`;
   }, [data?.enabled, data?.publicHash]);
 
   const rows = submissions.data?.submissions ?? [];

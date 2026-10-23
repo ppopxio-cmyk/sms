@@ -1,5 +1,9 @@
-import { asyncHandler } from '../utils/asyncHandler.js';
+﻿import { asyncHandler } from '../utils/asyncHandler.js';
 import { audit } from '../services/audit.service.js';
+import { User } from '../models/User.js';
+import { sendCode } from '../services/codeDelivery.js';
+import { checkCode } from '../services/code.service.js';
+import { AppError } from '../utils/AppError.js';
 import {
   calculateCourseMarks,
   courseMarksDetail,
@@ -59,7 +63,18 @@ export const calculate = asyncHandler(async (req, res) => {
   res.json(data);
 });
 
+export const requestSubmitCode = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.id).lean();
+  if (!user) throw new AppError(401, 'SESSION_ENDED', 'Please sign in again.');
+  const sent = await sendCode(user, 'course_marks_submit');
+  if (!sent) throw new AppError(429, 'WAIT_BEFORE_RESEND', 'Please wait before asking for another code.');
+  res.json({ message: `We emailed a 6-digit code to ${user.email}.`, email: user.email });
+});
+
 export const submit = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.id).lean();
+  if (!user) throw new AppError(401, 'SESSION_ENDED', 'Please sign in again.');
+  await checkCode(user._id, 'course_marks_submit', req.body.code);
   const data = await submitCourseMarks(req.user.id, req.body.offeringIds);
   audit({
     req,
@@ -89,3 +104,4 @@ export const exportMarks = asyncHandler(async (req, res) => {
   res.setHeader('X-Export-Rows', String(report.rowCount));
   res.send(report.buffer);
 });
+

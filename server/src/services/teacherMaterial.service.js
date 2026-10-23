@@ -7,10 +7,12 @@ import {
   ASSIGNMENT_POPULATE,
   READ_STATUSES,
   assignmentForTeacher,
+  assignmentForTeacherRead,
   assignmentIdsForTeacher,
   materialForTeacher,
 } from './teacherScope.service.js';
 import { ownFilter, searchFilter } from './registrar.helpers.js';
+import { activeProgramIdsForTeacher } from './teacherAccess.service.js';
 import { signedImageUrl } from './imagekit.service.js';
 
 function materialDto(row) {
@@ -91,25 +93,34 @@ function courseResourceDto(row) {
 }
 
 export async function listCourseResources(teacherId, query = {}) {
-  const match = { teacher: teacherId, status: { $in: READ_STATUSES } };
-  if (query.assignmentId) match._id = query.assignmentId;
-  const assignments = await CourseOffering.find(ownFilter(match))
-    .select('program course')
-    .populate('course', 'code')
-    .lean();
+  const programIds = await activeProgramIdsForTeacher(teacherId);
+  const filters = [{ deletedAt: null }];
 
-  const pairs = new Map();
-  for (const row of assignments) {
-    const code = String(row.course?.code || '').trim().toUpperCase();
-    if (row.program && code) pairs.set(`${row.program}:${code}`, { program: row.program, courseCode: code });
+  if (query.assignmentId) {
+    const assignment = await assignmentForTeacherRead(teacherId, query.assignmentId);
+    const code = String(assignment.course?.code || '').trim().toUpperCase();
+    filters.push({ program: assignment.program, ...(code ? { courseCode: code } : {}) });
+  } else if (programIds.length) {
+    filters.push({ program: { $in: programIds } });
+  } else {
+    const match = { teacher: teacherId, status: { $in: READ_STATUSES } };
+    const assignments = await CourseOffering.find(ownFilter(match))
+      .select('program course')
+      .populate('course', 'code')
+      .lean();
+    const pairs = new Map();
+    for (const row of assignments) {
+      const code = String(row.course?.code || '').trim().toUpperCase();
+      if (row.program && code) pairs.set(`${row.program}:${code}`, { program: row.program, courseCode: code });
+    }
+    if (!pairs.size) return { resources: [] };
+    filters.push({ $or: [...pairs.values()] });
   }
-  if (!pairs.size) return { resources: [] };
 
-  const filters = [{ $or: [...pairs.values()] }];
   const search = searchFilter(query.search, ['courseName', 'courseCode', 'fileName']);
   if (search) filters.push(search);
 
-  const rows = await CourseResource.find(ownFilter({ deletedAt: null, $and: filters }))
+  const rows = await CourseResource.find(ownFilter({ $and: filters }))
     .populate('program', 'code name')
     .populate('department', 'code name')
     .sort({ updatedAt: -1 })

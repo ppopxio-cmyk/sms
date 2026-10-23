@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import {
@@ -24,22 +24,24 @@ import { SkeletonRows } from '../../components/ui/Skeleton';
 export default function TeacherClasses() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
+  const [program, setProgram] = useState('');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const debounced = useDebounced(search);
 
   const query = useQuery({
-    queryKey: ['teacher', 'classes', { search: debounced, status, page, limit }],
+    queryKey: ['teacher', 'classes', { search: debounced, status, program, page, limit }],
     queryFn: async () =>
       (
         await api.get('/teacher/courses', {
-          params: { search: debounced || undefined, status, page, limit },
+          params: { search: debounced || undefined, status, program: program || undefined, page, limit },
         })
       ).data,
     placeholderData: keepPreviousData,
   });
 
   const rows = query.data?.assignments ?? [];
+  const programs = query.data?.programs ?? [];
   const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0 };
 
   return (
@@ -66,16 +68,32 @@ export default function TeacherClasses() {
                 { key: 'completed', label: 'Completed' },
               ]}
             />
-            <SearchInput
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setPage(1);
-              }}
-              placeholder="Search course, programme or year"
-              loading={query.isFetching}
-              className="w-full lg:max-w-sm"
-            />
+            <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-xl">
+              <select
+                value={program}
+                onChange={(event) => {
+                  setProgram(event.target.value);
+                  setPage(1);
+                }}
+                className="focus-ring h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700"
+                aria-label="Filter by programme"
+              >
+                <option value="">All programmes</option>
+                {programs.map((row) => (
+                  <option key={row.id} value={row.id}>{row.code} · {row.name}</option>
+                ))}
+              </select>
+              <SearchInput
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search course, programme or year"
+                loading={query.isFetching}
+                className="w-full"
+              />
+            </div>
           </div>
 
           {query.isError ? (
@@ -109,6 +127,9 @@ export default function TeacherClasses() {
                       </span>
                       <div className="flex flex-wrap justify-end gap-1.5">
                         {course.assessmentMode === 'competency' ? <Badge tone="warning">Competency</Badge> : null}
+                        <Badge tone={course.canManage ? 'brand' : 'neutral'}>
+                          {course.canManage ? 'My class' : 'Read-only'}
+                        </Badge>
                         <Badge tone={statusTone(course.status)}>{statusLabel(course.status)}</Badge>
                       </div>
                     </div>
@@ -166,3 +187,4 @@ export default function TeacherClasses() {
     </div>
   );
 }
+

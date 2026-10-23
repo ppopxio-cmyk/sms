@@ -25,6 +25,9 @@ const offeringSchema = new Schema(
     academicYear: { type: Schema.Types.ObjectId, ref: 'AcademicYear', required: true, index: true },
     term: { type: String, trim: true, maxlength: 60, required: true, index: true },
     level: { type: Number, min: 1, max: 20, required: true, index: true },
+    batch: { type: Schema.Types.ObjectId, ref: 'Batch', default: null, index: true },
+    category: { type: String, enum: ['regular', 'extension'], default: 'regular', index: true },
+    meetingDays: [{ type: String, trim: true, maxlength: 12 }],
     creditHours: { type: Number, required: true, min: 0.5, max: 30 },
     teacher: { type: Schema.Types.ObjectId, ref: 'User', default: null, index: true },
     assessmentMode: { type: String, enum: ['numeric', 'competency'], default: 'numeric' },
@@ -40,7 +43,7 @@ const offeringSchema = new Schema(
 );
 
 offeringSchema.index(
-  { course: 1, program: 1, academicYear: 1, term: 1, level: 1 },
+  { course: 1, program: 1, academicYear: 1, term: 1, level: 1, batch: 1, category: 1 },
   { unique: true },
 );
 

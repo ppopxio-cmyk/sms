@@ -10,6 +10,7 @@ import Alert from '../../components/ui/Alert';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Card, { CardBody } from '../../components/ui/Card';
+import CodeInput from '../../components/ui/CodeInput';
 import Modal from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';
@@ -27,6 +28,7 @@ export default function TeacherCourseMarks() {
   const queryClient = useQueryClient();
   const [program, setProgram] = useState('all');
   const [confirmSend, setConfirmSend] = useState(false);
+  const [sendCode, setSendCode] = useState('');
   const query = useQuery({
     queryKey: ['teacher', 'course-mark-courses'],
     queryFn: async () => (await api.get('/teacher/course-marks')).data,
@@ -43,15 +45,26 @@ export default function TeacherCourseMarks() {
   const ready = visible.filter(isReady);
   const submitted = visible.filter((row) => row.submittedStudents > 0);
 
+  const requestCodeMutation = useMutation({
+    mutationFn: async () => (await api.post('/teacher/course-marks/submit-code')).data,
+    onSuccess: (data) => {
+      setSendCode('');
+      toast.success(data?.message || 'A confirmation code was emailed to your account.');
+    },
+    onError: (error) => toast.error(errorMessage(error, 'The confirmation code could not be sent.')),
+  });
+
   const sendMutation = useMutation({
     mutationFn: async () =>
       (
         await api.post('/teacher/course-marks/submit', {
           offeringIds: ready.map((row) => row.assignment.id),
+          code: sendCode,
         })
       ).data,
     onSuccess: async (data) => {
       setConfirmSend(false);
+      setSendCode('');
       toast.success(
         `${data.courses.length} course${data.courses.length === 1 ? '' : 's'} sent to the registrar.`,
       );
@@ -197,7 +210,11 @@ export default function TeacherCourseMarks() {
             <Button variant="secondary" onClick={() => setConfirmSend(false)}>
               Cancel
             </Button>
-            <Button onClick={() => sendMutation.mutate()} loading={sendMutation.isPending}>
+            <Button
+              onClick={() => sendMutation.mutate()}
+              loading={sendMutation.isPending}
+              disabled={sendCode.length !== 6}
+            >
               <Send className="h-4 w-4" />
               Send marks
             </Button>
@@ -216,6 +233,23 @@ export default function TeacherCourseMarks() {
             </li>
           ))}
         </ul>
+        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium text-slate-700">Email confirmation code</p>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => requestCodeMutation.mutate()}
+              loading={requestCodeMutation.isPending}
+            >
+              Email me a code
+            </Button>
+          </div>
+          <div className="mt-3">
+            <CodeInput value={sendCode} onChange={setSendCode} disabled={sendMutation.isPending} />
+          </div>
+        </div>
       </Modal>
     </div>
   );

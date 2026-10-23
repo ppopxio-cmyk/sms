@@ -127,6 +127,8 @@ const COPY = {
   session_terminate: { subject: 'Confirm signing a device out', accent: 'Device sign-out', title: 'Confirm this sign-out', intro: 'Use this code to sign the other device out of your account.' },
   account_delete: { subject: 'Confirm deleting your account', accent: 'Account deletion', title: 'Confirm you want to delete your account', intro: 'Use this code to confirm that your account should be deleted. This cannot be undone.' },
   student_delete: { subject: 'Confirm deleting a student record', accent: 'Student record deletion', title: 'Confirm this permanent deletion', intro: 'Use this code to permanently delete the student record you selected. This cannot be undone.' },
+  batch_delete: { subject: 'Confirm deleting a batch', accent: 'Batch deletion', title: 'Confirm this batch deletion', intro: 'Use this code to delete the selected batch register. This cannot be undone.' },
+  course_marks_submit: { subject: 'Confirm submitting course marks', accent: 'Course marks submission', title: 'Confirm this submission', intro: 'Use this code to submit course marks for registrar review. Submitted marks are locked from further edits.' },
 };
 
 export function sendCodeEmail({ to, name, code, purpose }) {

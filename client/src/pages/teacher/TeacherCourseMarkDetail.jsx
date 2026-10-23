@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Calculator, CheckCircle2, Save, Send, TriangleAlert } from 'lucide-react';
@@ -10,6 +10,7 @@ import Alert from '../../components/ui/Alert';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Card, { CardBody, CardHeader } from '../../components/ui/Card';
+import CodeInput from '../../components/ui/CodeInput';
 import ExportMenu from '../../components/ui/ExportMenu';
 import Modal from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/StatePanel';
@@ -31,6 +32,7 @@ export default function TeacherCourseMarkDetail() {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState({ key: '', values: {} });
   const [confirmSubmit, setConfirmSubmit] = useState(false);
+  const [submitCode, setSubmitCode] = useState('');
 
   const query = useQuery({
     queryKey: ['teacher', 'course-marks', assignmentId],
@@ -124,11 +126,21 @@ export default function TeacherCourseMarkDetail() {
     onError: (error) => toast.error(errorMessage(error, 'We could not calculate these marks.')),
   });
 
+  const requestCodeMutation = useMutation({
+    mutationFn: async () => (await api.post('/teacher/course-marks/submit-code')).data,
+    onSuccess: (data) => {
+      setSubmitCode('');
+      toast.success(data?.message || 'A confirmation code was emailed to your account.');
+    },
+    onError: (error) => toast.error(errorMessage(error, 'The confirmation code could not be sent.')),
+  });
+
   const submitMutation = useMutation({
     mutationFn: async () =>
-      (await api.post('/teacher/course-marks/submit', { offeringIds: [assignmentId] })).data,
+      (await api.post('/teacher/course-marks/submit', { offeringIds: [assignmentId], code: submitCode })).data,
     onSuccess: async () => {
       setConfirmSubmit(false);
+      setSubmitCode('');
       toast.success('Course marks sent to the registrar.');
       await query.refetch();
       queryClient.invalidateQueries({ queryKey: ['teacher', 'course-mark-courses'] });
@@ -191,7 +203,7 @@ export default function TeacherCourseMarkDetail() {
         backTo="/teacher/course-marks"
         eyebrow="Course marks"
         title={classTitle(query.data.assignment)}
-        subtitle={`${classMeta(query.data.assignment)} · Grading policy v${query.data.grading.version}`}
+        subtitle={`${classMeta(query.data.assignment)} Â· Grading policy v${query.data.grading.version}`}
         actions={
           <>
             <ExportMenu
@@ -313,13 +325,13 @@ export default function TeacherCourseMarkDetail() {
                         </td>
                       ))}
                       <td className="py-2.5 pl-2 pr-3 text-right font-mono text-sm font-semibold text-slate-800">
-                        {row.total === null || row.total === undefined ? '—' : row.total}
+                        {row.total === null || row.total === undefined ? 'â€”' : row.total}
                       </td>
                       <td className="py-2.5 text-center">
                         {row.letter ? (
                           <Badge tone={row.passed ? 'success' : 'danger'}>{row.letter}</Badge>
                         ) : (
-                          <span className="text-xs text-slate-400">—</span>
+                          <span className="text-xs text-slate-400">â€”</span>
                         )}
                       </td>
                     </tr>
@@ -342,7 +354,11 @@ export default function TeacherCourseMarkDetail() {
             <Button variant="secondary" onClick={() => setConfirmSubmit(false)}>
               Cancel
             </Button>
-            <Button onClick={() => submitMutation.mutate()} loading={submitMutation.isPending}>
+            <Button
+              onClick={() => submitMutation.mutate()}
+              loading={submitMutation.isPending}
+              disabled={submitCode.length !== 6}
+            >
               Send marks
             </Button>
           </>
@@ -353,7 +369,25 @@ export default function TeacherCourseMarkDetail() {
           receives a notification, and this mark sheet becomes read-only.
         </p>
         <p className="mt-3 text-xs text-slate-500">Prepared {displayDate(new Date().toISOString().slice(0, 10))}</p>
+        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium text-slate-700">Email confirmation code</p>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => requestCodeMutation.mutate()}
+              loading={requestCodeMutation.isPending}
+            >
+              Email me a code
+            </Button>
+          </div>
+          <div className="mt-3">
+            <CodeInput value={submitCode} onChange={setSubmitCode} disabled={submitMutation.isPending} />
+          </div>
+        </div>
       </Modal>
     </div>
   );
 }
+

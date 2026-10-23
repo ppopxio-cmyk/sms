@@ -1,3 +1,4 @@
+﻿import { Student } from '../models/Student.js';
 import { CourseRegistration } from '../models/Offering.js';
 import { AttendanceSheet } from '../models/AttendanceSheet.js';
 import { AttendanceRecord } from '../models/Records.js';
@@ -10,71 +11,89 @@ import {
   assignmentDto,
   assignmentIdsForTeacher,
   dayKey,
+  readAssignmentIdsForTeacher,
   studentDto,
 } from './teacherScope.service.js';
-import { ownFilter } from './registrar.helpers.js';
+import { activeProgramIdsForTeacher } from './teacherAccess.service.js';
+import { ownFilter, searchFilter } from './registrar.helpers.js';
 
 const OFFERING_POPULATE = { path: 'offering', populate: ASSIGNMENT_POPULATE };
+const emptyPage = (query) => ({
+  students: [],
+  pagination: { page: query.page, limit: query.limit, total: 0, pages: 1 },
+});
+
+async function studentIdsEnrolledIn(assignmentIds) {
+  if (!assignmentIds.length) return [];
+  return CourseRegistration.distinct(
+    'student',
+    ownFilter({ offering: { $in: assignmentIds }, status: 'registered' }),
+  );
+}
 
 export async function listTeacherStudents(teacherId, query) {
-  const assignmentIds = await assignmentIdsForTeacher(teacherId);
-  if (!assignmentIds.length) {
-    return { students: [], pagination: { page: query.page, limit: query.limit, total: 0, pages: 1 } };
+  const programIds = await activeProgramIdsForTeacher(teacherId);
+  const readIds = await readAssignmentIdsForTeacher(teacherId);
+  if (!programIds.length && !readIds.length) return emptyPage(query);
+
+  const clauses = [];
+  if (programIds.length) {
+    clauses.push({ program: { $in: programIds } });
+  } else {
+    const ids = await studentIdsEnrolledIn(readIds);
+    if (!ids.length) return emptyPage(query);
+    clauses.push({ _id: { $in: ids } });
   }
 
-  const offeringIds = query.assignmentId
-    ? assignmentIds.filter((id) => String(id) === query.assignmentId)
-    : assignmentIds;
-
-  const rows = await CourseRegistration.find(
-    ownFilter({
-      offering: { $in: offeringIds },
-      status: query.status === 'all'
-        ? { $in: ['registered', 'dropped', 'withdrawn', 'completed', 'cancelled'] }
-        : query.status === 'active'
-          ? 'registered'
-          : query.status,
-    }),
-  )
-    .populate(STUDENT_POPULATE)
-    .populate(OFFERING_POPULATE)
-    .sort({ createdAt: -1 })
-    .lean();
-
-  const search = String(query.search || '').trim().toLowerCase();
-  const grouped = new Map();
-
-  for (const row of rows) {
-    const student = row.student && typeof row.student === 'object' ? row.student : null;
-    if (!student) continue;
-    const dto = studentDto(student);
-    const haystack = [dto.studentNumber, dto.name, dto.program, dto.batch].join(' ').toLowerCase();
-    if (search && !haystack.includes(search)) continue;
-
-    const key = String(student._id);
-    if (!grouped.has(key)) {
-      grouped.set(key, {
-        id: key,
-        studentNumber: dto.studentNumber,
-        name: dto.name,
-        firstName: dto.firstName,
-        middleName: dto.middleName,
-        lastName: dto.lastName,
-        sex: dto.sex,
-        level: dto.level,
-        program: dto.program,
-        programCode: dto.programCode,
-        batch: dto.batch,
-        batchCode: dto.batchCode,
-        studentStatus: dto.studentStatus,
-        enrollmentStatus: dto.enrollmentStatus,
-        email: dto.email,
-        phone: dto.phone,
-        classes: [],
-      });
+  if (query.assignmentId) {
+    const ids = await studentIdsEnrolledIn([query.assignmentId]);
+    if (!ids.length) return emptyPage(query);
+    clauses.push({ _id: { $in: ids } });
+  }
+  if (query.program) clauses.push({ program: query.program });
+  if (query.batch) clauses.push({ batch: query.batch });
+  if (query.category) clauses.push({ studentCategory: query.category });
+  if (query.level) clauses.push({ level: query.level });
+  if (query.status && query.status !== 'all') {
+    if (['active', 'completed', 'withdrawn', 'cancelled', 'pending'].includes(query.status)) {
+      clauses.push({ enrollmentStatus: query.status });
+    } else {
+      clauses.push({ studentStatus: query.status });
     }
+  }
+  const search = searchFilter(query.search, ['studentId', 'fullName', 'email', 'phone']);
+  if (search) clauses.push(search);
+
+  const filter = ownFilter({ $and: clauses });
+  const start = (query.page - 1) * query.limit;
+  const [rows, total] = await Promise.all([
+    Student.find(filter)
+      .populate('program', 'code name qualificationType')
+      .populate('batch', 'code name category currentLevel status')
+      .populate('department', 'code name')
+      .sort({ fullName: 1 })
+      .skip(start)
+      .limit(query.limit)
+      .lean(),
+    Student.countDocuments(filter),
+  ]);
+
+  const studentIds = rows.map((row) => row._id);
+  const registrationFilter = { student: { $in: studentIds }, offering: { $in: readIds } };
+  if (query.assignmentId) registrationFilter.offering = { $in: [query.assignmentId] };
+  const registrations = studentIds.length && readIds.length
+    ? await CourseRegistration.find(ownFilter(registrationFilter))
+        .populate(OFFERING_POPULATE)
+        .sort({ createdAt: -1 })
+        .lean()
+    : [];
+
+  const byStudent = new Map();
+  for (const row of registrations) {
+    const key = String(row.student);
+    if (!byStudent.has(key)) byStudent.set(key, []);
     const offering = row.offering && typeof row.offering === 'object' ? row.offering : null;
-    grouped.get(key).classes.push({
+    byStudent.get(key).push({
       registrationId: String(row._id),
       assignmentId: offering ? String(offering._id) : String(row.offering),
       courseCode: offering?.course?.code ?? '',
@@ -82,35 +101,69 @@ export async function listTeacherStudents(teacherId, query) {
       academicYear: offering?.academicYear?.label ?? '',
       term: offering?.term ?? '',
       level: offering?.level ?? null,
+      batch: offering?.batch?.code ?? '',
+      category: offering?.category ?? offering?.batch?.category ?? '',
+      canManage: String(offering?.teacher?._id ?? offering?.teacher ?? '') === String(teacherId),
       registrationStatus: row.status,
     });
   }
 
-  const students = [...grouped.values()];
-  const total = students.length;
-  const start = (query.page - 1) * query.limit;
+  const students = rows.map((student) => {
+    const dto = studentDto(student);
+    return {
+      ...dto,
+      studentNumber: dto.studentNumber,
+      name: dto.name,
+      classes: byStudent.get(String(student._id)) || [],
+    };
+  });
+
   return {
-    students: students.slice(start, start + query.limit),
-    pagination: { page: query.page, limit: query.limit, total, pages: Math.max(1, Math.ceil(total / query.limit)) },
+    students,
+    pagination: {
+      page: query.page,
+      limit: query.limit,
+      total,
+      pages: Math.max(1, Math.ceil(total / query.limit)),
+    },
   };
 }
 
 export async function teacherStudentDetail(teacherId, studentId) {
-  const assignmentIds = await assignmentIdsForTeacher(teacherId);
-  if (!assignmentIds.length) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student was not found in your classes.');
+  const programIds = await activeProgramIdsForTeacher(teacherId);
+  const ownAssignmentIds = await assignmentIdsForTeacher(teacherId);
+  const readIds = await readAssignmentIdsForTeacher(teacherId);
 
-  const rows = await CourseRegistration.find(ownFilter({ offering: { $in: assignmentIds }, student: studentId }))
-    .populate(STUDENT_POPULATE)
-    .populate(OFFERING_POPULATE)
+  const student = await Student.findById(studentId)
+    .populate('program', 'code name qualificationType')
+    .populate('batch', 'code name category currentLevel status')
+    .populate('department', 'code name')
     .lean();
+  if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student was not found.');
 
-  const withStudent = rows.find((row) => row.student && typeof row.student === 'object');
-  if (!withStudent) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student was not found in your classes.');
+  const inProgram = programIds.some((id) => String(id) === String(student.program?._id ?? student.program));
+  const ownRegistration = ownAssignmentIds.length
+    ? await CourseRegistration.exists(
+        ownFilter({ student: student._id, offering: { $in: ownAssignmentIds } }),
+      )
+    : false;
+  if (!inProgram && !ownRegistration) {
+    throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student was not found in your programmes or classes.');
+  }
 
-  const student = withStudent.student;
-  const dto = studentDto(student);
-  const activeRows = rows.filter((row) => row.status === 'registered');
-  const offerings = rows
+  const rows = readIds.length
+    ? await CourseRegistration.find(ownFilter({ offering: { $in: readIds }, student: student._id }))
+        .populate(STUDENT_POPULATE)
+        .populate(OFFERING_POPULATE)
+        .lean()
+    : [];
+
+  const ownRows = rows.filter((row) => {
+    const offering = row.offering && typeof row.offering === 'object' ? row.offering : null;
+    return String(offering?.teacher?._id ?? offering?.teacher ?? '') === String(teacherId);
+  });
+  const activeRows = ownRows.filter((row) => row.status === 'registered');
+  const offerings = ownRows
     .map((row) => row.offering)
     .filter((row) => row && typeof row === 'object');
   const offeringIds = offerings.map((row) => row._id);
@@ -174,14 +227,18 @@ export async function teacherStudentDetail(teacherId, studentId) {
     .sort((a, b) => a.title.localeCompare(b.title));
 
   return {
-    student: dto,
+    student: studentDto(student),
     classes: rows
       .filter((row) => row.offering && typeof row.offering === 'object')
       .map((row) =>
-        assignmentDto(row.offering, {
-          registrationId: String(row._id),
-          registrationStatus: row.status,
-        }),
+        assignmentDto(
+          row.offering,
+          {
+            registrationId: String(row._id),
+            registrationStatus: row.status,
+          },
+          teacherId,
+        ),
       ),
     attendance,
     results: assessmentRows,
@@ -196,3 +253,4 @@ export async function teacherStudentDetail(teacherId, studentId) {
     },
   };
 }
+

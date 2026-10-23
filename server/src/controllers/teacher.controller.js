@@ -1,7 +1,23 @@
-import { asyncHandler } from '../utils/asyncHandler.js';
+﻿import { asyncHandler } from '../utils/asyncHandler.js';
 import { teacherDashboard } from '../services/teacherDashboard.service.js';
 import { listTeacherAssignments, teacherAssignmentDetail } from '../services/teacherCourse.service.js';
 import { listTeacherStudents, teacherStudentDetail } from '../services/teacherStudent.service.js';
+import { activeProgramsForTeacher } from '../services/teacherAccess.service.js';
+
+export const programs = asyncHandler(async (req, res) => {
+  const rows = await activeProgramsForTeacher(req.user.id);
+  res.json({
+    programs: rows.map((row) => ({
+      id: String(row._id),
+      code: row.code,
+      name: row.name,
+      qualificationType: row.qualificationType,
+      department: row.department
+        ? { id: String(row.department._id), code: row.department.code, name: row.department.name }
+        : null,
+    })),
+  });
+});
 
 export const dashboard = asyncHandler(async (req, res) => {
   res.json(await teacherDashboard(req.user.id));

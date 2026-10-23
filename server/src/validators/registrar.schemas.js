@@ -162,8 +162,8 @@ export const calendarEventSchema = z.object({
 });
 
 export const batchSchema = z.object({
-  code: text(30).min(1),
-  name: text(120).min(1),
+  code: text(30).optional(),
+  name: text(120).optional(),
   department: objectId.optional(),
   program: objectId.optional(),
   programs: z.array(objectId).min(1).max(50).optional(),
@@ -187,6 +187,12 @@ export const batchUpdateSchema = z.object({
   expectedCompletionYear: z.coerce.number().int().min(2000).max(2300).nullish(),
   currentLevel: z.coerce.number().int().min(1).max(20).optional(),
   status: z.enum(['planned', 'active', 'completed', 'archived']).optional(),
+});
+
+export const batchDeleteSchema = z.object({
+  batchIds: z.array(objectId).min(1).max(50),
+  confirmText: text(40).min(1),
+  code: text(10).min(1),
 });
 
 export const batchExportQuerySchema = z.object({
@@ -238,6 +244,9 @@ export const reorderCurriculumSchema = z.object({
 export const offeringCreateSchema = z.object({
   curriculumCourse: objectId,
   teacher: objectId.nullish(),
+  batch: objectId.nullish(),
+  category: z.enum(['regular', 'extension']).optional(),
+  meetingDays: z.array(z.enum(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'])).max(7).optional(),
   capacity: z.coerce.number().int().min(1).max(500).optional().default(60),
   schedule: optionalText(300),
   status: z.enum(['draft', 'open', 'in_progress', 'completed', 'cancelled']).optional().default('draft'),
@@ -245,6 +254,9 @@ export const offeringCreateSchema = z.object({
 
 export const offeringUpdateSchema = z.object({
   teacher: objectId.nullish(),
+  batch: objectId.nullish(),
+  category: z.enum(['regular', 'extension']).optional(),
+  meetingDays: z.array(z.enum(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'])).max(7).optional(),
   capacity: z.coerce.number().int().min(1).max(500).optional(),
   schedule: optionalText(300),
   status: z.enum(['draft', 'open', 'in_progress', 'completed', 'cancelled']).optional(),
@@ -255,6 +267,8 @@ export const listOfferingsQuerySchema = paginationSchema.extend({
   term: text(60).optional(),
   program: objectId.optional(),
   level: z.coerce.number().int().min(1).max(20).optional(),
+  batch: objectId.optional(),
+  category: z.enum(['regular', 'extension']).optional(),
   status: z.enum(['all', 'draft', 'open', 'in_progress', 'completed', 'cancelled']).optional().default('all'),
 });
 

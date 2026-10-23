@@ -94,6 +94,7 @@ const courseSchema = new Schema(
     department: { type: Schema.Types.ObjectId, ref: 'Department', required: true, index: true },
     creditHours: { type: Number, required: true, min: 0.5, max: 30 },
     description: { type: String, trim: true, maxlength: 1000, default: '' },
+    prerequisites: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
     active: { type: Boolean, default: true, index: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     updatedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
@@ -183,7 +184,7 @@ const batchSchema = new Schema(
   { timestamps: true },
 );
 
-batchSchema.index({ program: 1, code: 1 }, { unique: true });
+batchSchema.index({ program: 1, code: 1, category: 1 }, { unique: true });
 
 export const Department = mongoose.model('Department', departmentSchema);
 export const Program = mongoose.model('Program', programSchema);

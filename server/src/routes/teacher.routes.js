@@ -1,4 +1,4 @@
-import express, { Router } from 'express';
+﻿import express, { Router } from 'express';
 import { authenticate, requirePasswordChanged } from '../middleware/authenticate.js';
 import { requirePermission, requireRole } from '../middleware/authorize.js';
 import { validate } from '../middleware/validate.js';
@@ -16,7 +16,6 @@ import {
   courseMarkPolicySchema,
   courseMarksExportQuerySchema,
   createAssessmentSchema,
-  createMaterialSchema,
   finalizeAttendanceSchema,
   finalizeAttendanceParamSchema,
   gradeSheetQuerySchema,
@@ -28,7 +27,6 @@ import {
   listCourseResourcesQuerySchema,
   listMaterialsQuerySchema,
   listStudentsQuerySchema,
-  materialParamSchema,
   reportOptionsQuerySchema,
   reviewAssessmentSubmissionSchema,
   rosterReportQuerySchema,
@@ -38,13 +36,13 @@ import {
   studentParamSchema,
   submitCourseMarksSchema,
   updateAssessmentSchema,
-  updateMaterialSchema,
 } from '../validators/teacher.schemas.js';
 import {
   assignmentDetail,
   dashboard,
   listAssignments,
   listStudents,
+  programs,
   studentDetail,
 } from '../controllers/teacher.controller.js';
 import {
@@ -71,11 +69,8 @@ import {
   uploadDocument,
 } from '../controllers/teacherAssessments.controller.js';
 import {
-  create as createMaterial,
   list as listMaterials,
-  remove as removeMaterial,
   sharedResources,
-  update as updateMaterial,
 } from '../controllers/teacherMaterials.controller.js';
 import {
   attendanceSummary,
@@ -94,6 +89,7 @@ import {
   save as saveCourseMarksController,
   savePolicy as saveCourseMarkPolicyController,
   submit as submitCourseMarksController,
+  requestSubmitCode as requestCourseMarksCode,
 } from '../controllers/teacherCourseMarks.controller.js';
 
 const r = Router();
@@ -102,6 +98,7 @@ const r = Router();
 // route repeats its permission so the permission map stays the source of truth.
 r.use(authenticate, requirePasswordChanged, requireRole('TEACHER'));
 
+r.get('/programs', requirePermission('teacher:dashboard'), programs);
 r.get('/dashboard', requirePermission('teacher:dashboard'), dashboard);
 
 r.get('/courses', requirePermission('teacher:courses:read'), validate(listAssignmentsQuerySchema, 'query'), listAssignments);
@@ -254,26 +251,17 @@ r.get(
   validate(listCourseResourcesQuerySchema, 'query'),
   sharedResources,
 );
-r.post('/materials', requirePermission('teacher:materials:manage'), validate(createMaterialSchema), createMaterial);
-r.patch(
-  '/materials/:materialId',
-  requirePermission('teacher:materials:manage'),
-  validate(materialParamSchema, 'params'),
-  validate(updateMaterialSchema),
-  updateMaterial,
-);
-r.delete(
-  '/materials/:materialId',
-  requirePermission('teacher:materials:manage'),
-  validate(materialParamSchema, 'params'),
-  removeMaterial,
-);
 
 r.get(
   '/course-marks',
   requirePermission('teacher:assessments:manage'),
   validate(listCourseMarksQuerySchema, 'query'),
   courseMarkCourses,
+);
+r.post(
+  '/course-marks/submit-code',
+  requirePermission('teacher:assessments:manage'),
+  requestCourseMarksCode,
 );
 r.post(
   '/course-marks/submit',
@@ -370,3 +358,5 @@ r.get(
 );
 
 export default r;
+
+

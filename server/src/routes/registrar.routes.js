@@ -21,6 +21,7 @@ import {
   batchSchema,
   batchUpdateSchema,
   batchExportQuerySchema,
+  batchDeleteSchema,
   batchAssignSchema,
   progressionSchema,
   curriculumPlanCreateSchema,
@@ -73,7 +74,7 @@ import {
   structure, createDepartment, updateDepartment, deleteDepartment, createProgram, updateProgram, deleteProgram,
   calendar, createAcademicYear, updateAcademicYear, createTerm, updateTerm,
   createCalendarEvent, updateCalendarEvent, deleteCalendarEvent,
-  listBatches, getBatch, exportBatch, createBatch, updateBatch, batchAssignmentPreview, assignBatch, progressBatch,
+  listBatches, listBatchGroups, requestBatchDeleteCode, deleteBatchGroup, getBatch, exportBatch, createBatch, updateBatch, batchAssignmentPreview, assignBatch, progressBatch,
   listPlans, planOptions, createPlan, getPlan, updatePlan, addPlanCourse, updatePlanCourse,
   removePlanCourse, reorderPlanCourses, publishPlan, archivePlan, clonePlan,
   listOfferings, offeringOptions, planOfferings, createOffering, updateOffering,
@@ -160,6 +161,9 @@ r.delete('/academic-calendar/events/:id', requirePermission('calendar:manage'), 
 
 // ---- Batches and progression ------------------------------------------------
 r.get('/batches', requirePermission('batches:view'), validate(listBatchesQuerySchema, 'query'), listBatches);
+r.get('/batches/groups', requirePermission('batches:view'), validate(listBatchesQuerySchema, 'query'), listBatchGroups);
+r.post('/batches/groups/delete-code', requirePermission('batches:manage'), requestBatchDeleteCode);
+r.post('/batches/groups/delete', requirePermission('batches:manage'), validate(batchDeleteSchema), deleteBatchGroup);
 r.get('/batches/:id', requirePermission('batches:view'), validate(idParamSchema, 'params'), getBatch);
 r.get(
   '/batches/:id/export',

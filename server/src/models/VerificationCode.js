@@ -7,7 +7,16 @@ const codeSchema = new mongoose.Schema({
   // "wait before sending another one" its memory.
   purpose: {
     type: String,
-    enum: ['email_verify_link', 'login_2fa', 'password_reset', 'session_terminate', 'account_delete', 'student_delete'],
+    enum: [
+      'email_verify_link',
+      'login_2fa',
+      'password_reset',
+      'session_terminate',
+      'account_delete',
+      'student_delete',
+      'batch_delete',
+      'course_marks_submit',
+    ],
     required: true,
   },
   codeHash: { type: String, required: true },

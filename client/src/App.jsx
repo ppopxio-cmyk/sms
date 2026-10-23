@@ -114,8 +114,10 @@ export default function App() {
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/maintenance" element={<Maintenance />} />
-        <Route path="/assesmets" element={<PublicAssessment />} />
+        <Route path="/assessments" element={<PublicAssessment />} />
+        <Route path="/assessments/student-answers" element={<PublicAssessment />} />
         <Route path="/assessments/:hash" element={<PublicAssessment />} />
+        <Route path="/assesmets" element={<PublicAssessment />} />
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>

@@ -5,6 +5,7 @@ import { Assessment } from '../models/Assessment.js';
 import { Material } from '../models/Material.js';
 import { AppError } from '../utils/AppError.js';
 import { ownFilter } from './registrar.helpers.js';
+import { teacherOfferingFilter } from './teacherAccess.service.js';
 
 export const TZ = 'Africa/Addis_Ababa';
 export const READ_STATUSES = ['open', 'in_progress', 'completed'];
@@ -15,14 +16,16 @@ export const ASSIGNMENT_POPULATE = [
   { path: 'academicYear', select: 'label isCurrent status startDate endDate' },
   { path: 'program', select: 'code name qualificationType' },
   { path: 'department', select: 'code name' },
+  { path: 'batch', select: 'code name category admissionAcademicYear currentLevel status' },
 ];
 
 export const STUDENT_POPULATE = {
   path: 'student',
-  select: 'studentId firstName middleName lastName sex level email phone studentStatus enrollmentStatus program batch department',
+  select:
+    'studentId firstName middleName lastName sex level email phone studentStatus enrollmentStatus studentCategory program batch department admissionDate photo',
   populate: [
     { path: 'program', select: 'code name qualificationType' },
-    { path: 'batch', select: 'code name currentLevel status' },
+    { path: 'batch', select: 'code name category currentLevel status' },
     { path: 'department', select: 'code name' },
   ],
 };
@@ -57,6 +60,32 @@ export async function assignmentIdsForTeacher(teacherId, { includeCompleted = tr
     .select('_id')
     .lean();
   return rows.map((row) => row._id);
+}
+
+export async function readAssignmentIdsForTeacher(teacherId, { includeCompleted = true } = {}) {
+  const statuses = includeCompleted ? READ_STATUSES : WRITE_STATUSES;
+  const access = await teacherOfferingFilter(teacherId);
+  const rows = await CourseOffering.find(
+    ownFilter({ $and: [access, { status: { $in: statuses } }] }),
+  )
+    .select('_id')
+    .lean();
+  return rows.map((row) => row._id);
+}
+
+export async function assignmentForTeacherRead(teacherId, assignmentId, { populate = true } = {}) {
+  const access = await teacherOfferingFilter(teacherId);
+  let query = CourseOffering.findOne(
+    ownFilter({
+      $and: [access, { _id: assignmentId, status: { $in: READ_STATUSES } }],
+    }),
+  );
+  if (populate) query = query.populate(ASSIGNMENT_POPULATE);
+  const assignment = await query.lean();
+  if (!assignment) {
+    throw new AppError(404, 'CLASS_NOT_FOUND', 'That class was not found in your workspace.');
+  }
+  return assignment;
 }
 
 export async function assignmentForTeacher(teacherId, assignmentId, { write = false, populate = true } = {}) {
@@ -107,11 +136,17 @@ export function studentDto(student) {
     level: student.level ?? null,
     program: labelOf(student.program),
     programCode: student.program?.code ?? '',
+    programId: student.program?._id ? String(student.program._id) : null,
     batch: labelOf(student.batch, ['code', 'name']),
     batchCode: student.batch?.code ?? '',
+    batchId: student.batch?._id ? String(student.batch._id) : null,
+    batchCategory: student.batch?.category ?? student.studentCategory ?? '',
     department: labelOf(student.department),
+    category: student.studentCategory ?? '',
     studentStatus: student.studentStatus ?? '',
     enrollmentStatus: student.enrollmentStatus ?? '',
+    admissionDate: student.admissionDate ?? null,
+    photo: student.photo ?? null,
     email: student.email ?? '',
     phone: student.phone ?? '',
   };
@@ -154,11 +189,14 @@ export async function materialForTeacher(teacherId, materialId, { write = false 
   return { material, assignment };
 }
 
-export function assignmentDto(row, extra = {}) {
+export function assignmentDto(row, extra = {}, teacherId = null) {
   const course = row.course && typeof row.course === 'object' ? row.course : null;
   const year = row.academicYear && typeof row.academicYear === 'object' ? row.academicYear : null;
   const program = row.program && typeof row.program === 'object' ? row.program : null;
   const department = row.department && typeof row.department === 'object' ? row.department : null;
+  const batch = row.batch && typeof row.batch === 'object' ? row.batch : null;
+  const owner = row.teacher?._id ?? row.teacher;
+  const canManage = teacherId ? Boolean(owner) && String(owner) === String(teacherId) : Boolean(extra.canManage);
 
   return {
     id: String(row._id),
@@ -178,12 +216,16 @@ export function assignmentDto(row, extra = {}) {
     programName: program?.name ?? '',
     qualificationType: program?.qualificationType ?? '',
     department: department?.name ?? labelOf(row.department),
-    batch: '',
-    batchCode: '',
+    batch: batch ? [batch.code, batch.name].filter(Boolean).join(' · ') : '',
+    batchCode: batch?.code ?? '',
+    batchId: batch?._id ? String(batch._id) : null,
+    category: row.category || batch?.category || '',
     section: '',
     schedule: row.schedule ?? '',
+    meetingDays: row.meetingDays ?? [],
     assessmentMode: row.assessmentMode ?? 'numeric',
     status: row.status,
+    canManage,
     ...extra,
   };
 }
