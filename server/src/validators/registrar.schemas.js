@@ -164,8 +164,6 @@ export const calendarEventSchema = z.object({
 export const batchSchema = z.object({
   code: text(30).optional(),
   name: text(120).optional(),
-  department: objectId.optional(),
-  program: objectId.optional(),
   programs: z.array(objectId).min(1).max(50).optional(),
   category: z.enum(['regular', 'extension']).optional().default('regular'),
   admissionAcademicYear: objectId,
@@ -178,8 +176,6 @@ export const batchSchema = z.object({
 export const batchUpdateSchema = z.object({
   code: text(30).min(1).optional(),
   name: text(120).min(1).optional(),
-  department: objectId.optional(),
-  program: objectId.optional(),
   programs: z.array(objectId).min(1).max(50).optional(),
   category: z.enum(['regular', 'extension']).optional(),
   admissionAcademicYear: objectId.optional(),

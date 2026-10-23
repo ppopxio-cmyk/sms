@@ -582,15 +582,11 @@ export const listBatches = asyncHandler(async (req, res) => {
 
 export const createBatch = asyncHandler(async (req, res) => {
   const input = req.body;
-  const programIds = [...new Set((input.programs?.length ? input.programs : [input.program]).filter(Boolean).map(String))];
+  const programIds = [...new Set((input.programs?.length ? input.programs : []).filter(Boolean).map(String))];
   if (!programIds.length) throw new AppError(400, 'PROGRAM_REQUIRED', 'Choose at least one programme for this batch.');
-  if (input.department) await requireDepartment(input.department);
 
   const programmes = await Program.find(ownFilter({ _id: { $in: programIds } })).lean();
   if (programmes.length !== programIds.length) throw new AppError(400, 'PROGRAM_INVALID', 'Choose valid programmes.');
-  if (input.department && programmes.some((program) => String(program.department) !== String(input.department))) {
-    throw new AppError(400, 'PROGRAM_DEPARTMENT_MISMATCH', 'Every chosen programme must belong to the selected department.');
-  }
   const category = input.category || 'regular';
   for (const program of programmes) {
     if (!program.active) throw new AppError(409, 'PROGRAM_INACTIVE', 'That programme is inactive and cannot receive a new batch.');
@@ -602,7 +598,7 @@ export const createBatch = asyncHandler(async (req, res) => {
   const year = await AcademicYear.findById(input.admissionAcademicYear).lean();
   if (!year) throw new AppError(400, 'ACADEMIC_YEAR_INVALID', 'Choose a valid academic year.');
   const startYear = new Date(year.startDate).getFullYear();
-  const code = String(input.code || `BAT-${startYear}`).trim().toUpperCase();
+  const code = String(input.code || `REG-BAT-${startYear}`).trim().toUpperCase();
   const name =
     String(input.name || '').trim() ||
     `${startYear} ${category === 'extension' ? 'Extension' : 'Regular'} Students`;
@@ -644,6 +640,7 @@ export const createBatch = asyncHandler(async (req, res) => {
       ...shared,
       program: program._id,
       department: program.department,
+      status: input.status || 'planned',
     })),
   );
   audit({
@@ -660,22 +657,60 @@ export const updateBatch = asyncHandler(async (req, res) => {
   const batch = await Batch.findById(req.valid.params.id);
   if (!batch) throw new AppError(404, 'BATCH_NOT_FOUND', 'That batch was not found.');
   const input = req.body;
-  if ((input.program && String(input.program) !== String(batch.program)) || input.category) {
-    const programId = input.program || batch.program;
-    const program = await Program.findById(programId).lean();
+
+  // Allow status to be changed (e.g. to archived).
+  if (input.status) {
+    batch.status = input.status;
+  }
+  if (input.category) {
+    const program = await Program.findById(batch.program).lean();
     if (!program) throw new AppError(400, 'PROGRAM_INVALID', 'Choose a valid programme.');
-    const category = input.category || batch.category || 'regular';
-    if (!(program.categories?.length ? program.categories : ['regular', 'extension']).includes(category)) {
+    if (!(program.categories?.length ? program.categories : ['regular', 'extension']).includes(input.category)) {
       throw new AppError(409, 'PROGRAM_CATEGORY', 'This programme is not offered in the selected regular/extension stream.');
     }
-    batch.program = program._id;
-    batch.department = program.department;
+    batch.category = input.category;
+  }
+  // Allow adding/updating programmes by re-creating rows for new programmes and updating existing ones.
+  if (input.programs?.length) {
+    const existingProgramIds = new Set([String(batch.program)]);
+    const newProgramIds = input.programs.filter((id) => !existingProgramIds.has(id)).map(String);
+    if (newProgramIds.length) {
+      const newPrograms = await Program.find(ownFilter({ _id: { $in: newProgramIds } })).lean();
+      if (newPrograms.length !== newProgramIds.length) {
+        throw new AppError(400, 'PROGRAM_INVALID', 'One or more selected programmes were not found.');
+      }
+      const category = input.category || batch.category || 'regular';
+      for (const program of newPrograms) {
+        if (!(program.categories?.length ? program.categories : ['regular', 'extension']).includes(category)) {
+          throw new AppError(409, 'PROGRAM_CATEGORY', `Programme ${program.code} is not offered in the ${category} stream.`);
+        }
+      }
+      await Batch.insertMany(
+        newPrograms.map((program) => ({
+          ...batch.toObject(),
+          _id: undefined,
+          program: program._id,
+          department: program.department,
+          createdAt: undefined,
+          createdBy: req.user.id,
+          updatedBy: req.user.id,
+        })),
+      );
+    }
+    batch.program = newProgramIds.length ? newPrograms?.[0]?._id ?? batch.program : batch.program;
   }
   if (input.durationYears) {
     const year = await AcademicYear.findById(input.admissionAcademicYear || batch.admissionAcademicYear).lean();
-    if (year) input.expectedCompletionYear = new Date(year.startDate).getFullYear() + Number(input.durationYears);
+    if (year) {
+      batch.admissionAcademicYear = year._id;
+      batch.expectedCompletionYear = new Date(year.startDate).getFullYear() + Number(input.durationYears);
+    }
   }
-  Object.assign(batch, input, { updatedBy: req.user.id });
+  if (input.code || input.name) {
+    batch.code = input.code || batch.code;
+    batch.name = input.name || batch.name;
+  }
+  batch.updatedBy = req.user.id;
   await batch.save();
   audit({ req, action: 'registrar.batch.update', targetType: 'Batch', targetId: batch._id });
   res.json({ batch });
@@ -1178,6 +1213,14 @@ export const publishPlan = asyncHandler(async (req, res) => {
     throw err;
   }
   audit({ req, action: 'registrar.curriculum.plan.publish', targetType: 'CurriculumPlan', targetId: plan._id, meta: { totalCredits } });
+  void notifyProgramTeachers(plan.program, {
+    type: 'curriculum_published',
+    title: `Curriculum published: ${plan.title}`,
+    body: `${entries.length} course${entries.length === 1 ? '' : 's'} are now available in the official plan. Check your materials page.`,
+    actorId: req.user.id,
+    actorName: req.user.name || 'Registrar',
+    meta: { planId: String(plan._id), program: String(plan.program), courseCount: entries.length },
+  }).catch(() => {});
   res.json({ plan });
 });
 

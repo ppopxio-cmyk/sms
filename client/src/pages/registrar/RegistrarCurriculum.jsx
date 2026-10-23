@@ -446,7 +446,7 @@ function EditPlanModal({ open, plan, onClose, onSaved }) {
 }
 
 function CourseModal({ open, plan, record, options, onClose, onSaved }) {
-  const [form, setForm] = useState({ courses: [], level: 1, term: '', creditHours: 3, category: 'required', prerequisites: [] });
+  const [form, setForm] = useState({ courses: [], level: 1, term: '', creditHours: 3, category: 'required', prerequisites: [], programmeCode: '' });
   const [error, setError] = useState('');
 
   const planTerms = useMemo(() => {
@@ -455,11 +455,30 @@ function CourseModal({ open, plan, record, options, onClose, onSaved }) {
       .map((row) => row.name);
     if (record?.term && !names.includes(record.term)) names.push(record.term);
     return Array.from(new Set(names));
-  }, [options?.terms, plan?.academicYear?.id, record?.term]);
+  }, [options?.terms, plan, record]);
+
+  // Auto-generate course code from programme code + sequential number
+  const planCourses = useMemo(() => {
+    if (!plan?.id) return [];
+    return (options?.courses || []).filter((c) => c.planId === plan.id || c._planId === plan.id);
+  }, [options?.courses, plan]);
+
+  const maxCourseNumber = useMemo(() => {
+    return planCourses.reduce((max, c) => {
+      const match = String(c.code).match(new RegExp(`^${form.programmeCode || plan?.program?.code || 'XX'}-(\\d+)$`, 'i'));
+      return Math.max(max, match ? parseInt(match[1], 10) : 0);
+    }, 0);
+  }, [planCourses, form.programmeCode, plan?.program?.code]);
+
+  const nextCourseCode = useMemo(() => {
+    const prefix = form.programmeCode || plan?.program?.code || 'XX';
+    return `${prefix}-${String(maxCourseNumber + 1).padStart(3, '0')}`;
+  }, [form.programmeCode, plan?.program?.code, maxCourseNumber]);
 
   useEffect(() => {
     if (!open) return;
     setError('');
+    const selectedProgram = (options?.programs || []).find((p) => p.id === plan?.program?.id);
     setForm(record ? {
       courses: [record.course?.id].filter(Boolean),
       level: record.level || 1,
@@ -467,6 +486,7 @@ function CourseModal({ open, plan, record, options, onClose, onSaved }) {
       creditHours: record.creditHours || 1,
       category: record.category || 'required',
       prerequisites: (record.prerequisites || []).map((item) => item.id),
+      programmeCode: selectedProgram?.code || '',
     } : {
       courses: [],
       level: 1,
@@ -474,8 +494,9 @@ function CourseModal({ open, plan, record, options, onClose, onSaved }) {
       creditHours: 3,
       category: 'required',
       prerequisites: [],
+      programmeCode: selectedProgram?.code || '',
     });
-  }, [open, record, planTerms]);
+  }, [open, record, planTerms, plan, options?.programs]);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -556,6 +577,23 @@ function CourseModal({ open, plan, record, options, onClose, onSaved }) {
           </div>
         )}
         <FormGrid>
+          <SelectField
+            label="Programme"
+            value={form.programmeCode}
+            onChange={(event) => set('programmeCode', event.target.value)}
+            disabled={Boolean(plan?.program?.code)}
+          >
+            <option value="">Choose a programme</option>
+            {(options?.programs || []).map((row) => (
+              <option key={row.id} value={row.code}>{row.code} · {row.name}</option>
+            ))}
+          </SelectField>
+          <Field
+            label="Course code"
+            value={form.courses.length ? '' : nextCourseCode}
+            readOnly
+            hint="Auto-generated from programme prefix"
+          />
           <Field label="Level / year" type="number" min="1" max="20" value={form.level} onChange={(event) => set('level', event.target.value)} required />
           <SelectField label="Term" value={form.term} onChange={(event) => set('term', event.target.value)}>
             <option value="">No term</option>

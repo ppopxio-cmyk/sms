@@ -32,9 +32,11 @@ const EMPTY = {
 };
 
 const todayInput = () => {
+  // Addis Ababa is UTC+3, so we adjust the local time to get the correct date
   const now = new Date();
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
+  const utc = now.getTime() + now.getTimezoneOffset() * 60_000;
+  const addisTime = new Date(utc + 3 * 3600_000);
+  return addisTime.toISOString().slice(0, 10);
 };
 
 const phoneBody = (value) => {
@@ -100,10 +102,9 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
   const batches = useMemo(
     () => (options?.batches || []).filter((batch) =>
       (!form.program || batch.program === form.program)
-      && (batch.category || 'regular') === form.studentCategory
-      && (['planned', 'active'].includes(batch.status) || batch.id === form.batch),
+      && (batch.category || 'regular') === form.studentCategory,
     ),
-    [options?.batches, form.program, form.studentCategory, form.batch],
+    [options?.batches, form.program, form.studentCategory],
   );
   const levels = selectedProgram?.qualificationType === 'diploma'
     ? selectedProgram.levels?.length ? selectedProgram.levels : [1, 2, 3, 4]
@@ -172,8 +173,9 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
         throw new Error('First name, last name, department and programme are required.');
       }
       if (!form.sex) throw new Error('Choose female or male.');
-      if (!form.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
-        throw new Error('Enter a valid student email address.');
+      const emailVal = form.email.trim().toLowerCase();
+      if (!emailVal || !/^[^\s@]+@gmail\.com$/i.test(emailVal)) {
+        throw new Error('Only Gmail addresses are accepted for student records.');
       }
       if (form.batch) {
         const batch = (options?.batches || []).find((row) => row.id === form.batch);
@@ -351,9 +353,9 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
               value={form.batch}
               onChange={(event) => chooseBatch(event.target.value)}
               disabled={!form.program}
-              hint="Leave automatic to use the newest planned or active intake for this stream."
+              hint="Choose a batch for this programme and stream."
             >
-              <option value="">Automatic intake</option>
+              <option value="">Choose a batch</option>
               {batches.map((batch) => (
                 <option key={batch.id} value={batch.id}>{batch.code} · {batch.name}</option>
               ))}
@@ -369,7 +371,7 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
                 <option key={year.id} value={year.id}>{year.label}{year.isCurrent ? ' · current' : ''}</option>
               ))}
             </SelectField>
-            <Field label="Admission date" type="date" value={form.admissionDate} onChange={(event) => set('admissionDate', event.target.value)} hint="Defaults to today." />
+            <Field label="Admission date" type="date" value={form.admissionDate} onChange={(event) => set('admissionDate', event.target.value)} hint="Defaults to today (Ethiopian calendar)." />
             {editing ? (
               <Field label="Completion date" type="date" value={form.completionDate} onChange={(event) => set('completionDate', event.target.value)} hint="Required before a certificate can be issued." />
             ) : null}

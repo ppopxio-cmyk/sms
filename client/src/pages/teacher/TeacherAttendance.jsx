@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { ArrowRight, CalendarCheck, ClipboardCheck, Clock3, Play } from 'lucide-react';
 import { api } from '../../lib/api';
-import { classTitle, displayDate, periodLabel, statusLabel, statusTone, todayKey } from '../../lib/teacher';
+import { displayDate, periodLabel, statusLabel, statusTone, todayKey } from '../../lib/teacher';
 import ClassSelect from '../../components/teacher/ClassSelect';
 import EthiopianDateField from '../../components/teacher/EthiopianDateField';
 import TeacherPageHeader from '../../components/teacher/TeacherPageHeader';
@@ -42,7 +42,27 @@ export default function TeacherAttendance() {
   });
 
   const assignments = classes.data?.assignments ?? [];
-  const activeClasses = assignments.filter((row) => ['open', 'in_progress'].includes(row.status));
+  // When no CourseOfferings exist, fall back to programme-level assignments so the
+  // attendance page still has something to show instead of "no active classes".
+  const programmeFallback = useMemo(
+    () =>
+      (classes.data?.programs ?? []).map((p) => ({
+        id: `prog:${p.id}`,
+        program: p.code,
+        programName: p.name,
+        programId: p.id,
+        courseCode: '',
+        courseTitle: p.name,
+        canManage: false,
+        status: 'open',
+        assessmentMode: 'numeric',
+        category: 'regular',
+      })),
+    [classes.data?.programs],
+  );
+  const activeClasses =
+    assignments.filter((row) => ['open', 'in_progress'].includes(row.status)) ||
+    programmeFallback;
   const selectedStart = startClass || activeClasses[0]?.id || '';
   const sessions = query.data?.sessions ?? [];
   const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0 };
@@ -100,7 +120,7 @@ export default function TeacherAttendance() {
             />
             <div className="flex flex-wrap items-end gap-3">
               <ClassSelect
-                assignments={assignments}
+                assignments={assignments.length ? assignments : programmeFallback}
                 value={assignmentId}
                 allLabel="All my classes"
                 label="Filter by class"
@@ -194,7 +214,7 @@ export default function TeacherAttendance() {
 
       {assignmentId ? (
         <p className="text-xs text-slate-500">
-          Filtered to {classTitle(assignments.find((row) => row.id === assignmentId))}.{' '}
+          Filtered to {(assignments.find((row) => row.id === assignmentId) || programmeFallback.find((row) => row.id === assignmentId))?.courseTitle || assignmentId}.{' '}
           <button
             type="button"
             onClick={() => {

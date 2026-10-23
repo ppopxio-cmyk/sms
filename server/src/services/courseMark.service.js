@@ -2,6 +2,8 @@ import { AppError } from '../utils/AppError.js';
 import { CourseMarkPolicy, MARK_COMPONENTS } from '../models/CourseMarkPolicy.js';
 import { GradingPolicy, Result, findBand } from '../models/Records.js';
 import { CourseOffering, CourseRegistration } from '../models/Offering.js';
+import { CourseAssignment } from '../models/CourseAssignment.js';
+import { Program } from '../models/AcademicStructure.js';
 import { buildExport } from './export.service.js';
 import { notifyRole } from './notification.service.js';
 import { ownFilter } from './registrar.helpers.js';
@@ -120,7 +122,45 @@ export async function listCourseMarkSummary(teacherId, query) {
     .populate(ASSIGNMENT_POPULATE)
     .sort({ createdAt: -1 })
     .lean();
-  const ids = assignments.map((row) => row._id);
+
+  // When no CourseOfferings exist, fall back to programme-level CourseAssignment
+  // records so the policy page is never misleadingly empty.
+  let fallbackRows = [];
+  if (!assignments.length) {
+    const programIds = await activeProgramIdsForTeacher(teacherId);
+    const existingProgramIds = new Set(assignments.map((a) => String(a.program?._id ?? a.program)));
+    if (programIds.length) {
+      const courseAssignments = await CourseAssignment.find(
+        ownFilter({ teacher: teacherId, program: { $in: programIds }, status: 'active' }),
+      )
+        .populate('program', 'code name qualificationType')
+        .populate('course', 'code title creditHours')
+        .populate('batch', 'code name category')
+        .lean();
+      const programs = await Program.find(
+        ownFilter({ _id: { $in: courseAssignments.map((a) => String(a.program?._id ?? a.program)) } }),
+      ).select('code name qualificationType').lean();
+      const programById = Object.fromEntries(programs.map((p) => [String(p._id), p]));
+      fallbackRows = courseAssignments
+        .filter((a) => !existingProgramIds.has(String(a.program?._id ?? a.program)))
+        .map((a) => {
+          const prog = programById[String(a.program?._id ?? a.program)];
+          return {
+            _id: `pa:${String(a._id)}`,
+            course: a.course ? { _id: a.course._id, code: a.course.code, title: a.course.title, creditHours: a.course.creditHours } : null,
+            program: prog ? { _id: prog._id, code: prog.code, name: prog.name, qualificationType: prog.qualificationType } : null,
+            batch: a.batch ? { _id: a.batch._id, code: a.batch.code, name: a.batch.name, category: a.batch.category } : null,
+            teacher: teacherId,
+            term: a.term || '',
+            status: 'open',
+            assessmentMode: 'numeric',
+            category: a.batch?.category || 'regular',
+          };
+        });
+    }
+  }
+  const allAssignments = [...assignments, ...fallbackRows];
+  const ids = allAssignments.map((row) => row._id);
   const [policies, counts, calculated, submitted] = await Promise.all([
     CourseMarkPolicy.find(ownFilter({ offering: { $in: ids } })).lean(),
     CourseRegistration.aggregate([
@@ -163,7 +203,7 @@ export async function listCourseMarkSummary(teacherId, query) {
   const submittedMap = new Map(submitted.map((row) => [String(row._id), row.count]));
 
   return {
-    courses: assignments
+    courses: allAssignments
       .filter((row) => !query.program || String(row.program?._id ?? row.program) === query.program)
       .map((row) => {
         const policy = policyDto(policyMap.get(String(row._id)));

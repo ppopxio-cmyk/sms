@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { ArrowRight, Download, GraduationCap, Users } from 'lucide-react';
 import { api } from '../../lib/api';
+import { formatEthiopian } from '../../lib/ethiopianDate';
 import { classTitle } from '../../lib/teacher';
 import { useDebounced } from '../../lib/useDebounced';
 import ClassSelect from '../../components/teacher/ClassSelect';
@@ -16,6 +17,21 @@ import { EmptyState, ErrorState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';
 
 const studentSubtitle = (student) => [student.program, student.batch, student.level ? `Level ${student.level}` : ''].filter(Boolean).join(' · ');
+
+function downloadCsv(rows, filename) {
+  const headers = ['Name', 'Student ID', 'Programme', 'Batch', 'Level', 'Sex', 'Status'];
+  const escape = (v) => {
+    const s = String(v ?? '');
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [headers.join(','), ...rows.map((r) => [r.name, r.studentNumber, r.program, r.batch, r.level ?? '', r.sex ?? '', r.studentStatus ?? ''].map(escape).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
 
 export default function TeacherStudents() {
   const [params, setParams] = useSearchParams();
@@ -45,7 +61,19 @@ export default function TeacherStudents() {
 
   const students = query.data?.students ?? [];
   const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0 };
-  const programs = classes.data?.programs ?? [];
+  // When no CourseOfferings exist yet, derive programme tabs from the
+  // teacher's programme assignments so the page never shows "no students"
+  // just because the registrar hasn't created course offerings.
+  const allProgramTabs = useMemo(() => {
+    const progList = classes.data?.programs ?? [];
+    const assignedIds = new Set(classes.data?.assignments?.map((a) => a.programId).filter(Boolean));
+    return progList.map((p) => ({
+      ...p,
+      label: p.code,
+      value: p.id,
+      _fromAssignment: assignedIds.has(p.id),
+    }));
+  }, [classes.data?.programs, classes.data?.assignments]);
 
   return (
     <div className="space-y-6">
@@ -67,15 +95,29 @@ export default function TeacherStudents() {
               }}
               tabs={[
                 { key: '', label: 'All programmes' },
-                ...programs.map((p) => ({ key: p.id, label: p.code })),
+                ...allProgramTabs.map((p) => ({ key: p.value, label: p.label })),
               ]}
             />
             <div className="flex items-center gap-2">
               <p className="text-xs text-slate-500">{pagination.total} student{pagination.total === 1 ? '' : 's'}</p>
               <button
                 type="button"
+                onClick={() =>
+                  downloadCsv(
+                    students.map((s) => ({
+                      name: s.name,
+                      studentNumber: s.studentId || s.studentNumber,
+                      program: s.program,
+                      batch: s.batch,
+                      level: s.level,
+                      sex: s.sex,
+                      studentStatus: s.studentStatus,
+                    })),
+                    `students-${formatEthiopian(new Date())}.csv`,
+                  )
+                }
                 className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-600 hover:bg-slate-50"
-                title="Export student list"
+                title="Export student list as CSV"
               >
                 <Download className="h-3.5 w-3.5" /> Export
               </button>

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ChevronDown, ChevronRight, Eye, Layers3, Plus, Trash2 } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { ChevronDown, ChevronRight, Eye, Layers3, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import {
   REGISTRAR,
@@ -23,6 +24,8 @@ import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
 import SearchInput from '../../components/ui/SearchInput';
 
+const CHART_COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316', '#eab308', '#22c55e', '#06b6d4'];
+
 export default function RegistrarBatches() {
   const [search, setSearch] = useState('');
   const debounced = useDebounced(search, 300);
@@ -32,9 +35,20 @@ export default function RegistrarBatches() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [formModal, setFormModal] = useState(false);
+  const [editBatch, setEditBatch] = useState(null);
   const [expanded, setExpanded] = useState({});
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteCode, setDeleteCode] = useState('');
+
+  const studentSummary = useQuery({
+    queryKey: ['registrar', 'batches', 'student-summary'],
+    queryFn: async () => {
+      const res = await api.get(`${REGISTRAR}/batches/groups`, { params: { limit: 500, status: 'all' } });
+      const groups = res.data?.groups || [];
+      return groups.map((g) => ({ name: g.code, count: g.studentCount || 0 }));
+    },
+    staleTime: 3 * 60_000,
+  });
 
   const options = useQuery({
     queryKey: ['registrar', 'students', 'options'],
@@ -168,6 +182,9 @@ export default function RegistrarBatches() {
           >
             <Eye className="h-3.5 w-3.5" /> View
           </Link>
+          <Button size="sm" variant="ghost" onClick={() => setEditBatch(row)} aria-label={`Edit ${row.code}`}>
+            <Pencil className="h-3.5 w-3.5 text-slate-600" />
+          </Button>
           <Button size="sm" variant="ghost" onClick={() => openDelete(row)} aria-label={`Delete ${row.code}`}>
             <Trash2 className="h-3.5 w-3.5 text-rose-600" />
           </Button>
@@ -183,6 +200,39 @@ export default function RegistrarBatches() {
         subtitle="One intake group across programmes. Regular and extension groups stay separate while sharing the same batch code."
         actions={<Button onClick={() => setFormModal(true)} className="gap-2"><Plus className="h-4 w-4" /> New batch</Button>}
       />
+
+      {/* Animated performance chart */}
+      {studentSummary.data?.length > 0 && (
+        <Card>
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Student enrollment by batch</h2>
+              <p className="mt-0.5 text-xs text-slate-500">Total students across all batches.</p>
+            </div>
+            <span className="text-xs text-slate-500">
+              {studentSummary.data.reduce((s, r) => s + r.count, 0)} students
+            </span>
+          </div>
+          <div className="px-5 py-5 h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={studentSummary.data} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip
+                  formatter={(value) => [value, 'Students']}
+                  labelFormatter={(label) => `Batch: ${label}`}
+                />
+                <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                  {studentSummary.data.map((_, index) => (
+                    <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      )}
 
       <Card className="p-4 sm:p-5">
         <div className="flex flex-col gap-3">
@@ -235,6 +285,13 @@ export default function RegistrarBatches() {
         onClose={() => setFormModal(false)}
         onSaved={() => query.refetch()}
       />
+      <BatchFormModal
+        open={Boolean(editBatch)}
+        editBatch={editBatch}
+        options={options.data}
+        onClose={() => setEditBatch(null)}
+        onSaved={() => { query.refetch(); setEditBatch(null); }}
+      />
 
       <Modal
         open={Boolean(deleteTarget)}
@@ -284,7 +341,8 @@ export default function RegistrarBatches() {
   );
 }
 
-function BatchFormModal({ open, options, onClose, onSaved }) {
+function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
+  const isEdit = Boolean(editBatch);
   const [form, setForm] = useState({});
   const [error, setError] = useState('');
 
@@ -293,25 +351,51 @@ function BatchFormModal({ open, options, onClose, onSaved }) {
     setTimeout(() => {
       setError('');
       const currentYear = (options?.academicYears || []).find((year) => year.isCurrent);
-      setForm({
-        code: '',
-        name: '',
-        programs: [],
-        category: 'regular',
-        admissionAcademicYear: currentYear?.id || '',
-        durationYears: '',
-        currentLevel: 1,
-        status: 'planned',
-      });
+      if (editBatch) {
+        setForm({
+          code: editBatch.code || '',
+          name: editBatch.name || '',
+          programs: [],
+          category: editBatch.category || 'regular',
+          admissionAcademicYear: editBatch.admissionAcademicYear?.id || '',
+          durationYears: editBatch.durationYears || '',
+          currentLevel: editBatch.currentLevel || 1,
+          status: editBatch.status || 'planned',
+        });
+      } else {
+        setForm({
+          code: '',
+          name: '',
+          programs: [],
+          category: 'regular',
+          admissionAcademicYear: currentYear?.id || '',
+          durationYears: '',
+          currentLevel: 1,
+          status: 'planned',
+        });
+      }
     }, 0);
-  }, [open, options]);
+  }, [open, options, editBatch]);
 
   const save = useMutation({
     mutationFn: async () => {
       if (!form.admissionAcademicYear) {
         throw new Error('Admission academic year is required.');
       }
-      if (!form.programs?.length) throw new Error('Choose at least one programme.');
+      if (!isEdit && !form.programs?.length) throw new Error('Choose at least one programme.');
+      if (isEdit) {
+        const payload = cleanPayload({
+          code: form.code.trim() || undefined,
+          name: form.name.trim() || undefined,
+          category: form.category,
+          admissionAcademicYear: form.admissionAcademicYear || undefined,
+          durationYears: form.durationYears ? Number(form.durationYears) : undefined,
+          currentLevel: Number(form.currentLevel) || undefined,
+          status: form.status,
+          programs: form.programs?.length ? form.programs : undefined,
+        });
+        return (await api.patch(`${REGISTRAR}/batches/${editBatch.batchIds[0]}`, payload)).data;
+      }
       const payload = cleanPayload({
         code: form.code.trim() || undefined,
         name: form.name.trim() || undefined,
@@ -326,7 +410,7 @@ function BatchFormModal({ open, options, onClose, onSaved }) {
     },
     onSuccess: (data) => {
       const count = data.batches?.length;
-      toast.success(count > 1 ? `${count} programme batch rows created.` : 'Batch created.');
+      toast.success(isEdit ? 'Batch updated.' : (count > 1 ? `${count} programme batch rows created.` : 'Batch created.'));
       onSaved?.();
       onClose?.();
     },
@@ -367,24 +451,86 @@ function BatchFormModal({ open, options, onClose, onSaved }) {
     });
   };
 
+  // Auto-generate code and name when fields are blank
+  const handleAdmissionYearChange = (value) => {
+    set('admissionAcademicYear', value);
+    const year = (options?.academicYears || []).find((y) => y.id === value);
+    if (year && !form.code) {
+      const startYear = new Date(year.startDate).getFullYear();
+      set('code', `REG-BAT-${startYear}`);
+      set('name', `${startYear} ${form.category === 'extension' ? 'Extension' : 'Regular'} Students`);
+    }
+  };
+
+  const handleCategoryChange = (value) => {
+    set('category', value);
+    if (!form.name) {
+      const year = (options?.academicYears || []).find((y) => y.id === form.admissionAcademicYear);
+      if (year) {
+        const startYear = new Date(year.startDate).getFullYear();
+        set('name', `${startYear} ${value === 'extension' ? 'Extension' : 'Regular'} Students`);
+      }
+    }
+  };
+
   return (
     <Modal
       open={open}
-      title="New batch"
-      subtitle="Choose a delivery stream and every programme that shares this intake. The code and name are generated when left blank."
+      title={isEdit ? `Edit batch: ${editBatch?.code || ''}` : 'New batch'}
+      subtitle={isEdit
+        ? 'Update the batch code, name, stream or add programmes. Leave code blank to regenerate.'
+        : 'Choose a delivery stream and every programme that shares this intake. The code and name are generated when left blank.'}
       onClose={save.isPending ? undefined : onClose}
       dismissible={!save.isPending}
-      footer={<><Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending}>Create batch</Button></>}
+      footer={<><Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending}>{isEdit ? 'Save batch' : 'Create batch'}</Button></>}
     >
       <div className="grid gap-4">
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
+
+        {/* Delivery stream + Admission academic year first */}
+        <FormGrid>
+          <SelectField label="Delivery stream" value={form.category || 'regular'} onChange={(e) => handleCategoryChange(e.target.value)} required>
+            {categories.map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
+          </SelectField>
+          <SelectField label="Admission academic year" value={form.admissionAcademicYear || ''} onChange={(e) => handleAdmissionYearChange(e.target.value)} required>
+            <option value="">Choose a year</option>
+            {(options?.academicYears || []).map((year) => <option key={year.id} value={year.id}>{year.label}{year.isCurrent ? ' · current' : ''}</option>)}
+          </SelectField>
+        </FormGrid>
+
+        {/* Programmes multi-select */}
+        <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3 sm:col-span-2">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            {isEdit ? 'Programmes in this batch' : 'Programmes to include'}
+          </p>
+          <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-100 bg-white p-2">
+            {(options?.programs || []).map((row) => (
+              <label key={row.id} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+                <input
+                  type="checkbox"
+                  checked={(form.programs || []).includes(row.id)}
+                  onChange={() => toggleProgram(row.id)}
+                  disabled={isEdit}
+                  className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                />
+                <span className="min-w-0 flex-1 truncate">{row.code} · {row.name}</span>
+              </label>
+            ))}
+            {!options?.programs?.length ? <p className="px-2 py-3 text-sm text-slate-500">No programmes available.</p> : null}
+          </div>
+          {isEdit && (
+            <p className="mt-2 text-xs text-slate-500">Select additional programmes to add them to this batch.</p>
+          )}
+        </div>
+
+        {/* Auto-generated code and name at bottom */}
         <FormGrid>
           <Field
             label="Batch code"
             value={form.code || ''}
             onChange={(event) => set('code', event.target.value)}
-            placeholder="Auto: BAT-2026"
-            hint="Leave blank to use BAT-<admission year>."
+            placeholder="Auto: REG-BAT-2026"
+            hint="Leave blank to use REG-BAT-<admission year>."
           />
           <Field
             label="Batch name"
@@ -393,37 +539,13 @@ function BatchFormModal({ open, options, onClose, onSaved }) {
             placeholder="Auto: 2026 Regular Students"
             hint="Leave blank to generate a stream-aware name."
           />
-          <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3 sm:col-span-2">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Programmes in this batch</p>
-            <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-100 bg-white p-2">
-              {(options?.programs || []).map((row) => (
-                <label key={row.id} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
-                  <input
-                    type="checkbox"
-                    checked={(form.programs || []).includes(row.id)}
-                    onChange={() => toggleProgram(row.id)}
-                    className="h-4 w-4 rounded border-slate-300 text-brand-600"
-                  />
-                  <span className="min-w-0 flex-1 truncate">{row.code} · {row.name}</span>
-                </label>
-              ))}
-              {!options?.programs?.length ? <p className="px-2 py-3 text-sm text-slate-500">No programmes available.</p> : null}
-            </div>
-          </div>
-          <SelectField label="Delivery stream" value={form.category || 'regular'} onChange={(event) => set('category', event.target.value)} required>
-            {categories.map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
-          </SelectField>
-          <SelectField label="Admission academic year" value={form.admissionAcademicYear || ''} onChange={(event) => set('admissionAcademicYear', event.target.value)} required>
-            <option value="">Choose a year</option>
-            {(options?.academicYears || []).map((year) => <option key={year.id} value={year.id}>{year.label}{year.isCurrent ? ' · current' : ''}</option>)}
-          </SelectField>
           <Field label="Duration (years)" type="number" min="1" max="5" value={form.durationYears || ''} onChange={(event) => set('durationYears', event.target.value)} hint="Expected completion is calculated from the admission year. Maximum 5 years." />
           <Field label="Current level" type="number" min="1" max="20" value={form.currentLevel || 1} onChange={(event) => set('currentLevel', event.target.value)} />
           <SelectField label="Status" value={form.status || 'planned'} onChange={(event) => set('status', event.target.value)}>
             {['planned', 'active', 'completed', 'archived'].map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
           </SelectField>
         </FormGrid>
-        <p className="text-xs leading-relaxed text-slate-500">Every ticked programme gets its own batch row, sharing this code, stream and admission year. Student numbers count per programme.</p>
+        <p className="text-xs leading-relaxed text-slate-500">{isEdit ? 'Changes will apply to all programme rows in this batch group.' : 'Every ticked programme gets its own batch row, sharing this code, stream and admission year. Student numbers count per programme.'}</p>
       </div>
     </Modal>
   );

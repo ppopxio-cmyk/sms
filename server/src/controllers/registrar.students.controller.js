@@ -17,6 +17,7 @@ import { sendStudentAdmissionEmail } from '../services/mail.service.js';
 import { buildStudentProfileExport } from '../services/studentExport.service.js';
 import { logger } from '../utils/logger.js';
 import { pageOf, sortOf, searchFilter, mergeFilters, paged, ownFilter, canonicalNow } from '../services/registrar.helpers.js';
+import { normalizePhone } from '../utils/phone.js';
 
 const STUDENT_SORT = ['createdAt', 'updatedAt', 'studentId', 'fullName', 'level', 'admissionDate'];
 
@@ -140,6 +141,9 @@ async function assertCapacity(program) {
 async function assertEmailAvailable(email, excludeId) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) throw new AppError(400, 'EMAIL_REQUIRED', 'A student email address is required.');
+  if (!/^[\w.%+-]+@gmail\.com$/i.test(normalized)) {
+    throw new AppError(400, 'EMAIL_NOT_GMAIL', 'Only Gmail addresses are accepted for student records.');
+  }
   const duplicate = await Student.findOne(
     ownFilter({ email: normalized, ...(excludeId ? { _id: { $ne: excludeId } } : {}) }),
   )
@@ -150,6 +154,24 @@ async function assertEmailAvailable(email, excludeId) {
       409,
       'STUDENT_EMAIL_EXISTS',
       `That email address already belongs to student ${duplicate.studentId}.`,
+    );
+  }
+  return normalized;
+}
+
+async function assertPhoneAvailable(phone, excludeId) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return '';
+  const duplicate = await Student.findOne(
+    ownFilter({ phone: normalized, ...(excludeId ? { _id: { $ne: excludeId } } : {}) }),
+  )
+    .select('studentId')
+    .lean();
+  if (duplicate) {
+    throw new AppError(
+      409,
+      'STUDENT_PHONE_EXISTS',
+      `That phone number already belongs to student ${duplicate.studentId}.`,
     );
   }
   return normalized;
@@ -246,6 +268,7 @@ export const createStudent = asyncHandler(async (req, res) => {
   await assertCapacity(program);
   validateLevel(program, input.level || 1);
   const email = await assertEmailAvailable(input.email);
+  const phone = await assertPhoneAvailable(input.phone);
 
   let academicYear = null;
   const yearId = input.admissionAcademicYear || batch?.admissionAcademicYear;
@@ -265,6 +288,7 @@ export const createStudent = asyncHandler(async (req, res) => {
   const base = {
     ...input,
     email,
+    phone,
     studentCategory: category,
     department: department._id,
     program: program._id,
@@ -627,7 +651,7 @@ export const studentOptions = asyncHandler(async (_req, res) => {
   const [departments, programs, batches, years] = await Promise.all([
     Department.find({ active: true }).sort({ name: 1 }).lean(),
     Program.find({ active: true }).sort({ name: 1 }).lean(),
-    Batch.find(ownFilter({ status: { $in: ['planned', 'active'] } })).sort({ code: 1 }).lean(),
+    Batch.find(ownFilter({})).sort({ code: 1 }).lean(),
     AcademicYear.find().sort({ startDate: -1 }).lean(),
   ]);
   res.json({

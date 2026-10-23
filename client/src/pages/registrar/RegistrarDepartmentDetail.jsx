@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, BookOpen, Building2, UserPlus, Users } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BookOpen, Building2, UserPlus, Users } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import { REGISTRAR } from '../../lib/registrar';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';

@@ -130,11 +130,14 @@ export const analytics = asyncHandler(async (req, res) => {
   const query = req.valid.query;
   const resultMatch = { status: 'published', totalMark: { $ne: null } };
   if (query.academicYear) resultMatch.academicYear = new mongoose.Types.ObjectId(query.academicYear);
+  // After $unwind('$student'), the student fields are flattened onto the
+  // top level of the aggregation document. Use the flat names here so the
+  // downstream $match works correctly.
   const studentMatch = {};
-  if (query.department) studentMatch['student.department'] = new mongoose.Types.ObjectId(query.department);
-  if (query.program) studentMatch['student.program'] = new mongoose.Types.ObjectId(query.program);
-  if (query.batch) studentMatch['student.batch'] = new mongoose.Types.ObjectId(query.batch);
-  if (query.category) studentMatch['student.studentCategory'] = query.category;
+  if (query.department) studentMatch.department = new mongoose.Types.ObjectId(query.department);
+  if (query.program) studentMatch.program = new mongoose.Types.ObjectId(query.program);
+  if (query.batch) studentMatch.batch = new mongoose.Types.ObjectId(query.batch);
+  if (query.category) studentMatch.category = query.category;
 
   const [years, departments, programmes, batches, rows] = await Promise.all([
     AcademicYear.find().sort({ startDate: -1 }).select('label isCurrent startDate').lean(),
