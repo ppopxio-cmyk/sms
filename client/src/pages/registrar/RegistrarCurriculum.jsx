@@ -10,6 +10,7 @@ import {
   Pencil,
   Plus,
   ScrollText,
+  Search,
   Trash2,
 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
@@ -37,7 +38,7 @@ export default function RegistrarCurriculum() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const [status, setStatus] = useState('all');
-  const [program, setProgram] = useState('');
+  const [department, setDepartment] = useState('');
   const [academicYear, setAcademicYear] = useState('');
   const [selectedId, setSelectedId] = useState(searchParams.get('plan') || '');
   const [creating, setCreating] = useState(false);
@@ -48,15 +49,15 @@ export default function RegistrarCurriculum() {
   const options = useQuery({
     queryKey: ['registrar', 'curriculum', 'options'],
     queryFn: async () => (await api.get(`${REGISTRAR}/curriculum/options`)).data,
-    staleTime: 5 * 60_000,
+    staleTime: 30_000,
   });
 
   const params = useMemo(() => ({
     limit: 50,
     ...(status !== 'all' ? { status } : {}),
-    ...(program ? { program } : {}),
+    ...(department ? { department } : {}),
     ...(academicYear ? { academicYear } : {}),
-  }), [status, program, academicYear]);
+  }), [status, department, academicYear]);
 
   const plans = useQuery({
     queryKey: ['registrar', 'curriculum', params],
@@ -171,9 +172,13 @@ export default function RegistrarCurriculum() {
                 <option value="all">All plans</option>
                 {['draft', 'published', 'archived'].map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
               </SelectField>
-              <SelectField label="Programme" value={program} onChange={(event) => setProgram(event.target.value)}>
-                <option value="">All programmes</option>
-                {(options.data?.programs || []).map((row) => <option key={row.id} value={row.id}>{row.code}</option>)}
+              <SelectField label="Department" value={department} onChange={(event) => setDepartment(event.target.value)}>
+                <option value="">All departments</option>
+                {(options.data?.departments || []).map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.code} · {row.name}
+                  </option>
+                ))}
               </SelectField>
               <SelectField label="Academic year" value={academicYear} onChange={(event) => setAcademicYear(event.target.value)}>
                 <option value="">All years</option>
@@ -292,6 +297,7 @@ export default function RegistrarCurriculum() {
         options={options.data}
         onClose={() => setCourseModal(null)}
         onSaved={invalidate}
+        refetchOptions={() => options.refetch()}
       />
       <ConfirmDialog
         open={Boolean(confirm)}
@@ -482,30 +488,61 @@ function EditPlanModal({ open, plan, onClose, onSaved }) {
   );
 }
 
-function CourseModal({ open, plan, record, options, onClose, onSaved }) {
+function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOptions }) {
   const [form, setForm] = useState({ courses: [], level: 1, term: '', creditHours: 3, category: 'required', prerequisites: [] });
   const [error, setError] = useState('');
+  const [scopeFilter, setScopeFilter] = useState('programme'); // 'programme' | 'all'
+  const [searchTerm, setSearchTerm] = useState('');
 
   const defaultLevel = useMemo(() => {
     return plan?.program?.durationYears ? 1 : (plan?.program?.levels?.[0] || 1);
   }, [plan?.program]);
 
-  const availableCourses = useMemo(() => {
-    if (record) return (options?.courses || []).filter((row) => row.id === record.course?.id);
-    const planDeptId = plan?.department?.id || plan?.department || plan?.program?.department?.id || plan?.program?.department;
-    const planProgCode = plan?.program?.code || '';
-    
-    const inProg = (options?.courses || []).filter((row) => {
-      const codeMatches = planProgCode && String(row.code || '').toUpperCase().startsWith(planProgCode.toUpperCase());
-      const deptMatches = planDeptId && String(row.department?.id || row.department) === String(planDeptId);
-      return codeMatches || deptMatches;
+  const planProgId = String(plan?.program?.id || plan?.program?._id || (typeof plan?.program === 'string' ? plan.program : '') || '');
+  const planProgCode = String(plan?.program?.code || '').trim().toUpperCase();
+  const planDeptId = String(plan?.department?.id || plan?.department?._id || plan?.department || plan?.program?.department?.id || plan?.program?.department?._id || plan?.program?.department || '');
+
+  const programmeCourses = useMemo(() => {
+    return (options?.courses || []).filter((row) => {
+      // 1. Program ID directly linked via CourseResource
+      const rowProgId = String(row.program?.id || row.program?._id || '');
+      if (planProgId && rowProgId && rowProgId === planProgId) return true;
+
+      // 2. Program code match (e.g. course starts with CS- or HL- or row.program.code === planProgCode)
+      const rowProgCode = String(row.program?.code || '').trim().toUpperCase();
+      if (planProgCode) {
+        if (rowProgCode && rowProgCode === planProgCode) return true;
+        const codeUpper = String(row.code || '').trim().toUpperCase();
+        if (codeUpper.startsWith(`${planProgCode}-`) || codeUpper.startsWith(planProgCode)) return true;
+      }
+
+      // 3. Department match
+      const rowDeptId = String(row.department?.id || row.department?._id || row.department || '');
+      if (planDeptId && rowDeptId && rowDeptId === planDeptId) return true;
+
+      return false;
     });
-    return inProg.length ? inProg : (options?.courses || []);
-  }, [options?.courses, plan, record]);
+  }, [options?.courses, planProgId, planProgCode, planDeptId]);
+
+  const displayedCourses = useMemo(() => {
+    if (record) return (options?.courses || []).filter((row) => row.id === record.course?.id);
+    const allCourses = options?.courses || [];
+    // If scope is 'programme' but no programme-specific courses found, fallback to all courses
+    const baseList = scopeFilter === 'programme' && programmeCourses.length > 0 ? programmeCourses : allCourses;
+    if (!searchTerm.trim()) return baseList;
+    const term = searchTerm.trim().toLowerCase();
+    return baseList.filter((c) =>
+      String(c.code || '').toLowerCase().includes(term) ||
+      String(c.title || '').toLowerCase().includes(term)
+    );
+  }, [record, options?.courses, scopeFilter, programmeCourses, searchTerm]);
 
   useEffect(() => {
     if (!open) return;
     setError('');
+    setSearchTerm('');
+    setScopeFilter('programme');
+    refetchOptions?.();
     setForm(record ? {
       courses: [record.course?.id].filter(Boolean),
       level: record.level || defaultLevel,
@@ -521,7 +558,7 @@ function CourseModal({ open, plan, record, options, onClose, onSaved }) {
       category: 'required',
       prerequisites: [],
     });
-  }, [open, record, plan, defaultLevel]);
+  }, [open, record, plan, defaultLevel, refetchOptions]);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -602,23 +639,83 @@ function CourseModal({ open, plan, record, options, onClose, onSaved }) {
           </SelectField>
         ) : (
           <div>
-            <span className="mb-1.5 block text-sm font-medium text-slate-700">Courses in programme</span>
-            <div className="max-h-64 space-y-1 overflow-y-auto rounded-xl border border-slate-100 p-2">
-              {availableCourses.map((row) => (
-                <label key={row.id} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
-                  <input
-                    type="checkbox"
-                    checked={form.courses.includes(row.id)}
-                    onChange={() => toggleCourse(row.id)}
-                    className="h-4 w-4 rounded border-slate-300 text-brand-600"
-                  />
-                  <span className="min-w-0 flex-1 truncate">{row.code} · {row.title}</span>
-                  <span className="text-xs text-slate-400">{row.creditHours} cr</span>
-                </label>
-              ))}
-              {!availableCourses.length ? <p className="px-2 py-3 text-sm text-slate-500">No courses available for this programme.</p> : null}
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-slate-800">Courses to include</span>
+              {(options?.courses || []).length > programmeCourses.length && programmeCourses.length > 0 ? (
+                <div className="flex rounded-lg bg-slate-100 p-0.5 text-xs font-medium">
+                  <button
+                    type="button"
+                    onClick={() => setScopeFilter('programme')}
+                    className={`rounded-md px-2.5 py-1 transition ${scopeFilter === 'programme' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                  >
+                    {plan?.program?.code || 'Programme'} ({programmeCourses.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScopeFilter('all')}
+                    className={`rounded-md px-2.5 py-1 transition ${scopeFilter === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                  >
+                    All catalogue ({(options?.courses || []).length})
+                  </button>
+                </div>
+              ) : programmeCourses.length === 0 && (options?.courses || []).length > 0 ? (
+                <span className="rounded-md bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                  Showing all catalogue courses ({(options?.courses || []).length})
+                </span>
+              ) : null}
             </div>
-            <p className="mt-1.5 text-xs text-slate-500">{form.courses.length} selected.</p>
+
+            <div className="relative mb-2">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
+              <input
+                type="search"
+                placeholder="Search by course code or title…"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="focus-ring w-full rounded-xl border border-slate-200 bg-white py-1.5 pl-9 pr-3 text-xs placeholder:text-slate-400"
+              />
+            </div>
+
+            <div className="max-h-60 space-y-1 overflow-y-auto rounded-xl border border-slate-200/80 bg-slate-50/30 p-2">
+              {displayedCourses.map((row) => {
+                const isSelected = form.courses.includes(row.id);
+                return (
+                  <label
+                    key={row.id}
+                    className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition ${
+                      isSelected ? 'bg-brand-50/80 font-medium text-brand-900' : 'text-slate-700 hover:bg-slate-100/70'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleCourse(row.id)}
+                      className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    <div className="min-w-0 flex-1 truncate">
+                      <span className="font-semibold text-slate-900">{row.code}</span>
+                      <span className="mx-1.5 text-slate-300">·</span>
+                      <span className="text-slate-700">{row.title}</span>
+                    </div>
+                    <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600">
+                      {row.creditHours} cr
+                    </span>
+                  </label>
+                );
+              })}
+              {!displayedCourses.length ? (
+                <div className="py-6 text-center text-sm text-slate-500">
+                  <p>No courses found{searchTerm ? ` matching "${searchTerm}"` : ''}.</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Upload materials in Course registration to add courses to the catalogue.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+            <div className="mt-1.5 flex items-center justify-between text-xs text-slate-500">
+              <span>{form.courses.length} selected</span>
+              {displayedCourses.length > 0 ? <span>Showing {displayedCourses.length} courses</span> : null}
+            </div>
           </div>
         )}
         <FormGrid>

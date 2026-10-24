@@ -509,6 +509,7 @@ export const analyticsQuerySchema = z.object({
 });
 
 export const listPlansQuerySchema = paginationSchema.extend({
+  department: objectId.optional(),
   program: objectId.optional(),
   academicYear: objectId.optional(),
   status: z.enum(['all', 'draft', 'published', 'archived']).optional().default('all'),

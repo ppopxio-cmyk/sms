@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { CourseResource } from '../models/CourseResource.js';
-import { Program } from '../models/AcademicStructure.js';
+import { Course, Program } from '../models/AcademicStructure.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
 import { audit } from '../services/audit.service.js';
@@ -76,6 +76,27 @@ export const uploadCourseResource = asyncHandler(async (req, res) => {
       contentType: uploaded.contentType,
       bytes: uploaded.bytes,
       uploadedBy: req.user.id,
+    });
+
+    // Ensure the course exists in the academic catalogue
+    await Course.findOneAndUpdate(
+      { code: courseCode.trim().toUpperCase() },
+      {
+        $setOnInsert: {
+          code: courseCode.trim().toUpperCase(),
+          createdBy: req.user.id,
+        },
+        $set: {
+          title: courseName.trim(),
+          department: program.department,
+          creditHours: Number(creditHours) || 3,
+          active: true,
+          updatedBy: req.user.id,
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    ).catch((err) => {
+      logger.warn({ err: err.message }, 'Could not sync course material to course catalogue');
     });
   } catch (err) {
     await deleteImage(uploaded.fileId).catch(() => {});

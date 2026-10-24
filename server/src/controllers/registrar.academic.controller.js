@@ -10,9 +10,10 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { pageOf, sortOf, searchFilter, mergeFilters, paged, ownFilter } from '../services/registrar.helpers.js';
 import { planCredits } from '../services/eligibility.service.js';
 import { buildExport, EXPORT_LIMIT } from '../services/export.service.js';
-import { notifyProgramTeachers } from '../services/notification.service.js';
+import { notifyProgramTeachers, notifyUser } from '../services/notification.service.js';
 import { syncProgramTeachers } from '../services/teacherAccess.service.js';
 import { TeacherProgramAssignment } from '../models/Teaching.js';
+import { CourseResource } from '../models/CourseResource.js';
 import { sendCode } from '../services/codeDelivery.js';
 import { checkCode } from '../services/code.service.js';
 import { sendCurriculumOfferingEmail } from '../services/mail.service.js';
@@ -921,7 +922,20 @@ export const progressBatch = asyncHandler(async (req, res) => {
 export const listPlans = asyncHandler(async (req, res) => {
   const query = req.valid.query;
   const { page, limit, skip } = pageOf(query);
+
+  let departmentFilter = null;
+  if (query.department) {
+    const progIds = await Program.find({ department: query.department }).distinct('_id');
+    departmentFilter = {
+      $or: [
+        { department: query.department },
+        { program: { $in: progIds } },
+      ],
+    };
+  }
+
   const filter = mergeFilters(
+    departmentFilter,
     query.program ? { program: query.program } : null,
     query.academicYear ? { academicYear: query.academicYear } : null,
     query.status && query.status !== 'all' ? { status: query.status } : null,
@@ -964,17 +978,73 @@ export const listPlans = asyncHandler(async (req, res) => {
 });
 
 export const planOptions = asyncHandler(async (_req, res) => {
-  const [departments, programs, years, courses, terms] = await Promise.all([
+  // Sync any CourseResource records into Course collection so uploaded course materials appear in catalogue
+  try {
+    const resources = await CourseResource.find({ deletedAt: null })
+      .populate('program', 'code name department')
+      .populate('department', 'code name')
+      .lean();
+    for (const r of resources) {
+      if (r.courseCode) {
+        let deptId = r.department?._id || r.department || r.program?.department?._id || r.program?.department;
+        if (!deptId) {
+          const fallbackDept = await Department.findOne({ active: true }).lean();
+          deptId = fallbackDept?._id;
+        }
+        if (deptId) {
+          await Course.findOneAndUpdate(
+            { code: r.courseCode.trim().toUpperCase() },
+            {
+              $setOnInsert: {
+                code: r.courseCode.trim().toUpperCase(),
+                createdBy: r.uploadedBy || null,
+              },
+              $set: {
+                title: r.courseName ? r.courseName.trim() : r.courseCode,
+                department: deptId,
+                creditHours: Number(r.creditHours) || 3,
+                active: true,
+              },
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true },
+          ).catch(() => {});
+        }
+      }
+    }
+  } catch {}
+
+  // Ensure any inactive/legacy courses that have no active flag set default to active
+  await Course.updateMany({ active: { $exists: false } }, { $set: { active: true } }).catch(() => {});
+
+  const [departments, programs, years, courses, terms, resources] = await Promise.all([
     Department.find({ active: true }).sort({ name: 1 }).lean(),
     Program.find({ active: true }).populate('department', 'code name').sort({ name: 1 }).lean(),
     AcademicYear.find().sort({ startDate: -1 }).lean(),
-    Course.find({ active: true })
+    Course.find({ active: { $ne: false } })
       .populate('department', 'code name')
       .populate('prerequisites', 'code title')
       .sort({ code: 1 })
       .lean(),
     AcademicTerm.find().populate('academicYear', 'label').sort({ sequence: 1 }).lean(),
+    CourseResource.find({ deletedAt: null })
+      .populate('program', 'code name department')
+      .populate('department', 'code name')
+      .lean(),
   ]);
+
+  // Build a lookup of program metadata by courseCode from CourseResource
+  const resourceProgByCourseCode = new Map();
+  for (const r of resources) {
+    if (r.courseCode && r.program) {
+      const p = r.program;
+      resourceProgByCourseCode.set(r.courseCode.trim().toUpperCase(), {
+        id: String(p._id || p.id || p),
+        code: p.code || '',
+        name: p.name || '',
+      });
+    }
+  }
+
   res.json({
     departments: departments.map((row) => ({ id: String(row._id), code: row.code, name: row.name })),
     programs: programs.map((row) => ({
@@ -987,18 +1057,23 @@ export const planOptions = asyncHandler(async (_req, res) => {
       department: row.department ? { id: String(row.department._id), code: row.department.code, name: row.department.name } : null,
     })),
     academicYears: years.map((row) => ({ id: String(row._id), label: row.label, isCurrent: row.isCurrent })),
-    courses: courses.map((row) => ({
-      id: String(row._id),
-      code: row.code,
-      title: row.title,
-      creditHours: row.creditHours,
-      prerequisites: (row.prerequisites || []).map((course) =>
-        course && typeof course === 'object'
-          ? { id: String(course._id), code: course.code, title: course.title }
-          : { id: String(course), code: '', title: '' },
-      ),
-      department: row.department ? { id: String(row.department._id), code: row.department.code, name: row.department.name } : null,
-    })),
+    courses: courses.map((row) => {
+      const codeUpper = String(row.code || '').trim().toUpperCase();
+      const progMeta = resourceProgByCourseCode.get(codeUpper) || null;
+      return {
+        id: String(row._id),
+        code: row.code,
+        title: row.title,
+        creditHours: row.creditHours,
+        program: progMeta,
+        prerequisites: (row.prerequisites || []).map((course) =>
+          course && typeof course === 'object'
+            ? { id: String(course._id), code: course.code, title: course.title }
+            : { id: String(course), code: '', title: '' },
+        ),
+        department: row.department ? { id: String(row.department._id), code: row.department.code, name: row.department.name } : null,
+      };
+    }),
     terms: terms.map((row) => ({
       id: String(row._id),
       name: row.name,
@@ -1225,8 +1300,70 @@ export const publishPlan = asyncHandler(async (req, res) => {
   }
   // Get programme and assigned teachers
   const program = await Program.findById(plan.program).populate('teachers', 'name email').lean();
-  const programTeachers = (program?.teachers || []).filter(Boolean);
+  let programTeachers = (program?.teachers || []).filter(Boolean);
+
+  // If no direct teachers on program, check active TeacherProgramAssignment records
+  if (!programTeachers.length) {
+    const assignments = await TeacherProgramAssignment.find({ program: plan.program, status: 'active' })
+      .populate('teacher', 'name email')
+      .lean();
+    programTeachers = assignments.map((a) => a.teacher).filter(Boolean);
+  }
+
+  // If still none, check teachers belonging to this department
+  const deptId = program?.department || plan.department;
+  if (!programTeachers.length && deptId) {
+    programTeachers = await User.find({
+      role: { $in: ['TEACHER', 'teacher'] },
+      department: deptId,
+      status: { $ne: 'disabled' },
+      deletedAt: null,
+    }).select('name email').lean();
+  }
+
+  // Fallback to any active teachers if needed so classes have an instructor
+  if (!programTeachers.length) {
+    programTeachers = await User.find({
+      role: { $in: ['TEACHER', 'teacher'] },
+      status: { $ne: 'disabled' },
+      deletedAt: null,
+    }).limit(5).select('name email').lean();
+  }
+
   const primaryTeacherId = programTeachers[0]?._id || null;
+
+  // Make programme active and ensure teacher assignment sync
+  if (programTeachers.length > 0) {
+    await syncProgramTeachers({
+      programId: plan.program,
+      teacherIds: programTeachers.map((t) => t._id),
+      source: 'program',
+      actorId: req.user.id,
+    }).catch(() => {});
+
+    await Program.updateOne(
+      { _id: plan.program },
+      { $addToSet: { teachers: { $each: programTeachers.map((t) => t._id) } }, $set: { active: true } },
+    ).catch(() => {});
+  } else {
+    await Program.updateOne({ _id: plan.program }, { $set: { active: true } }).catch(() => {});
+  }
+
+  // Make programme pending to active class: activate batches, student enrollments, and course offerings
+  await Batch.updateMany(
+    ownFilter({ program: plan.program, status: { $in: ['planned', 'pending'] } }),
+    { $set: { status: 'active' } },
+  ).catch(() => {});
+
+  await Student.updateMany(
+    ownFilter({ program: plan.program, enrollmentStatus: { $in: ['pending', 'planned'] } }),
+    { $set: { enrollmentStatus: 'active' } },
+  ).catch(() => {});
+
+  await CourseOffering.updateMany(
+    ownFilter({ program: plan.program, status: { $in: ['draft', 'pending'] } }),
+    { $set: { status: 'open', ...(primaryTeacherId ? { teacher: primaryTeacherId } : {}) } },
+  ).catch(() => {});
 
   // Auto-create/upsert course offerings for each curriculum course in this published plan
   for (const entry of entries) {
@@ -1275,6 +1412,20 @@ export const publishPlan = asyncHandler(async (req, res) => {
   }
 
   audit({ req, action: 'registrar.curriculum.plan.publish', targetType: 'CurriculumPlan', targetId: plan._id, meta: { totalCredits } });
+
+  // In-app notifications to each teacher
+  for (const teacher of programTeachers) {
+    if (teacher?._id) {
+      void notifyUser(teacher._id, {
+        type: 'curriculum_published',
+        title: `Course Offerings Assigned: ${plan.title}`,
+        body: `${entries.length} course offerings have been assigned to your classes in ${program?.name || 'programme'}. Check teacher/classes.`,
+        actorId: req.user.id,
+        actorName: req.user.name || 'Registrar',
+        meta: { planId: String(plan._id), program: String(plan.program), courseCount: entries.length },
+      }).catch(() => {});
+    }
+  }
   void notifyProgramTeachers(plan.program, {
     type: 'curriculum_published',
     title: `Course Offerings Assigned: ${plan.title}`,
