@@ -6,6 +6,22 @@ import { Material } from '../models/Material.js';
 import { AppError } from '../utils/AppError.js';
 import { ownFilter } from './registrar.helpers.js';
 import { teacherOfferingFilter } from './teacherAccess.service.js';
+import { signedImageUrl } from './imagekit.service.js';
+
+function photoView(photo) {
+  if (!photo) return null;
+  const usable = photo.status !== 'missing';
+  const url = usable && photo.filePath ? signedImageUrl(photo.filePath, { expiresIn: 3600 }) : usable ? photo.url : null;
+  const thumbnailUrl = usable
+    ? photo.filePath
+      ? signedImageUrl(photo.filePath, {
+          transformation: [{ width: 160, height: 160, cropMode: 'extract' }],
+          expiresIn: 3600,
+        })
+      : photo.thumbnailUrl || url
+    : null;
+  return { ...photo, url, thumbnailUrl: thumbnailUrl || url };
+}
 
 export const TZ = 'Africa/Addis_Ababa';
 export const READ_STATUSES = ['open', 'in_progress', 'completed'];
@@ -146,7 +162,7 @@ export function studentDto(student) {
     studentStatus: student.studentStatus ?? '',
     enrollmentStatus: student.enrollmentStatus ?? '',
     admissionDate: student.admissionDate ?? null,
-    photo: student.photo ?? null,
+    photo: photoView(student.photo),
     email: student.email ?? '',
     phone: student.phone ?? '',
   };

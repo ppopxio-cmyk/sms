@@ -1,11 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ExternalLink, FileText } from 'lucide-react';
+import { BookOpen, Download, ExternalLink, FileText, GraduationCap, Layers } from 'lucide-react';
 import { api } from '../../lib/api';
 import { formatEthiopian } from '../../lib/ethiopianDate';
 import { useDebounced } from '../../lib/useDebounced';
-import ClassSelect from '../../components/teacher/ClassSelect';
 import TeacherPageHeader from '../../components/teacher/TeacherPageHeader';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
@@ -13,8 +12,7 @@ import Card, { CardBody } from '../../components/ui/Card';
 import SearchInput from '../../components/ui/SearchInput';
 import { EmptyState, ErrorState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';
-import { SelectField } from '../../components/registrar/Fields';
-import Field from '../../components/ui/Field';
+import FilterTabs from '../../components/ui/FilterTabs';
 
 const formatBytes = (bytes) => {
   const value = Number(bytes) || 0;
@@ -25,247 +23,267 @@ const formatBytes = (bytes) => {
 
 export default function TeacherMaterials() {
   const [params, setParams] = useSearchParams();
+  const [activeSection, setActiveSection] = useState('documents'); // 'documents' | 'curriculum'
   const [search, setSearch] = useState('');
-  const [assignmentId, setAssignmentId] = useState(params.get('assignmentId') || '');
+  const [selectedProgram, setSelectedProgram] = useState(params.get('program') || '');
   const debounced = useDebounced(search);
 
+  // Fetch teacher's assigned classes and programmes
   const classes = useQuery({
     queryKey: ['teacher', 'classes', 'options'],
     queryFn: async () => (await api.get('/teacher/courses', { params: { status: 'all', limit: 100 } })).data,
   });
 
+  // Fetch course resources uploaded by registrar
   const courseResources = useQuery({
-    queryKey: ['teacher', 'course-resources', { assignmentId, search: debounced }],
+    queryKey: ['teacher', 'course-resources', { program: selectedProgram, search: debounced }],
     queryFn: async () =>
       (
         await api.get('/teacher/materials/course-resources', {
-          params: { assignmentId: assignmentId || undefined, search: debounced || undefined },
+          params: { program: selectedProgram || undefined, search: debounced || undefined },
         })
       ).data,
   });
 
-  const [uploading, setUploading] = useState(false);
-  const [uploadFile, setUploadFile] = useState(null);
-  const [uploadError, setUploadError] = useState('');
-  const [uploadSuccess, setUploadSuccess] = useState(false);
-  const [uploadProgram, setUploadProgram] = useState('');
-  const [uploadCourseName, setUploadCourseName] = useState('');
-  const [uploadCourseCode, setUploadCourseCode] = useState('');
+  // Fetch published curriculum for teacher's programmes
+  const curriculumQuery = useQuery({
+    queryKey: ['teacher', 'materials-curriculum'],
+    queryFn: async () => (await api.get('/teacher/materials/curriculum')).data,
+  });
 
-  const assignments = classes.data?.assignments ?? [];
-  // When no CourseOfferings exist, show the teacher's programmes as options so the
-  // page is not just an empty search box.
-  const programmeFallback = useMemo(
-    () =>
-      (classes.data?.programs ?? []).map((p) => ({
-        id: `prog:${p.id}`,
-        program: p.code,
-        programName: p.name,
-        programId: p.id,
-        courseCode: '',
-        courseTitle: p.name,
-        canManage: false,
-        status: 'open',
-        assessmentMode: 'numeric',
-        category: 'regular',
-      })),
-    [classes.data?.programs],
-  );
-  const allClassOptions = assignments.length ? assignments : programmeFallback;
+  const teacherPrograms = useMemo(() => {
+    return classes.data?.programs ?? [];
+  }, [classes.data?.programs]);
+
   const sharedFiles = courseResources.data?.resources ?? [];
+  const curriculumPlans = curriculumQuery.data?.plans ?? [];
 
-  const programOptions = classes.data?.programs ?? [];
+  // Filter curriculum plans by selected programme
+  const filteredPlans = useMemo(() => {
+    let list = curriculumPlans;
+    if (selectedProgram) {
+      list = list.filter((p) => String(p.program?.id || p.program) === String(selectedProgram));
+    }
+    if (debounced.trim()) {
+      const q = debounced.trim().toLowerCase();
+      list = list.filter(
+        (p) =>
+          String(p.title || '').toLowerCase().includes(q) ||
+          String(p.program?.code || '').toLowerCase().includes(q) ||
+          (p.courses || []).some(
+            (c) =>
+              String(c.course?.code || '').toLowerCase().includes(q) ||
+              String(c.course?.title || '').toLowerCase().includes(q),
+          ),
+      );
+    }
+    return list;
+  }, [curriculumPlans, selectedProgram, debounced]);
 
-  const handleUpload = async () => {
-    if (!uploadFile || !uploadProgram) {
-      setUploadError('Choose a programme and a file.');
-      return;
-    }
-    const ext = uploadFile.name.split('.').pop()?.toLowerCase();
-    if (!['pdf', 'doc', 'docx'].includes(ext)) {
-      setUploadError('Only PDF or Word documents are accepted.');
-      return;
-    }
-    if (uploadFile.size > 10 * 1024 * 1024) {
-      setUploadError('File must be under 10 MB.');
-      return;
-    }
-    setUploadError('');
-    setUploading(true);
-    try {
-      await api.post(`/registrar/course-registration/resources`, uploadFile, {
-        params: {
-          program: uploadProgram,
-          courseName: uploadCourseName || uploadFile.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' '),
-          courseCode: uploadCourseCode || '',
-          filename: uploadFile.name,
-        },
-        headers: { 'Content-Type': uploadFile.type },
-        timeout: 60_000,
-      });
-      setUploadSuccess(true);
-      setUploadFile(null);
-      setUploadCourseName('');
-      setUploadCourseCode('');
-      setTimeout(() => setUploadSuccess(false), 3000);
-    } catch (err) {
-      setUploadError(err?.response?.data?.message || 'Upload failed.');
-    } finally {
-      setUploading(false);
-    }
-  };
+  const programTabs = useMemo(() => {
+    return [
+      { key: '', label: 'All programmes' },
+      ...teacherPrograms.map((p) => ({ key: p.id, label: `${p.code} · ${p.name}` })),
+    ];
+  }, [teacherPrograms]);
 
   return (
     <div className="space-y-6">
       <TeacherPageHeader
         eyebrow="Teaching"
-        title="Materials"
-        subtitle="Course documents shared by the registrar for your programmes and classes."
+        title="Learning materials & curriculum"
+        subtitle="Access official documents sent by the registrar and review approved curriculum plans for your programmes."
       />
+
+      {/* Programme Filter Tabs */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+        <FilterTabs
+          label="Programme"
+          value={selectedProgram}
+          onChange={(next) => {
+            setSelectedProgram(next);
+            if (next) setParams({ program: next });
+            else setParams({});
+          }}
+          tabs={programTabs}
+        />
+      </div>
+
+      {/* Section Switcher Tabs: Documents vs Curriculum */}
+      <div className="flex items-center gap-3 border-b border-slate-200 pb-2">
+        <button
+          type="button"
+          onClick={() => setActiveSection('documents')}
+          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
+            activeSection === 'documents'
+              ? 'bg-brand-600 text-white shadow-sm'
+              : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          <FileText className="h-4 w-4" />
+          Course documents
+          <Badge tone={activeSection === 'documents' ? 'brand' : 'neutral'} className="ml-1">
+            {sharedFiles.length}
+          </Badge>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveSection('curriculum')}
+          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
+            activeSection === 'curriculum'
+              ? 'bg-brand-600 text-white shadow-sm'
+              : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          <BookOpen className="h-4 w-4" />
+          Programme curriculum
+          <Badge tone={activeSection === 'curriculum' ? 'brand' : 'neutral'} className="ml-1">
+            {filteredPlans.length}
+          </Badge>
+        </button>
+      </div>
 
       <Card>
         <CardBody className="space-y-4">
-          <div className="grid gap-3 lg:grid-cols-[1fr_260px]">
-            <SearchInput
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search course documents"
-              loading={courseResources.isFetching}
-            />
-            <ClassSelect
-              assignments={allClassOptions}
-              value={assignmentId}
-              allLabel="All my programmes"
-              label="Programme"
-              onChange={(value) => {
-                setAssignmentId(value);
-                if (value) setParams({ assignmentId: value });
-                else setParams({});
-              }}
-            />
-          </div>
-
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm text-slate-500">
-              Documents are managed by the registrar and are read-only here.
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="w-full sm:w-80">
+              <SearchInput
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={activeSection === 'documents' ? 'Search course documents...' : 'Search curriculum plans or courses...'}
+                loading={courseResources.isFetching || curriculumQuery.isFetching}
+              />
+            </div>
+            <p className="text-xs text-slate-500">
+              Official materials assigned by the registrar. Read-only.
             </p>
-            <Badge tone="neutral">
-              {sharedFiles.length} file{sharedFiles.length === 1 ? '' : 's'}
-            </Badge>
           </div>
 
-          {/* Upload area */}
-          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 p-4">
-            <p className="mb-3 text-sm font-semibold text-slate-700">Upload a course document</p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <SelectField label="Programme" value={uploadProgram} onChange={(e) => setUploadProgram(e.target.value)}>
-                <option value="">Choose a programme</option>
-                {programOptions?.map((p) => (
-                  <option key={p.id} value={p.id}>{p.code} · {p.name}</option>
-                ))}
-              </SelectField>
-              <Field
-                label="Course code"
-                value={uploadCourseCode}
-                onChange={(e) => setUploadCourseCode(e.target.value)}
-                placeholder="Optional"
+          {activeSection === 'documents' ? (
+            /* Documents Section */
+            courseResources.isError ? (
+              <ErrorState message="We could not load course documents." onRetry={courseResources.refetch} />
+            ) : courseResources.isLoading ? (
+              <SkeletonRows rows={4} />
+            ) : !sharedFiles.length ? (
+              <EmptyState
+                icon={FileText}
+                title="No course documents yet"
+                message="The registrar has not uploaded a PDF or Word document for your assigned programmes."
               />
-            </div>
-            <div className="mt-3">
-              <Field
-                label="Course name"
-                value={uploadCourseName}
-                onChange={(e) => setUploadCourseName(e.target.value)}
-                placeholder="Auto-filled from filename if blank"
-              />
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <label className="focus-ring inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:border-brand-300">
-                <FileText className="h-4 w-4 text-slate-400" />
-                <span>{uploadFile ? uploadFile.name : 'Choose file...'}</span>
-                <input
-                  type="file"
-                  accept=".pdf,.doc,.docx"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) {
-                      setUploadFile(f);
-                      if (!uploadCourseName) setUploadCourseName(f.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' '));
-                    }
-                  }}
-                />
-              </label>
-              <Button
-                size="sm"
-                onClick={handleUpload}
-                loading={uploading}
-                disabled={!uploadFile || !uploadProgram}
-                className="gap-1.5"
-              >
-                <ExternalLink className="h-3.5 w-3.5" /> Upload
-              </Button>
-              {uploadSuccess && (
-                <span className="text-xs font-medium text-emerald-600">Uploaded successfully.</span>
-              )}
-            </div>
-            {uploadError && (
-              <p role="alert" className="mt-2 text-xs font-medium text-rose-600">{uploadError}</p>
-            )}
-            <p className="mt-2 text-[11px] text-slate-400">PDF or Word, max 10 MB. The file becomes available to students in this programme.</p>
-          </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2">
+                {sharedFiles.map((resource) => (
+                  <article key={resource.id} className="flex flex-col rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs transition hover:border-brand-200">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">
+                          <FileText className="h-5 w-5" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-bold text-slate-900">
+                            {resource.courseCode || 'Course'}
+                          </p>
+                          <p className="truncate text-xs text-slate-500">{resource.courseName}</p>
+                        </div>
+                      </div>
+                      <Badge tone="brand">
+                        {resource.creditHours ?? 3} Cr.
+                      </Badge>
+                    </div>
 
-          {courseResources.isError ? (
-            <ErrorState message="We could not load course documents." onRetry={courseResources.refetch} />
-          ) : courseResources.isLoading ? (
-            <SkeletonRows rows={4} />
-          ) : !sharedFiles.length ? (
-            <EmptyState
-              icon={FileText}
-              title="No course documents yet"
-              message="The registrar has not uploaded a PDF or Word document for these courses."
-            />
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2">
-              {sharedFiles.map((resource) => (
-                <article key={resource.id} className="flex flex-col rounded-2xl border border-slate-100 bg-white/70 p-5">
-                  <div className="flex items-start gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-slate-500">
-                      <FileText className="h-5 w-5" />
-                    </span>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-900">
-                        {resource.courseCode || 'Course'}
+                    <div className="mt-3 rounded-xl bg-slate-50 p-2.5">
+                      <p className="truncate text-xs font-medium text-slate-700">{resource.fileName}</p>
+                      <p className="mt-0.5 text-[11px] text-slate-400">
+                        {formatBytes(resource.bytes)}
+                        {resource.program?.code ? <> &middot; {resource.program.code} &middot; {resource.program.name}</> : null}
                       </p>
-                      <p className="truncate text-xs text-slate-500">{resource.courseName}</p>
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                      <p className="text-[11px] text-slate-400">
+                        Uploaded {resource.createdAt ? formatEthiopian(new Date(resource.createdAt)) : ''}
+                      </p>
+                      {resource.url ? (
+                        <a
+                          href={resource.url}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="focus-ring inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-100"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          Download file
+                        </a>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">File unavailable</span>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )
+          ) : (
+            /* Curriculum Section */
+            curriculumQuery.isError ? (
+              <ErrorState message="We could not load the curriculum plans." onRetry={curriculumQuery.refetch} />
+            ) : curriculumQuery.isLoading ? (
+              <SkeletonRows rows={4} />
+            ) : !filteredPlans.length ? (
+              <EmptyState
+                icon={BookOpen}
+                title="No published curriculum plans"
+                message="No published curriculum plans have been assigned to your programmes yet."
+              />
+            ) : (
+              <div className="space-y-6">
+                {filteredPlans.map((plan) => (
+                  <div key={plan.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+                    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-base font-bold text-slate-900">{plan.title}</h3>
+                          <Badge tone="success">Published · v{plan.version}</Badge>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {plan.program?.name} ({plan.program?.code}) &middot; Academic Year: {plan.academicYear?.label}
+                        </p>
+                      </div>
+                      <span className="text-xs font-semibold text-slate-500">
+                        {plan.courses?.length ?? 0} course{plan.courses?.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 divide-y divide-slate-100">
+                      {(plan.courses || []).map((entry) => (
+                        <div key={entry.id} className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+                          <div className="flex items-start gap-3">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-700">
+                              {entry.course?.code?.slice(0, 3) || 'CR'}
+                            </span>
+                            <div>
+                              <p className="text-sm font-semibold text-slate-900">
+                                {entry.course?.code} &middot; {entry.course?.title}
+                              </p>
+                              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                                <span>{entry.creditHours ?? entry.course?.creditHours ?? 3} Credit Hours</span>
+                                {entry.level ? <span>&middot; Level {entry.level}</span> : null}
+                                {entry.term ? <span>&middot; Term: {entry.term}</span> : null}
+                                <span className="capitalize">&middot; {entry.category || 'Required'}</span>
+                              </div>
+                              {entry.prerequisites?.length ? (
+                                <p className="mt-1 text-xs text-amber-700">
+                                  Prerequisites: {entry.prerequisites.map((p) => p.code).join(', ')}
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                  <p className="mt-3 truncate text-sm text-slate-700">{resource.fileName}</p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    {formatBytes(resource.bytes)}
-                    {resource.program?.code ? <> &middot; {resource.program.code}</> : null}
-                  </p>
-                  <div className="mt-auto flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
-                    <p className="text-[11px] text-slate-400">
-                      {resource.createdAt ? formatEthiopian(new Date(resource.createdAt)) : ''}
-                    </p>
-                    {resource.url ? (
-                      <a
-                        href={resource.url}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="focus-ring inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold text-brand-700 hover:bg-brand-50"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        Open document
-                      </a>
-                    ) : (
-                      <span className="text-[11px] text-slate-400">File unavailable</span>
-                    )}
-                  </div>
-                </article>
-              ))}
-            </div>
+                ))}
+              </div>
+            )
           )}
         </CardBody>
       </Card>

@@ -277,6 +277,24 @@ export function sendStudentAdmissionEmail({ to, name, studentId, program, depart
 
 // Settings can prove the mail path works without ever returning a secret. The test
 // message goes only to the signed-in administrator's own address.
+export function sendCurriculumOfferingEmail({ to, name, planTitle, programName, courseCount }) {
+  const body =
+    para(`Hi ${hi(name)},<br>The curriculum plan <strong>${esc(planTitle)}</strong> for <strong>${esc(programName)}</strong> has been published by the Registrar.`) +
+    para(`${courseCount} course offering${courseCount === 1 ? '' : 's'} have been assigned to your classes. You can now access and manage them in your teacher portal.`) +
+    note('Visit the teacher portal under "Classes" to review your offerings, student registrations and attendance.');
+  return deliver({
+    to,
+    subject: `Course Offerings Assigned: ${programName} (${planTitle})`,
+    html: layout({
+      preheader: 'New course offerings assigned',
+      title: 'Course Offerings Assigned',
+      accent: 'Academic Planning',
+      body,
+    }),
+    text: `Hi ${name}, The curriculum plan "${planTitle}" for ${programName} has been published by the Registrar with ${courseCount} course offerings assigned to your classes. Check your portal at teacher/classes.`,
+  });
+}
+
 export function sendTestEmail({ to, name, transport }) {
   const body =
     para(`Hi ${hi(name)},<br>This is a test from the college portal. If you can read it, the configured mail transport is working.`) +

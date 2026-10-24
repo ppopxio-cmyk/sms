@@ -20,6 +20,7 @@ function resourceDto(row) {
       : null,
     courseName: row.courseName,
     courseCode: row.courseCode,
+    creditHours: row.creditHours ?? 3,
     fileName: row.fileName,
     contentType: row.contentType,
     bytes: row.bytes,
@@ -45,7 +46,7 @@ export const listCourseResources = asyncHandler(async (req, res) => {
 });
 
 export const uploadCourseResource = asyncHandler(async (req, res) => {
-  const { program: programId, courseName, courseCode, filename } = req.valid.query;
+  const { program: programId, courseName, courseCode, filename, creditHours } = req.valid.query;
   const program = await Program.findById(programId).lean();
   if (!program) throw new AppError(400, 'PROGRAM_INVALID', 'Choose a valid programme.');
   if (!program.active) throw new AppError(409, 'PROGRAM_INACTIVE', 'That programme is inactive.');
@@ -68,6 +69,7 @@ export const uploadCourseResource = asyncHandler(async (req, res) => {
       department: program.department,
       courseName: courseName.trim(),
       courseCode: courseCode.trim().toUpperCase(),
+      creditHours: Number(creditHours) || 3,
       fileName: safeName,
       filePath: uploaded.filePath,
       fileId: uploaded.fileId,

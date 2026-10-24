@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, Legend } from 'recharts';
 import { SlidersHorizontal, UserPlus, Users, Building2, BookOpen, GraduationCap, TrendingUp } from 'lucide-react';
 import { api } from '../../lib/api';
 import {
@@ -47,18 +48,34 @@ export default function RegistrarStudents() {
   const [limit, setLimit] = useState(20);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [chartTab, setChartTab] = useState('programs');
 
   const options = useQuery({
     queryKey: ['registrar', 'students', 'options'],
     queryFn: async () => (await api.get(`${REGISTRAR}/students/options`)).data,
-    staleTime: 5 * 60_000,
+    staleTime: 30_000,
   });
 
   const summary = useQuery({
     queryKey: ['registrar', 'students', 'summary'],
     queryFn: async () => (await api.get(`${REGISTRAR}/students/summary`)).data,
-    staleTime: 5 * 60_000,
+    staleTime: 30_000,
   });
+
+  const chartData = useMemo(() => {
+    if (!summary.data) return [];
+    const source =
+      chartTab === 'programs'
+        ? summary.data.byProgram || []
+        : chartTab === 'departments'
+          ? summary.data.byDepartment || []
+          : summary.data.byBatch || [];
+    return source.slice(0, 8).map((row) => ({
+      name: row.code || row.name || 'Unknown',
+      students: row.count || 0,
+      trend: row.count || 0,
+    }));
+  }, [summary.data, chartTab]);
 
   const params = useMemo(
     () => ({
@@ -207,61 +224,43 @@ export default function RegistrarStudents() {
         }
       />
 
-      {/* Summary chart — only shown when no filters are active */}
+      {/* Hybrid Summary chart — only shown when no filters are active */}
       {!filtered && summary.data ? (
-        <Card>
-          <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
-            <TrendingUp className="h-4 w-4 text-brand-600" />
-            <h2 className="text-sm font-semibold text-slate-900">Enrollment overview</h2>
-            <span className="ml-auto text-xs text-slate-500">{summary.data.total} students total</span>
+        <Card className="overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-brand-600" />
+              <h2 className="text-sm font-semibold text-slate-900">Enrollment overview</h2>
+              <Badge tone="brand">{summary.data.total} total students</Badge>
+            </div>
+            <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1 text-xs font-medium">
+              {['programs', 'departments', 'batches'].map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setChartTab(tab)}
+                  className={`rounded-lg px-2.5 py-1 capitalize transition ${
+                    chartTab === tab ? 'bg-white text-slate-900 shadow-sm font-semibold' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  By {tab}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="grid gap-4 p-5 sm:grid-cols-3">
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wider text-slate-500 mb-3">By department</p>
-              <div className="space-y-1.5">
-                {(summary.data.byDepartment || []).slice(0, 5).map((row) => (
-                  <div key={row.id} className="flex items-center justify-between text-sm">
-                    <span className="text-slate-700 truncate">{row.name}</span>
-                    <span className="font-mono text-slate-900">{row.count}</span>
-                  </div>
-                ))}
-                {(summary.data.byDepartment?.length ?? 0) > 5 ? (
-                  <button
-                    type="button"
-                    onClick={() => navigate('/registrar/students')}
-                    className="text-xs text-brand-600 hover:text-brand-800"
-                  >
-                    +{(summary.data.byDepartment.length - 5)} more
-                  </button>
-                ) : null}
-              </div>
-            </div>
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wider text-slate-500 mb-3">By programme</p>
-              <div className="space-y-1.5">
-                {(summary.data.byProgram || []).slice(0, 5).map((row) => (
-                  <div key={row.id} className="flex items-center justify-between text-sm">
-                    <span className="text-slate-700 truncate">{row.name}</span>
-                    <span className="font-mono text-slate-900">{row.count}</span>
-                  </div>
-                ))}
-                {(summary.data.byProgram?.length ?? 0) > 5 ? (
-                  <button type="button" className="text-xs text-brand-600 hover:text-brand-800">
-                    +{(summary.data.byProgram.length - 5)} more
-                  </button>
-                ) : null}
-              </div>
-            </div>
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wider text-slate-500 mb-3">By batch</p>
-              <div className="space-y-1.5">
-                {(summary.data.byBatch || []).slice(0, 5).map((row) => (
-                  <div key={row.id} className="flex items-center justify-between text-sm">
-                    <span className="text-slate-700 truncate">{row.code || row.name}</span>
-                    <span className="font-mono text-slate-900">{row.count}</span>
-                  </div>
-                ))}
-              </div>
+          <div className="p-5">
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={false} />
+                  <ChartTooltip contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                  <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
+                  <Bar dataKey="students" fill="#4f46e5" radius={[6, 6, 0, 0]} name="Student Count" barSize={36} />
+                  <Line type="monotone" dataKey="trend" stroke="#06b6d4" strokeWidth={2.5} dot={{ r: 4, fill: '#06b6d4' }} name="Enrollment Trend" />
+                </ComposedChart>
+              </ResponsiveContainer>
             </div>
           </div>
         </Card>

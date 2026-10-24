@@ -55,7 +55,12 @@ export const createStudentSchema = z.object({
   lastName: text(80).min(1),
   sex: z.enum(['female', 'male']),
   dateOfBirth: date.nullish(),
-  email: z.email('Enter a valid email address.').transform((value) => value.trim().toLowerCase()),
+  email: z
+    .string()
+    .trim()
+    .email('Enter a valid email address.')
+    .refine((v) => /^[\w.%+-]+@gmail\.com$/i.test(v), 'Only Gmail addresses are accepted (@gmail.com).')
+    .transform((value) => value.trim().toLowerCase()),
   phone: ethiopianPhone,
   address: z
     .object({
@@ -109,6 +114,7 @@ const programFields = z.object({
   shortTerm: shortTermSchema.nullish(),
   capacity: z.coerce.number().int().min(1).max(10000).nullish(),
   teachers: z.array(objectId).max(100).optional(),
+  academicYears: z.array(objectId).optional(),
   description: optionalText(1000),
   active: z.boolean().optional(),
 });
@@ -224,7 +230,7 @@ export const curriculumPlanUpdateSchema = z.object({
 export const curriculumCourseSchema = z.object({
   course: objectId,
   term: optionalText(60),
-  level: z.coerce.number().int().min(1).max(20),
+  level: z.coerce.number().int().min(1).max(20).optional().default(1),
   creditHours: z.coerce.number().min(0.5).max(30),
   category: z.enum(['required', 'elective']).optional().default('required'),
   prerequisites: z.array(objectId).max(20).optional().default([]),
@@ -309,6 +315,7 @@ export const courseResourceUploadSchema = z.object({
   courseName: text(160).min(1),
   courseCode: text(40).min(1),
   filename: text(255).min(1),
+  creditHours: z.coerce.number().min(0.5).max(30).optional().default(3),
 });
 
 export const listResultsQuerySchema = paginationSchema.extend({
@@ -536,8 +543,8 @@ export const noticeListSchema = paginationSchema.extend({
 });
 
 const gradeBandSchema = z.object({
-  min: z.coerce.number().int().min(0).max(100),
-  max: z.coerce.number().int().min(0).max(100),
+  min: z.coerce.number().min(0).max(100),
+  max: z.coerce.number().min(0).max(100),
   letter: text(10).min(1),
   points: z.coerce.number().min(0).max(4),
   pass: z.boolean().default(true),

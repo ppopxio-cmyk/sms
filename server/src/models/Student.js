@@ -39,16 +39,26 @@ const studentSchema = new mongoose.Schema(
     fullName: { type: String, trim: true, maxlength: 250 },
     sex: { type: String, enum: STUDENT_SEXES, default: 'unspecified' },
     dateOfBirth: { type: Date, default: null },
-    email: { type: String, default: '', trim: true, lowercase: true, maxlength: 254 },
+    email: {
+      type: String,
+      default: '',
+      trim: true,
+      lowercase: true,
+      maxlength: 254,
+      validate: {
+        validator: (v) => !v || /^[\w.%+-]+@gmail\.com$/i.test(v),
+        message: 'Email must be a valid Gmail address (@gmail.com).',
+      },
+    },
     // Required and normalised to +251 9XX XXX XXX on the way in. A registrar cannot
     // admit a student without a working Ethiopian mobile number.
     phone: {
       type: String,
-      required: [true, 'Phone number is required.'],
+      default: '',
       trim: true,
-      set: (value) => normalizePhone(value),
+      set: (value) => (value ? normalizePhone(value) : ''),
       validate: {
-        validator: (value) => isValidEthiopianPhone(value),
+        validator: (value) => !value || isValidEthiopianPhone(value),
         message: '{VALUE} is not a valid Ethiopian mobile number.',
       },
       maxlength: 20,
@@ -90,6 +100,7 @@ const studentSchema = new mongoose.Schema(
 
 studentSchema.index({ studentId: 1 }, { unique: true });
 studentSchema.index({ email: 1 }, { unique: true, partialFilterExpression: { email: { $gt: '' } } });
+studentSchema.index({ phone: 1 }, { unique: true, partialFilterExpression: { phone: { $gt: '' } } });
 studentSchema.index({ lastName: 1, firstName: 1 });
 studentSchema.index({ program: 1, batch: 1, studentStatus: 1 });
 

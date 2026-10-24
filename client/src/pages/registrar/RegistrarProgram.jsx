@@ -15,7 +15,7 @@ import { EmptyState } from '../../components/ui/StatePanel';
 import { SkeletonCard } from '../../components/ui/Skeleton';
 
 export default function RegistrarProgram() {
-  const { programId } = useParams();
+  const { id, programId = id } = useParams();
   const queryClient = useQueryClient();
   const [assignModal, setAssignModal] = useState(null);
 

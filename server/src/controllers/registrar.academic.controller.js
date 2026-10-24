@@ -15,6 +15,7 @@ import { syncProgramTeachers } from '../services/teacherAccess.service.js';
 import { TeacherProgramAssignment } from '../models/Teaching.js';
 import { sendCode } from '../services/codeDelivery.js';
 import { checkCode } from '../services/code.service.js';
+import { sendCurriculumOfferingEmail } from '../services/mail.service.js';
 
 async function recalcPlan(planId) {
   const total = await planCredits(planId);
@@ -32,7 +33,7 @@ async function requirePlan(planId, { status } = {}) {
 }
 
 export const structure = asyncHandler(async (_req, res) => {
-  const [departments, programs, courses, plans, teachers] = await Promise.all([
+  const [departments, programs, courses, plans, teachers, academicYears] = await Promise.all([
     Department.find().sort({ name: 1 }).lean(),
     Program.find()
       .populate('department', 'code name')
@@ -46,6 +47,7 @@ export const structure = asyncHandler(async (_req, res) => {
       .sort({ createdAt: -1 })
       .lean(),
     User.find({ role: 'TEACHER', status: 'active', deletedAt: null }).select('name email').sort({ name: 1 }).lean(),
+    AcademicYear.find().sort({ startDate: -1 }).lean(),
   ]);
   const [programCounts, courseCounts] = await Promise.all([
     Program.aggregate([{ $group: { _id: '$department', count: { $sum: 1 } } }]),
@@ -73,6 +75,7 @@ export const structure = asyncHandler(async (_req, res) => {
         name: teacher.name || teacher.email,
         email: teacher.email,
       })),
+      academicYears: (row.academicYears || []).map(String),
       _id: undefined,
     })),
     courses: courses.map((row) => ({
@@ -96,6 +99,12 @@ export const structure = asyncHandler(async (_req, res) => {
       id: String(row._id),
       name: row.name || row.email,
       email: row.email,
+    })),
+    academicYears: academicYears.map((row) => ({
+      id: String(row._id),
+      label: row.label,
+      isCurrent: row.isCurrent,
+      status: row.status,
     })),
   });
 });
@@ -955,7 +964,8 @@ export const listPlans = asyncHandler(async (req, res) => {
 });
 
 export const planOptions = asyncHandler(async (_req, res) => {
-  const [programs, years, courses, terms] = await Promise.all([
+  const [departments, programs, years, courses, terms] = await Promise.all([
+    Department.find({ active: true }).sort({ name: 1 }).lean(),
     Program.find({ active: true }).populate('department', 'code name').sort({ name: 1 }).lean(),
     AcademicYear.find().sort({ startDate: -1 }).lean(),
     Course.find({ active: true })
@@ -966,6 +976,7 @@ export const planOptions = asyncHandler(async (_req, res) => {
     AcademicTerm.find().populate('academicYear', 'label').sort({ sequence: 1 }).lean(),
   ]);
   res.json({
+    departments: departments.map((row) => ({ id: String(row._id), code: row.code, name: row.name })),
     programs: programs.map((row) => ({
       id: String(row._id),
       code: row.code,
@@ -1212,15 +1223,80 @@ export const publishPlan = asyncHandler(async (req, res) => {
     }
     throw err;
   }
+  // Get programme and assigned teachers
+  const program = await Program.findById(plan.program).populate('teachers', 'name email').lean();
+  const programTeachers = (program?.teachers || []).filter(Boolean);
+  const primaryTeacherId = programTeachers[0]?._id || null;
+
+  // Auto-create/upsert course offerings for each curriculum course in this published plan
+  for (const entry of entries) {
+    if (!entry.course?._id) continue;
+    try {
+      const term = entry.term || 'Semester 1';
+      const level = entry.level || 1;
+      const creditHours = entry.creditHours || 3;
+
+      const existingOffering = await CourseOffering.findOne(ownFilter({
+        course: entry.course._id,
+        program: plan.program,
+        academicYear: plan.academicYear,
+        term,
+        level,
+      }));
+
+      if (!existingOffering) {
+        await CourseOffering.create({
+          course: entry.course._id,
+          curriculumPlan: plan._id,
+          curriculumCourse: entry._id,
+          program: plan.program,
+          department: plan.department || program?.department,
+          academicYear: plan.academicYear,
+          term,
+          level,
+          creditHours,
+          teacher: primaryTeacherId,
+          capacity: 60,
+          registeredCount: 0,
+          status: 'open',
+          createdBy: req.user.id,
+          updatedBy: req.user.id,
+        });
+      } else {
+        existingOffering.status = 'open';
+        if (!existingOffering.teacher && primaryTeacherId) {
+          existingOffering.teacher = primaryTeacherId;
+        }
+        await existingOffering.save();
+      }
+    } catch {
+      // Continue with other courses
+    }
+  }
+
   audit({ req, action: 'registrar.curriculum.plan.publish', targetType: 'CurriculumPlan', targetId: plan._id, meta: { totalCredits } });
   void notifyProgramTeachers(plan.program, {
     type: 'curriculum_published',
-    title: `Curriculum published: ${plan.title}`,
-    body: `${entries.length} course${entries.length === 1 ? '' : 's'} are now available in the official plan. Check your materials page.`,
+    title: `Course Offerings Assigned: ${plan.title}`,
+    body: `${entries.length} course offerings have been assigned to your classes in ${program?.name || 'programme'}. Check teacher/classes.`,
     actorId: req.user.id,
     actorName: req.user.name || 'Registrar',
     meta: { planId: String(plan._id), program: String(plan.program), courseCount: entries.length },
   }).catch(() => {});
+
+  // Send email to each programme teacher
+  for (const teacher of programTeachers) {
+    if (teacher?.email) {
+      void sendCurriculumOfferingEmail({
+        to: teacher.email,
+        name: teacher.name || 'Teacher',
+        planTitle: plan.title,
+        programName: program?.name || 'Programme',
+        courseCount: entries.length,
+      }).catch(() => {});
+    }
+  }
+
   res.json({ plan });
 });
 
@@ -1315,7 +1391,8 @@ export const listOfferings = asyncHandler(async (req, res) => {
 });
 
 export const offeringOptions = asyncHandler(async (_req, res) => {
-  const [programs, years, teachers, plans, batches] = await Promise.all([
+  const [departments, programs, years, teachers, plans, batches] = await Promise.all([
+    Department.find({ active: true }).sort({ name: 1 }).lean(),
     Program.find({ active: true }).sort({ name: 1 }).lean(),
     AcademicYear.find().sort({ startDate: -1 }).lean(),
     User.find({ role: 'TEACHER', status: 'active', deletedAt: null }).select('name email').sort({ name: 1 }).lean(),
@@ -1324,14 +1401,15 @@ export const offeringOptions = asyncHandler(async (_req, res) => {
       .populate('academicYear', 'label')
       .sort({ createdAt: -1 })
       .lean(),
-    Batch.find({ status: { $ne: 'archived' } })
+    Batch.find(ownFilter({ status: { $ne: 'archived' } }))
       .select('code name program category admissionAcademicYear currentLevel status')
       .sort({ code: 1, category: 1 })
       .lean(),
   ]);
   res.json({
-    programs: programs.map((row) => ({ id: String(row._id), code: row.code, name: row.name })),
-    academicYears: years.map((row) => ({ id: String(row._id), label: row.label, isCurrent: row.isCurrent })),
+    departments: departments.map((row) => ({ id: String(row._id), code: row.code, name: row.name })),
+    programs: programs.map((row) => ({ id: String(row._id), code: row.code, name: row.name, department: String(row.department) })),
+    academicYears: years.map((row) => ({ id: String(row._id), label: row.label, isCurrent: row.isCurrent, status: row.status })),
     teachers: teachers.map((row) => ({ id: String(row._id), name: row.name || row.email, email: row.email })),
     plans: plans.map((row) => ({
       id: String(row._id),

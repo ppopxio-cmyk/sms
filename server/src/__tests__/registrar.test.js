@@ -225,8 +225,8 @@ describe('Registrar grading policy', () => {
 
     const saved = await PATCH('/api/registrar/grading-policy', f.registrarToken).send({
       bands: [
-        { min: 0, max: 49.99, letter: 'F', points: 0, pass: false },
-        { min: 49.99, max: 100, letter: 'A', points: 4, pass: true },
+        { min: 0, max: 49, letter: 'F', points: 0, pass: false },
+        { min: 50, max: 100, letter: 'A', points: 4, pass: true },
       ],
       repeatPolicy: 'all',
       rounding: 2,

@@ -1,4 +1,4 @@
-﻿import mongoose from 'mongoose';
+import mongoose from 'mongoose';
 import { Student, Enrollment } from '../models/Student.js';
 import { Department, Program, Course, AcademicYear, CalendarEvent, Batch } from '../models/AcademicStructure.js';
 import { CurriculumPlan } from '../models/Curriculum.js';
@@ -127,12 +127,13 @@ export const dashboard = asyncHandler(async (req, res) => {
 });
 
 export const analytics = asyncHandler(async (req, res) => {
-  const query = req.valid.query;
-  const resultMatch = { status: 'published', totalMark: { $ne: null } };
-  if (query.academicYear) resultMatch.academicYear = new mongoose.Types.ObjectId(query.academicYear);
-  // After $unwind('$student'), the student fields are flattened onto the
-  // top level of the aggregation document. Use the flat names here so the
-  // downstream $match works correctly.
+  const query = req.valid?.query || {};
+  const resultMatch = ownFilter({
+    status: 'published',
+    totalMark: { $ne: null },
+    ...(query.academicYear ? { academicYear: new mongoose.Types.ObjectId(query.academicYear) } : {}),
+  });
+
   const studentMatch = {};
   if (query.department) studentMatch.department = new mongoose.Types.ObjectId(query.department);
   if (query.program) studentMatch.program = new mongoose.Types.ObjectId(query.program);
@@ -140,10 +141,10 @@ export const analytics = asyncHandler(async (req, res) => {
   if (query.category) studentMatch.category = query.category;
 
   const [years, departments, programmes, batches, rows] = await Promise.all([
-    AcademicYear.find().sort({ startDate: -1 }).select('label isCurrent startDate').lean(),
+    AcademicYear.find().sort({ startDate: -1 }).select('label isCurrent startDate status').lean(),
     Department.find({ active: true }).select('code name').sort({ name: 1 }).lean(),
     Program.find({ active: true }).select('code name department categories').sort({ name: 1 }).lean(),
-    Batch.find({ status: { $in: ['planned', 'active'] } }).select('code name program category').sort({ createdAt: -1 }).lean(),
+    Batch.find(ownFilter({ status: { $in: ['planned', 'active'] } })).select('code name program category').sort({ createdAt: -1 }).lean(),
     Result.aggregate([
       { $match: resultMatch },
       {
@@ -155,7 +156,6 @@ export const analytics = asyncHandler(async (req, res) => {
         },
       },
       { $unwind: '$student' },
-      ...(Object.keys(studentMatch).length ? [{ $match: studentMatch }] : []),
       {
         $project: {
           studentId: '$student._id',
@@ -172,6 +172,7 @@ export const analytics = asyncHandler(async (req, res) => {
           academicYear: 1,
         },
       },
+      ...(Object.keys(studentMatch).length ? [{ $match: studentMatch }] : []),
       {
         $facet: {
           overview: [
@@ -281,7 +282,7 @@ export const analytics = asyncHandler(async (req, res) => {
 
   res.json({
     filters: {
-      academicYears: years.map((row) => ({ id: String(row._id), label: row.label, isCurrent: row.isCurrent })),
+      academicYears: years.map((row) => ({ id: String(row._id), label: row.label, isCurrent: row.isCurrent, status: row.status })),
       departments: departments.map((row) => ({ id: String(row._id), code: row.code, name: row.name })),
       programs: programmes.map((row) => ({
         id: String(row._id),

@@ -92,8 +92,8 @@ export default function RegistrarBatch() {
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="Students" value={total} hint="All records in this batch" />
-        <Metric label="Active" value={counts.active || 0} hint="Currently enrolled" />
-        <Metric label="Graduated" value={counts.graduated || 0} hint="Completed their programme" />
+        <Metric label="Current Level" value={levelLabel(batch.currentLevel)} hint={batch.status === 'completed' ? 'Completed' : 'Current progression'} />
+        <Metric label="Duration" value={batch.durationYears ? `${batch.durationYears} Years` : 'Standard'} hint={batch.expectedCompletionYear ? `Expected: ${batch.expectedCompletionYear}` : 'Calculated duration'} />
         <Metric label="Stream" value={batch.category === 'extension' ? 'Extension' : 'Regular'} hint={batch.admissionAcademicYear?.label || 'Admission year'} />
       </div>
 

@@ -54,6 +54,7 @@ const programSchema = new Schema(
     // Null means the college has not set a cap.
     capacity: { type: Number, min: 1, max: 10000, default: null },
     teachers: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    academicYears: [{ type: Schema.Types.ObjectId, ref: 'AcademicYear' }],
     graduationPolicy: { type: graduationPolicySchema, default: () => ({}) },
     description: { type: String, trim: true, maxlength: 1000, default: '' },
     active: { type: Boolean, default: true, index: true },

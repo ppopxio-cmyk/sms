@@ -44,6 +44,7 @@ const blankProgram = () => ({
   shortTerm: { duration: 12, unit: 'weeks' },
   capacity: '',
   teachers: [],
+  academicYears: [],
   description: '',
   active: true,
 });
@@ -62,6 +63,7 @@ function programToForm(row, departmentId = '') {
     shortTerm: row.shortTerm?.duration ? row.shortTerm : { duration: 12, unit: 'weeks' },
     capacity: row.capacity ?? '',
     teachers: (row.teachers || []).map((teacher) => teacher.id || String(teacher)),
+    academicYears: (row.academicYears || []).map((y) => y.id || String(y)),
     description: row.description || '',
     active: row.active !== false,
   };
@@ -81,19 +83,26 @@ function programPayload(form) {
       : null,
     capacity: form.capacity === '' ? null : Number(form.capacity),
     teachers: form.teachers,
+    academicYears: form.academicYears || [],
     description: form.description.trim(),
     active: Boolean(form.active),
   };
 }
 
-export default function RegistrarAcademicStructure() {
+export default function RegistrarAcademicStructure({ defaultTab = 'departments' }) {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState('departments');
+  const [tab, setTab] = useState(defaultTab);
   const [search, setSearch] = useState('');
   const [departmentModal, setDepartmentModal] = useState(null);
   const [programModal, setProgramModal] = useState(null);
   const [assignModal, setAssignModal] = useState(null);
   const [deleting, setDeleting] = useState(null);
+
+  useEffect(() => {
+    if (defaultTab) {
+      setTab(defaultTab);
+    }
+  }, [defaultTab]);
 
   const query = useQuery({
     queryKey: ['registrar', 'structure'],
@@ -361,6 +370,7 @@ export default function RegistrarAcademicStructure() {
         departmentId={programModal?.departmentId}
         departments={query.data?.departments || []}
         teachers={query.data?.teachers || []}
+        academicYears={query.data?.academicYears || []}
         onClose={() => setProgramModal(null)}
         onSaved={invalidate}
       />
@@ -507,7 +517,7 @@ function DepartmentModal({ open, row, onClose, onSaved }) {
   );
 }
 
-function ProgramModal({ open, row, departmentId, departments, teachers, onClose, onSaved }) {
+function ProgramModal({ open, row, departmentId, departments, teachers, academicYears = [], onClose, onSaved }) {
   const [form, setForm] = useState(blankProgram);
   const [error, setError] = useState('');
 
@@ -560,6 +570,16 @@ function ProgramModal({ open, row, departmentId, departments, teachers, onClose,
       ? current.teachers.filter((value) => value !== teacherId)
       : [...current.teachers, teacherId],
   }));
+  const toggleAcademicYear = (yearId) => setForm((current) => ({
+    ...current,
+    academicYears: current.academicYears.includes(yearId)
+      ? current.academicYears.filter((value) => value !== yearId)
+      : [...current.academicYears, yearId],
+  }));
+
+  const activeAndPlannedYears = useMemo(() => {
+    return (academicYears || []).filter((y) => y.status === 'active' || y.status === 'planned');
+  }, [academicYears]);
 
   return (
     <Modal
@@ -628,6 +648,24 @@ function ProgramModal({ open, row, departmentId, departments, teachers, onClose,
             </div>
           </div>
         ) : null}
+
+        <div className="rounded-2xl bg-slate-50/80 p-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Academic years for this programme</p>
+          <div className="flex flex-wrap gap-2">
+            {activeAndPlannedYears.map((year) => (
+              <label key={year.id} className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${form.academicYears.includes(year.id) ? 'border-brand-200 bg-brand-50 text-brand-900' : 'border-slate-200 bg-white text-slate-700'}`}>
+                <input type="checkbox" checked={form.academicYears.includes(year.id)} onChange={() => toggleAcademicYear(year.id)} className="h-4 w-4 rounded border-slate-300 text-brand-600" />
+                <span className="font-medium">{year.name || year.year}</span>
+                <span className="text-xs text-slate-400 capitalize">({year.status})</span>
+              </label>
+            ))}
+          </div>
+          {!activeAndPlannedYears.length ? (
+            <p className="text-xs text-slate-500">No active or planned academic years found in the academic calendar.</p>
+          ) : (
+            <p className="mt-2 text-xs text-slate-500">Only active and planned academic years are available for selection.</p>
+          )}
+        </div>
 
         <div className="rounded-2xl bg-slate-50/80 p-4">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Teachers assigned to this programme</p>

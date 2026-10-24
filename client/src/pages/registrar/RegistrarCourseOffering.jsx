@@ -1,215 +1,219 @@
-import { useEffect, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
-import { ArrowLeft, BookOpen, Plus } from 'lucide-react';
-import { api, errorMessage } from '../../lib/api';
-import { REGISTRAR, cleanPayload } from '../../lib/registrar';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { BookOpen, Building2, Calendar, CheckCircle2, Clock, Users } from 'lucide-react';
+import { api } from '../../lib/api';
+import { REGISTRAR, humanStatus, levelLabel, toneForStatus } from '../../lib/registrar';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
+import RegistrarTable from '../../components/registrar/RegistrarTable';
 import Card, { CardBody, CardHeader } from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
-import Button from '../../components/ui/Button';
-import Modal from '../../components/ui/Modal';
-import { FormGrid, SelectField } from '../../components/registrar/Fields';
-import Field from '../../components/ui/Field';
-import { EmptyState } from '../../components/ui/StatePanel';
-import { SkeletonCard } from '../../components/ui/Skeleton';
+import SearchInput from '../../components/ui/SearchInput';
+import Pagination from '../../components/ui/Pagination';
 
 export default function RegistrarCourseOffering() {
-  const queryClient = useQueryClient();
-  const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({
-    curriculumCourse: '',
-    teacher: '',
-    batch: '',
-    category: 'regular',
-    status: 'draft',
-    capacity: '',
-    schedule: '',
-    meetingDays: [],
-  });
+  const [selectedDept, setSelectedDept] = useState('');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
 
-  const options = useQuery({
-    queryKey: ['registrar', 'course-offering', 'options'],
-    queryFn: async () => {
-      const [structure, calendar] = await Promise.all([
-        api.get(`${REGISTRAR}/academic-structure`),
-        api.get(`${REGISTRAR}/academic-calendar`),
-      ]);
-      return { structure: structure.data, calendar: calendar.data };
-    },
+  // Fetch options to get all departments
+  const optionsQuery = useQuery({
+    queryKey: ['registrar', 'offering-options'],
+    queryFn: async () => (await api.get(`${REGISTRAR}/offerings/options`)).data,
     staleTime: 5 * 60_000,
   });
 
-  const publishedPlans = (options.data?.structure?.plans || []).filter((p) => p.status === 'published');
+  const departments = optionsQuery.data?.departments || [];
 
-  const curriculumCourses = (options.data?.structure?.courses || []).map((course) => ({
-    id: course.id,
-    code: course.code,
-    title: course.title,
-    planId: null,
-  }));
-
-  const allTeachers = options.data?.structure?.teachers || [];
-  const allBatches = options.data?.structure?.batches || [];
-
-  const createOffering = useMutation({
-    mutationFn: async (data) => (await api.post(`${REGISTRAR}/offerings`, data)).data,
-    onSuccess: () => {
-      toast.success('Course offering created.');
-      queryClient.invalidateQueries({ queryKey: ['registrar', 'course-offering', 'options'] });
-      setShowModal(false);
-      setForm({ curriculumCourse: '', teacher: '', batch: '', category: 'regular', status: 'draft', capacity: '', schedule: '', meetingDays: [] });
-    },
-    onError: (err) => toast.error(errorMessage(err, 'Could not create offering.')),
+  // Fetch all course offerings
+  const offeringsQuery = useQuery({
+    queryKey: ['registrar', 'all-course-offerings', page, limit],
+    queryFn: async () => (await api.get(`${REGISTRAR}/offerings`, { params: { page, limit } })).data,
   });
 
-  const set = (field, value) => setForm((c) => ({ ...c, [field]: value }));
+  const offerings = offeringsQuery.data?.rows || [];
+  const pagination = offeringsQuery.data?.pagination || { page: 1, pages: 1, total: 0, limit: 20 };
+
+  // Filter offerings by department and search
+  const filteredOfferings = useMemo(() => {
+    let rows = offerings;
+    if (selectedDept) {
+      // Find programs belonging to this department
+      const progsInDept = new Set(
+        (optionsQuery.data?.programs || [])
+          .filter((p) => String(p.department?.id || p.department) === String(selectedDept))
+          .map((p) => String(p.id)),
+      );
+      rows = rows.filter((r) => {
+        const progId = String(r.program?.id || r.program?._id || '');
+        return progsInDept.has(progId);
+      });
+    }
+
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      rows = rows.filter((r) =>
+        [
+          r.course?.code,
+          r.course?.title,
+          r.program?.code,
+          r.program?.name,
+          r.teacher?.name,
+          r.batch?.code,
+        ].some((val) => String(val || '').toLowerCase().includes(q)),
+      );
+    }
+    return rows;
+  }, [offerings, selectedDept, search, optionsQuery.data?.programs]);
+
+  const columns = [
+    {
+      key: 'course',
+      label: 'Course',
+      render: (row) => (
+        <div>
+          <p className="text-sm font-semibold text-slate-900">{row.course?.code || '—'}</p>
+          <p className="text-xs text-slate-500">{row.course?.title || '—'}</p>
+        </div>
+      ),
+    },
+    {
+      key: 'program',
+      label: 'Programme & Level',
+      render: (row) => (
+        <div>
+          <p className="text-sm text-slate-800 font-medium">{row.program?.code || '—'}</p>
+          <p className="text-xs text-slate-400">
+            {levelLabel(row.level, row.program?.qualificationType)} · {humanStatus(row.category || 'regular')}
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: 'term',
+      label: 'Academic year & Term',
+      render: (row) => (
+        <div>
+          <p className="text-xs font-medium text-slate-700">{row.academicYear?.label || '—'}</p>
+          <p className="text-xs text-slate-400">{row.term || 'All terms'}</p>
+        </div>
+      ),
+    },
+    {
+      key: 'teacher',
+      label: 'Assigned teacher',
+      render: (row) => (
+        row.teacher ? (
+          <div>
+            <p className="text-sm text-slate-800">{row.teacher.name}</p>
+            <p className="text-xs text-slate-400">{row.teacher.email}</p>
+          </div>
+        ) : (
+          <span className="text-xs text-slate-400 italic">Unassigned</span>
+        )
+      ),
+    },
+    {
+      key: 'seats',
+      label: 'Enrolled / Capacity',
+      render: (row) => (
+        <div>
+          <p className="text-sm font-semibold text-slate-800">
+            {row.registeredCount ?? 0} / {row.capacity ?? '—'}
+          </p>
+          <p className="text-xs text-slate-400">
+            {row.capacity ? `${Math.max(0, row.capacity - (row.registeredCount ?? 0))} seats left` : 'No cap'}
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: 'schedule',
+      label: 'Schedule',
+      render: (row) => (
+        <span className="text-xs text-slate-600">
+          {row.schedule || 'To be announced'}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      render: (row) => <Badge tone={toneForStatus(row.status)}>{humanStatus(row.status)}</Badge>,
+    },
+  ];
 
   return (
     <div className="space-y-6">
       <RegistrarPageHeader
-        title="Course Offerings"
-        subtitle="Create course offerings from published curriculum plans. Each offering links a course to a programme, batch, term and teacher."
-        actions={
-          <Button onClick={() => setShowModal(true)} className="gap-2">
-            <Plus className="h-4 w-4" /> New offering
-          </Button>
-        }
+        title="Course offerings"
+        subtitle="View all assigned course offerings produced from published curriculum plans across departments."
       />
 
       <Card>
-        <CardHeader title="Published Plans" icon={BookOpen} subtitle="Select a plan to create offerings from." />
-        <CardBody>
-          {publishedPlans.length === 0 ? (
-            <EmptyState icon={BookOpen} title="No published plans" message="Publish a curriculum plan first before creating course offerings." />
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {publishedPlans.map((plan) => (
-                <div key={plan.id} className="rounded-xl border border-slate-100 p-4">
-                  <p className="text-sm font-semibold text-slate-900">{plan.title}</p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {plan.program?.code} · {plan.academicYear?.label}
-                  </p>
-                  <div className="mt-3">
-                    <Button size="sm" variant="secondary" onClick={() => {
-                      setForm((f) => ({ ...f, curriculumCourse: '', batch: '', teacher: '' }));
-                      setShowModal(true);
-                    }}>
-                      Create offering
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardBody>
+        {/* Department filter tabs */}
+        <div className="border-b border-slate-100 px-5 py-3.5 bg-slate-50/50">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-2 flex items-center gap-1">
+              <Building2 className="h-3.5 w-3.5" /> Department:
+            </span>
+            <button
+              type="button"
+              onClick={() => { setSelectedDept(''); setPage(1); }}
+              className={`focus-ring shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition ${!selectedDept ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}`}
+            >
+              All departments
+            </button>
+            {departments.map((dept) => (
+              <button
+                key={dept.id}
+                type="button"
+                onClick={() => { setSelectedDept(dept.id); setPage(1); }}
+                className={`focus-ring shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition ${selectedDept === dept.id ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}`}
+              >
+                {dept.code} · {dept.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
+          <p className="text-xs text-slate-500">
+            Showing <span className="font-semibold text-slate-800">{filteredOfferings.length}</span> course offering{filteredOfferings.length === 1 ? '' : 's'}
+          </p>
+          <div className="w-72">
+            <SearchInput
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              placeholder="Search course, teacher, or programme..."
+            />
+          </div>
+        </div>
+
+        <RegistrarTable
+          columns={columns}
+          rows={filteredOfferings}
+          loading={offeringsQuery.isLoading}
+          error={offeringsQuery.error ? offeringsQuery.error?.response?.data?.message || 'Offerings could not be loaded.' : null}
+          onRetry={offeringsQuery.refetch}
+          rowKey={(row) => row.id}
+          emptyTitle="No course offerings found"
+          emptyMessage="When curriculum plans are published, offerings are automatically assigned and listed here."
+          noResultsTitle="No offerings match filters"
+          noResultsMessage="Try selecting another department tab or clearing the search query."
+        />
+
+        <div className="px-5 pb-4 pt-2">
+          <Pagination
+            page={pagination.page}
+            pages={pagination.pages}
+            total={pagination.total}
+            limit={pagination.limit}
+            onPage={setPage}
+            onLimit={(val) => { setLimit(val); setPage(1); }}
+          />
+        </div>
       </Card>
-
-      <CreateOfferingModal
-        open={showModal}
-        onClose={() => setShowModal(false)}
-        onSubmit={(data) => createOffering.mutate(data)}
-        plans={publishedPlans}
-        courses={options.data?.structure?.courses || []}
-        teachers={allTeachers}
-        batches={allBatches}
-        terms={options.data?.calendar?.terms || []}
-        selectedPlanId={form.curriculumCourse ? null : null}
-      />
     </div>
-  );
-}
-
-function CreateOfferingModal({ open, onClose, onSubmit, plans, courses, teachers, batches, terms, selectedPlanId }) {
-  const [form, setForm] = useState({
-    curriculumCourse: '',
-    teacher: '',
-    batch: '',
-    category: 'regular',
-    status: 'draft',
-    capacity: '',
-    schedule: '',
-  });
-
-  useEffect(() => {
-    if (!open) return;
-    setForm({ curriculumCourse: '', teacher: '', batch: '', category: 'regular', status: 'draft', capacity: '', schedule: '' });
-  }, [open]);
-
-  const set = (field, value) => setForm((c) => ({ ...c, [field]: value }));
-
-  const selectedCourse = courses.find((c) => c.id === form.curriculumCourse);
-  const filteredBatches = batches.filter((b) => {
-    if (!form.category) return true;
-    return b.category === form.category;
-  });
-
-  const save = useMutation({
-    mutationFn: async () => {
-      if (!form.curriculumCourse) throw new Error('Choose a course.');
-      const payload = cleanPayload({
-        curriculumCourse: form.curriculumCourse,
-        teacher: form.teacher || null,
-        batch: form.batch || null,
-        category: form.category,
-        status: form.status,
-        capacity: form.capacity ? Number(form.capacity) : undefined,
-        schedule: form.schedule || '',
-      });
-      return onSubmit(payload);
-    },
-    onSuccess: () => {
-      onClose();
-    },
-    onError: (err) => toast.error(errorMessage(err, 'Could not create offering.')),
-  });
-
-  return (
-    <Modal
-      open={open}
-      title="New course offering"
-      onClose={save.isPending ? undefined : onClose}
-      dismissible={!save.isPending}
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button>
-          <Button onClick={() => save.mutate()} loading={save.isPending}>Create offering</Button>
-        </>
-      }
-    >
-      <div className="grid gap-4">
-        <FormGrid>
-          <SelectField label="Course" value={form.curriculumCourse} onChange={(e) => set('curriculumCourse', e.target.value)} required>
-            <option value="">Choose a course</option>
-            {courses.map((c) => (
-              <option key={c.id} value={c.id}>{c.code} · {c.title}</option>
-            ))}
-          </SelectField>
-          <SelectField label="Teacher (optional)" value={form.teacher} onChange={(e) => set('teacher', e.target.value)}>
-            <option value="">Unassigned</option>
-            {teachers.map((t) => (
-              <option key={t.id} value={t.id}>{t.name || t.email}</option>
-            ))}
-          </SelectField>
-          <SelectField label="Batch (optional)" value={form.batch} onChange={(e) => set('batch', e.target.value)}>
-            <option value="">All batches</option>
-            {filteredBatches.map((b) => (
-              <option key={b.id} value={b.id}>{b.code} · {b.name}</option>
-            ))}
-          </SelectField>
-          <SelectField label="Category" value={form.category} onChange={(e) => set('category', e.target.value)} required>
-            <option value="regular">Regular</option>
-            <option value="extension">Extension</option>
-          </SelectField>
-          <SelectField label="Status" value={form.status} onChange={(e) => set('status', e.target.value)}>
-            <option value="draft">Draft</option>
-            <option value="open">Open</option>
-            <option value="in_progress">In Progress</option>
-          </SelectField>
-          <Field label="Capacity" type="number" min="1" max="500" value={form.capacity} onChange={(e) => set('capacity', e.target.value)} hint="Max students that can register." />
-          <Field label="Schedule" value={form.schedule} onChange={(e) => set('schedule', e.target.value)} placeholder="e.g. Mon 8-10am, Wed 2-4pm" />
-        </FormGrid>
-      </div>
-    </Modal>
   );
 }

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ClipboardCheck, Download, FileText, Plus, Trash2, Upload, UsersRound } from 'lucide-react';
+import { BookOpen, ClipboardCheck, Download, FileText, Plus, Trash2, Upload, UsersRound } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import {
   REGISTRAR,
@@ -38,11 +39,11 @@ export default function RegistrarCourseRegistration() {
   const [recordPage, setRecordPage] = useState(1);
   const [recordLimit, setRecordLimit] = useState(20);
   const [dropping, setDropping] = useState(null);
+  const [materialDepartment, setMaterialDepartment] = useState('');
   const [materialProgram, setMaterialProgram] = useState('');
   const [materialSearch, setMaterialSearch] = useState('');
   const [materialModal, setMaterialModal] = useState(false);
   const [removingMaterial, setRemovingMaterial] = useState(null);
-  const [offeringModal, setOfferingModal] = useState(false);
 
   const options = useQuery({
     queryKey: ['registrar', 'offering-options'],
@@ -134,13 +135,20 @@ export default function RegistrarCourseRegistration() {
     }
     return map;
   }, [allMaterials]);
+  const programsInDept = useMemo(() => {
+    const list = options.data?.programs || [];
+    if (!materialDepartment) return list;
+    return list.filter((p) => String(p.department?.id || p.department) === String(materialDepartment));
+  }, [options.data?.programs, materialDepartment]);
+
   const visibleMaterials = useMemo(() => {
     const term = materialSearch.trim().toLowerCase();
     return allMaterials.filter((row) => (
-      (!materialProgram || row.program?.id === materialProgram)
+      (!materialDepartment || String(row.department?.id || row.department) === String(materialDepartment))
+      && (!materialProgram || row.program?.id === materialProgram)
       && (!term || [row.courseName, row.courseCode, row.fileName].some((value) => String(value || '').toLowerCase().includes(term)))
     ));
-  }, [allMaterials, materialProgram, materialSearch]);
+  }, [allMaterials, materialDepartment, materialProgram, materialSearch]);
 
   const materialColumns = [
     {
@@ -153,7 +161,27 @@ export default function RegistrarCourseRegistration() {
         </div>
       ),
     },
-    { key: 'program', label: 'Programme', render: (row) => row.program ? `${row.program.code} · ${row.program.name}` : '—' },
+    {
+      key: 'credits',
+      label: 'Credits',
+      render: (row) => <span className="text-xs font-semibold text-slate-700">{row.creditHours ?? 3} Cr.</span>,
+    },
+    {
+      key: 'program',
+      label: 'Programme',
+      render: (row) => row.program ? (
+        <div>
+          <Link
+            to={`/registrar/course-registration/programme/${row.program.id}`}
+            className="text-sm font-medium text-brand-700 hover:underline"
+            title="View programme courses"
+          >
+            {row.program.code} · {row.program.name}
+          </Link>
+          {row.department ? <p className="text-xs text-slate-400">{row.department.name || row.department.code}</p> : null}
+        </div>
+      ) : '—',
+    },
     {
       key: 'file',
       label: 'Material',
@@ -174,10 +202,19 @@ export default function RegistrarCourseRegistration() {
       className: 'text-right',
       mobileFull: true,
       render: (row) => (
-        <div className="flex justify-end gap-1.5">
+        <div className="flex justify-end items-center gap-1.5">
           <a href={row.url} target="_blank" rel="noreferrer" className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-brand-700 hover:bg-brand-50">
             <Download className="h-3.5 w-3.5" /> Open
           </a>
+          {row.program?.id && (
+            <Link
+              to={`/registrar/course-registration/programme/${row.program.id}`}
+              className="focus-ring inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+              title="View all courses in this programme"
+            >
+              <BookOpen className="h-3.5 w-3.5" />
+            </Link>
+          )}
           <Button size="sm" variant="ghost" onClick={() => setRemovingMaterial(row)} aria-label={`Remove ${row.fileName}`}>
             <Trash2 className="h-3.5 w-3.5 text-rose-600" />
           </Button>
@@ -285,46 +322,75 @@ export default function RegistrarCourseRegistration() {
     <div className="space-y-6">
       <RegistrarPageHeader
         title="Course registration"
-        subtitle="Register students against open offerings and keep each programme's course materials in one place."
-        actions={
-          <Button onClick={() => setOfferingModal(true)}>
-            <Plus className="h-4 w-4" />
-            New offering
-          </Button>
-        }
+        subtitle="Manage programme course materials and register students against active offerings."
       />
 
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Course materials</h2>
-            <p className="mt-0.5 text-xs text-slate-500">Every programme is listed here. Add a course name, code and its PDF or Word material.</p>
+            <p className="mt-0.5 text-xs text-slate-500">Add course materials with automated codes and filenames, and filter across departments and programmes.</p>
           </div>
           <Button onClick={() => setMaterialModal(true)} className="gap-1.5"><Plus className="h-4 w-4" /> Add material</Button>
         </div>
-        <div className="border-b border-slate-100 px-5 py-4">
-          <div className="flex gap-2 overflow-x-auto pb-1">
+        <div className="border-b border-slate-100 px-5 py-3 space-y-3">
+          {/* Department tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">Dept:</span>
+            <button
+              type="button"
+              onClick={() => { setMaterialDepartment(''); setMaterialProgram(''); }}
+              className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${!materialDepartment ? 'bg-brand-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            >
+              All departments
+            </button>
+            {(options.data?.departments || []).map((dept) => (
+              <button
+                key={dept.id}
+                type="button"
+                onClick={() => { setMaterialDepartment(dept.id); setMaterialProgram(''); }}
+                className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${materialDepartment === dept.id ? 'bg-brand-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                {dept.code} · {dept.name}
+              </button>
+            ))}
+          </div>
+
+          {/* Programme tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">Prog:</span>
             <button
               type="button"
               onClick={() => setMaterialProgram('')}
-              className={`focus-ring shrink-0 rounded-xl border px-3 py-2 text-left transition ${!materialProgram ? 'border-brand-300 bg-brand-50 text-brand-800' : 'border-slate-100 bg-white text-slate-600 hover:border-slate-200'}`}
+              className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${!materialProgram ? 'border border-brand-300 bg-brand-50 text-brand-800 font-semibold' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
             >
-              <span className="block text-xs font-semibold">All programmes</span>
-              <span className="mt-0.5 block text-[11px] opacity-70">{allMaterials.length} file{allMaterials.length === 1 ? '' : 's'}</span>
+              All programmes ({allMaterials.length})
             </button>
-            {(options.data?.programs || []).map((row) => (
+            {programsInDept.map((row) => (
               <button
                 key={row.id}
                 type="button"
                 onClick={() => setMaterialProgram(row.id)}
-                className={`focus-ring w-44 shrink-0 rounded-xl border px-3 py-2 text-left transition ${materialProgram === row.id ? 'border-brand-300 bg-brand-50 text-brand-800' : 'border-slate-100 bg-white text-slate-600 hover:border-slate-200'}`}
+                className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${materialProgram === row.id ? 'border border-brand-300 bg-brand-50 text-brand-800 font-semibold' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
               >
-                <span className="block truncate text-xs font-semibold">{row.code}</span>
-                <span className="mt-0.5 block truncate text-[11px] opacity-70">{row.name}</span>
-                <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wider opacity-60">{materialCounts.get(row.id) || 0} file{(materialCounts.get(row.id) || 0) === 1 ? '' : 's'}</span>
+                {row.code} ({materialCounts.get(row.id) || 0})
               </button>
             ))}
           </div>
+
+          {materialProgram && (
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-xs text-slate-500">
+                Viewing courses for <span className="font-semibold text-slate-700">{programsInDept.find((p) => p.id === materialProgram)?.name || 'selected programme'}</span>
+              </span>
+              <Link
+                to={`/registrar/course-registration/programme/${materialProgram}`}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 transition"
+              >
+                <BookOpen className="h-3.5 w-3.5" /> View all programme courses & materials
+              </Link>
+            </div>
+          )}
         </div>
         <div className="px-5 py-3">
           <SearchInput value={materialSearch} onChange={(event) => setMaterialSearch(event.target.value)} placeholder="Search course name, code or file" loading={materials.isFetching} />
@@ -435,13 +501,6 @@ export default function RegistrarCourseRegistration() {
         </div>
       </Card>
 
-      <CreateOfferingModal
-        open={offeringModal}
-        plans={options.data?.plans || []}
-        teachers={options.data?.teachers || []}
-        onClose={() => setOfferingModal(false)}
-        onSaved={invalidate}
-      />
       <RegisterOfferingModal
         offering={registering}
         options={options.data}
@@ -462,6 +521,7 @@ export default function RegistrarCourseRegistration() {
       <CourseMaterialModal
         open={materialModal}
         options={options.data}
+        existingMaterials={allMaterials}
         initialProgram={materialProgram}
         onClose={() => setMaterialModal(false)}
         onSaved={() => queryClient.invalidateQueries({ queryKey: ['registrar', 'course-materials'] })}
@@ -486,17 +546,71 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function CourseMaterialModal({ open, options, initialProgram, onClose, onSaved }) {
-  const [form, setForm] = useState({ program: '', courseName: '', courseCode: '' });
+function CourseMaterialModal({ open, options, existingMaterials = [], initialProgram, onClose, onSaved }) {
+  const [department, setDepartment] = useState('');
+  const [form, setForm] = useState({ program: '', courseName: '', courseCode: '', creditHours: 3 });
   const [file, setFile] = useState(null);
   const [error, setError] = useState('');
+
+  const departments = options?.departments || [];
+  const allPrograms = options?.programs || [];
+
+  const filteredPrograms = useMemo(() => {
+    if (!department) return allPrograms;
+    return allPrograms.filter((p) => String(p.department?.id || p.department) === String(department));
+  }, [allPrograms, department]);
+
+  const autoGenerateCode = (progId) => {
+    const prog = allPrograms.find((p) => p.id === progId);
+    if (!prog) return '';
+    const progMaterials = (existingMaterials || []).filter(
+      (m) => (m.program?.id || m.program) === progId,
+    );
+    const count = progMaterials.length;
+    const nextNum = String(count + 1).padStart(3, '0');
+    return `${prog.code}-${nextNum}`;
+  };
 
   useEffect(() => {
     if (!open) return;
     setError('');
     setFile(null);
-    setForm({ program: initialProgram || '', courseName: '', courseCode: '' });
-  }, [open, initialProgram]);
+    const initialProg = allPrograms.find((p) => p.id === initialProgram);
+    const initialDept = initialProg?.department || '';
+    setDepartment(initialDept);
+    const autoCode = initialProg ? autoGenerateCode(initialProg.id) : '';
+    setForm({
+      program: initialProgram || '',
+      courseName: '',
+      courseCode: autoCode,
+      creditHours: 3,
+    });
+  }, [open, initialProgram, allPrograms, existingMaterials]);
+
+  const handleProgramChange = (progId) => {
+    const prog = allPrograms.find((p) => p.id === progId);
+    const code = prog ? autoGenerateCode(prog.id) : '';
+    setForm((current) => ({
+      ...current,
+      program: progId,
+      courseCode: code || current.courseCode,
+    }));
+  };
+
+  const handleFileChange = (event) => {
+    const selectedFile = event.target.files?.[0] || null;
+    setFile(selectedFile);
+    if (selectedFile) {
+      const cleanName = selectedFile.name
+        .replace(/\.[^/.]+$/, '')
+        .replace(/[_-]/g, ' ')
+        .trim();
+      setForm((current) => ({
+        ...current,
+        courseName: cleanName,
+      }));
+    }
+  };
 
   const save = useMutation({
     mutationFn: async () => {
@@ -516,7 +630,8 @@ function CourseMaterialModal({ open, options, initialProgram, onClose, onSaved }
         params: {
           program: form.program,
           courseName: form.courseName.trim(),
-          courseCode: form.courseCode.trim(),
+          courseCode: form.courseCode.trim().toUpperCase(),
+          creditHours: Number(form.creditHours) || 3,
           filename: file.name,
         },
         headers: { 'Content-Type': contentType },
@@ -549,13 +664,71 @@ function CourseMaterialModal({ open, options, initialProgram, onClose, onSaved }
       <div className="grid gap-4">
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
         <FormGrid>
-          <SelectField label="Programme" value={form.program} onChange={(event) => set('program', event.target.value)} required>
-            <option value="">Choose a programme</option>
-            {(options?.programs || []).map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
+          <SelectField
+            label="Department"
+            value={department}
+            onChange={(event) => {
+              const deptId = event.target.value;
+              setDepartment(deptId);
+              setForm((current) => ({ ...current, program: '', courseCode: '' }));
+            }}
+            required
+          >
+            <option value="">Choose a department</option>
+            {departments.map((row) => (
+              <option key={row.id} value={row.id}>
+                {row.code} · {row.name}
+              </option>
+            ))}
           </SelectField>
-          <Field label="Course code" value={form.courseCode} onChange={(event) => set('courseCode', event.target.value)} placeholder="e.g. CS101" required />
-          <Field label="Course name" value={form.courseName} onChange={(event) => set('courseName', event.target.value)} placeholder="e.g. Introduction to Computing" required />
-          <Field label="PDF or Word document" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => setFile(event.target.files?.[0] || null)} hint="Maximum 10 MB. PDF, DOC or DOCX." required />
+          <SelectField
+            label="Programme"
+            value={form.program}
+            onChange={(event) => handleProgramChange(event.target.value)}
+            disabled={!department && departments.length > 0}
+            required
+          >
+            <option value="">Choose a programme</option>
+            {filteredPrograms.map((row) => (
+              <option key={row.id} value={row.id}>
+                {row.code} · {row.name}
+              </option>
+            ))}
+          </SelectField>
+          <Field
+            label="Course code"
+            value={form.courseCode}
+            onChange={(event) => set('courseCode', event.target.value)}
+            placeholder="e.g. CS-001"
+            hint="Auto-generated based on programme code. Can be customized."
+            required
+          />
+          <Field
+            label="Course name"
+            value={form.courseName}
+            onChange={(event) => set('courseName', event.target.value)}
+            placeholder="e.g. Introduction to Computing"
+            hint="Auto-filled from attached file name."
+            required
+          />
+          <Field
+            label="Credit hours"
+            type="number"
+            min="0.5"
+            max="30"
+            step="0.5"
+            value={form.creditHours}
+            onChange={(event) => set('creditHours', event.target.value)}
+            required
+          />
+          <Field
+            label="PDF or Word document"
+            type="file"
+            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            onChange={handleFileChange}
+            hint="Maximum 10 MB. PDF, DOC or DOCX."
+            required
+          />
         </FormGrid>
       </div>
     </Modal>

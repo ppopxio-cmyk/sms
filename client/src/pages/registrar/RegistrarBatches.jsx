@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { ChevronDown, ChevronRight, Eye, Layers3, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Eye, Info, Layers3, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import {
   REGISTRAR,
@@ -342,6 +342,7 @@ export default function RegistrarBatches() {
 }
 
 function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
+  const queryClient = useQueryClient();
   const isEdit = Boolean(editBatch);
   const [form, setForm] = useState({});
   const [error, setError] = useState('');
@@ -355,11 +356,9 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
         setForm({
           code: editBatch.code || '',
           name: editBatch.name || '',
-          programs: [],
+          programs: (editBatch.programs || []).map((p) => p.id || p),
           category: editBatch.category || 'regular',
           admissionAcademicYear: editBatch.admissionAcademicYear?.id || '',
-          durationYears: editBatch.durationYears || '',
-          currentLevel: editBatch.currentLevel || 1,
           status: editBatch.status || 'planned',
         });
       } else {
@@ -369,8 +368,6 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
           programs: [],
           category: 'regular',
           admissionAcademicYear: currentYear?.id || '',
-          durationYears: '',
-          currentLevel: 1,
           status: 'planned',
         });
       }
@@ -389,8 +386,6 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
           name: form.name.trim() || undefined,
           category: form.category,
           admissionAcademicYear: form.admissionAcademicYear || undefined,
-          durationYears: form.durationYears ? Number(form.durationYears) : undefined,
-          currentLevel: Number(form.currentLevel) || undefined,
           status: form.status,
           programs: form.programs?.length ? form.programs : undefined,
         });
@@ -401,8 +396,6 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
         name: form.name.trim() || undefined,
         category: form.category,
         admissionAcademicYear: form.admissionAcademicYear,
-        durationYears: form.durationYears ? Number(form.durationYears) : undefined,
-        currentLevel: Number(form.currentLevel) || 1,
         status: form.status,
         programs: form.programs,
       });
@@ -411,6 +404,8 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
     onSuccess: (data) => {
       const count = data.batches?.length;
       toast.success(isEdit ? 'Batch updated.' : (count > 1 ? `${count} programme batch rows created.` : 'Batch created.'));
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'students', 'options'] });
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'offering-options'] });
       onSaved?.();
       onClose?.();
     },
@@ -431,11 +426,10 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
     : ['regular', 'extension'];
 
   const toggleProgram = (programId) => {
-    const program = (options?.programs || []).find((row) => row.id === programId);
     setForm((current) => {
-      const programs = current.programs.includes(programId)
+      const programs = (current.programs || []).includes(programId)
         ? current.programs.filter((id) => id !== programId)
-        : [...current.programs, programId];
+        : [...(current.programs || []), programId];
       const allowed = programs.length
         ? (options?.programs || [])
             .filter((row) => programs.includes(row.id))
@@ -445,8 +439,6 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
         ...current,
         programs,
         category: allowed.includes(current.category) ? current.category : allowed[0] || 'regular',
-        durationYears:
-          current.durationYears || (programs.length === 1 && program?.durationYears ? Math.min(5, program.durationYears) : ''),
       };
     });
   };
@@ -477,17 +469,24 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
     <Modal
       open={open}
       title={isEdit ? `Edit batch: ${editBatch?.code || ''}` : 'New batch'}
-      subtitle={isEdit
-        ? 'Update the batch code, name, stream or add programmes. Leave code blank to regenerate.'
-        : 'Choose a delivery stream and every programme that shares this intake. The code and name are generated when left blank.'}
+      size="lg"
       onClose={save.isPending ? undefined : onClose}
       dismissible={!save.isPending}
       footer={<><Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending}>{isEdit ? 'Save batch' : 'Create batch'}</Button></>}
     >
-      <div className="grid gap-4">
+      <div className="space-y-4">
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
 
-        {/* Delivery stream + Admission academic year first */}
+        <div className="flex items-start gap-2.5 rounded-xl border border-sky-100 bg-sky-50/70 p-3 text-xs text-sky-800">
+          <Info className="h-4 w-4 shrink-0 text-sky-600 mt-0.5" />
+          <div className="space-y-0.5">
+            <p className="font-semibold">Automatic generation & structure inheritance</p>
+            <p className="text-sky-700 leading-relaxed">
+              Batch code and name generate automatically if left blank. Duration years and levels are automatically taken from the programmes in Academic Structure and shown in batch details.
+            </p>
+          </div>
+        </div>
+
         <FormGrid>
           <SelectField label="Delivery stream" value={form.category || 'regular'} onChange={(e) => handleCategoryChange(e.target.value)} required>
             {categories.map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
@@ -498,14 +497,16 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
           </SelectField>
         </FormGrid>
 
-        {/* Programmes multi-select */}
         <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3 sm:col-span-2">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-            {isEdit ? 'Programmes in this batch' : 'Programmes to include'}
-          </p>
-          <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-100 bg-white p-2">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              {isEdit ? 'Programmes in this batch' : 'Programmes to include'}
+            </p>
+            <span className="text-xs text-slate-400">{(form.programs || []).length} selected</span>
+          </div>
+          <div className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-slate-100 bg-white p-2">
             {(options?.programs || []).map((row) => (
-              <label key={row.id} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+              <label key={row.id} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-slate-700 hover:bg-slate-50">
                 <input
                   type="checkbox"
                   checked={(form.programs || []).includes(row.id)}
@@ -513,39 +514,31 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
                   disabled={isEdit}
                   className="h-4 w-4 rounded border-slate-300 text-brand-600"
                 />
-                <span className="min-w-0 flex-1 truncate">{row.code} · {row.name}</span>
+                <span className="min-w-0 flex-1 truncate font-medium">{row.code} · {row.name}</span>
+                <span className="text-xs text-slate-400">{row.qualificationType || ''}</span>
               </label>
             ))}
             {!options?.programs?.length ? <p className="px-2 py-3 text-sm text-slate-500">No programmes available.</p> : null}
           </div>
-          {isEdit && (
-            <p className="mt-2 text-xs text-slate-500">Select additional programmes to add them to this batch.</p>
-          )}
         </div>
 
-        {/* Auto-generated code and name at bottom */}
         <FormGrid>
           <Field
             label="Batch code"
             value={form.code || ''}
             onChange={(event) => set('code', event.target.value)}
             placeholder="Auto: REG-BAT-2026"
-            hint="Leave blank to use REG-BAT-<admission year>."
           />
           <Field
             label="Batch name"
             value={form.name || ''}
             onChange={(event) => set('name', event.target.value)}
             placeholder="Auto: 2026 Regular Students"
-            hint="Leave blank to generate a stream-aware name."
           />
-          <Field label="Duration (years)" type="number" min="1" max="5" value={form.durationYears || ''} onChange={(event) => set('durationYears', event.target.value)} hint="Expected completion is calculated from the admission year. Maximum 5 years." />
-          <Field label="Current level" type="number" min="1" max="20" value={form.currentLevel || 1} onChange={(event) => set('currentLevel', event.target.value)} />
           <SelectField label="Status" value={form.status || 'planned'} onChange={(event) => set('status', event.target.value)}>
             {['planned', 'active', 'completed', 'archived'].map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
           </SelectField>
         </FormGrid>
-        <p className="text-xs leading-relaxed text-slate-500">{isEdit ? 'Changes will apply to all programme rows in this batch group.' : 'Every ticked programme gets its own batch row, sharing this code, stream and admission year. Student numbers count per programme.'}</p>
       </div>
     </Modal>
   );

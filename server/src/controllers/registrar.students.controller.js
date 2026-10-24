@@ -682,6 +682,7 @@ export const studentOptions = asyncHandler(async (_req, res) => {
       id: String(row._id),
       label: row.label,
       isCurrent: row.isCurrent,
+      status: row.status,
       startDate: row.startDate,
       endDate: row.endDate,
     })),

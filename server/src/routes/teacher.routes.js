@@ -1,4 +1,4 @@
-﻿import express, { Router } from 'express';
+import express, { Router } from 'express';
 import { authenticate, requirePasswordChanged } from '../middleware/authenticate.js';
 import { requirePermission, requireRole } from '../middleware/authorize.js';
 import { validate } from '../middleware/validate.js';
@@ -16,6 +16,7 @@ import {
   courseMarkPolicySchema,
   courseMarksExportQuerySchema,
   createAssessmentSchema,
+  createMaterialSchema,
   finalizeAttendanceSchema,
   finalizeAttendanceParamSchema,
   gradeSheetQuerySchema,
@@ -27,6 +28,7 @@ import {
   listCourseResourcesQuerySchema,
   listMaterialsQuerySchema,
   listStudentsQuerySchema,
+  materialParamSchema,
   reportOptionsQuerySchema,
   reviewAssessmentSubmissionSchema,
   rosterReportQuerySchema,
@@ -36,6 +38,7 @@ import {
   studentParamSchema,
   submitCourseMarksSchema,
   updateAssessmentSchema,
+  updateMaterialSchema,
 } from '../validators/teacher.schemas.js';
 import {
   assignmentDetail,
@@ -70,8 +73,12 @@ import {
   uploadDocument,
 } from '../controllers/teacherAssessments.controller.js';
 import {
+  create as createMaterial,
   list as listMaterials,
+  remove as removeMaterial,
   sharedResources,
+  teacherCurriculum,
+  update as updateMaterial,
 } from '../controllers/teacherMaterials.controller.js';
 import {
   attendanceSummary,
@@ -249,11 +256,30 @@ r.post(
 );
 
 r.get('/materials', requirePermission('teacher:materials:manage'), validate(listMaterialsQuerySchema, 'query'), listMaterials);
+r.post('/materials', requirePermission('teacher:materials:manage'), validate(createMaterialSchema), createMaterial);
+r.put(
+  '/materials/:materialId',
+  requirePermission('teacher:materials:manage'),
+  validate(materialParamSchema, 'params'),
+  validate(updateMaterialSchema),
+  updateMaterial,
+);
+r.delete(
+  '/materials/:materialId',
+  requirePermission('teacher:materials:manage'),
+  validate(materialParamSchema, 'params'),
+  removeMaterial,
+);
 r.get(
   '/materials/course-resources',
   requirePermission('teacher:materials:manage'),
   validate(listCourseResourcesQuerySchema, 'query'),
   sharedResources,
+);
+r.get(
+  '/materials/curriculum',
+  requirePermission('teacher:materials:manage'),
+  teacherCurriculum,
 );
 
 r.get(

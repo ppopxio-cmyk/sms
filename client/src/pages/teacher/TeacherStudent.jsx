@@ -70,6 +70,20 @@ export default function TeacherStudent() {
         <Card>
           <CardHeader title="Student record" subtitle="Read-only information from the registrar." icon={UserRound} />
           <CardBody>
+            {student.photo?.url || student.photo?.thumbnailUrl ? (
+              <div className="mb-4 flex items-center gap-3 border-b border-slate-100 pb-4">
+                <img
+                  src={student.photo.thumbnailUrl || student.photo.url}
+                  alt={student.name}
+                  className="h-14 w-14 rounded-full object-cover ring-2 ring-brand-100"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+                <div>
+                  <p className="text-base font-bold text-slate-900">{student.name}</p>
+                  <p className="text-xs font-mono text-slate-500">{student.studentNumber}</p>
+                </div>
+              </div>
+            ) : null}
             <dl className="space-y-4">
               {[
                 ['Student ID', student.studentNumber || '—'],

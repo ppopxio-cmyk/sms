@@ -85,6 +85,7 @@ function courseResourceDto(row) {
       : null,
     courseName: row.courseName,
     courseCode: row.courseCode,
+    creditHours: row.creditHours ?? 3,
     fileName: row.fileName,
     contentType: row.contentType,
     bytes: row.bytes,
@@ -97,7 +98,9 @@ export async function listCourseResources(teacherId, query = {}) {
   const programIds = await activeProgramIdsForTeacher(teacherId);
   const filters = [{ deletedAt: null }];
 
-  if (query.assignmentId) {
+  if (query.program) {
+    filters.push({ program: query.program });
+  } else if (query.assignmentId) {
     const assignment = await assignmentForTeacherRead(teacherId, query.assignmentId);
     const code = String(assignment.course?.code || '').trim().toUpperCase();
     filters.push({ program: assignment.program, ...(code ? { courseCode: code } : {}) });

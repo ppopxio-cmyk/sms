@@ -181,8 +181,13 @@ export default function TeacherStudents() {
                       <tr key={student.id} className="group">
                         <td className="py-3.5 pr-4">
                           <div className="flex items-center gap-3">
-                            {student.photo?.thumbnailUrl ? (
-                              <img src={student.photo.thumbnailUrl} alt="" className="h-9 w-9 rounded-full object-cover ring-1 ring-slate-100" />
+                            {student.photo?.thumbnailUrl || student.photo?.url ? (
+                              <img
+                                src={student.photo.thumbnailUrl || student.photo.url}
+                                alt={student.name}
+                                className="h-9 w-9 rounded-full object-cover ring-1 ring-slate-200"
+                                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                              />
                             ) : (
                               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-700 text-xs font-bold">
                                 {student.name?.slice(0, 2)?.toUpperCase() || 'S'}
@@ -228,8 +233,20 @@ export default function TeacherStudents() {
                       to={`/teacher/students/${student.id}`}
                       className="focus-ring block rounded-2xl border border-slate-100 bg-white/75 p-4 transition hover:bg-white"
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
+                      <div className="flex items-center gap-3">
+                        {student.photo?.thumbnailUrl || student.photo?.url ? (
+                          <img
+                            src={student.photo.thumbnailUrl || student.photo.url}
+                            alt={student.name}
+                            className="h-10 w-10 shrink-0 rounded-full object-cover ring-1 ring-slate-200"
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
+                        ) : (
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-700 text-xs font-bold">
+                            {student.name?.slice(0, 2)?.toUpperCase() || 'S'}
+                          </span>
+                        )}
+                        <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-semibold text-slate-900">{student.name}</p>
                           <p className="mt-0.5 text-xs text-slate-500">{student.studentNumber || 'No student ID'}</p>
                         </div>

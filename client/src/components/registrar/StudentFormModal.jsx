@@ -100,17 +100,46 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
   const selectedProgram = (options?.programs || []).find((program) => program.id === form.program);
   const categories = selectedProgram?.categories?.length ? selectedProgram.categories : ['regular', 'extension'];
   const batches = useMemo(
-    () => (options?.batches || []).filter((batch) =>
-      (!form.program || batch.program === form.program)
-      && (batch.category || 'regular') === form.studentCategory,
-    ),
+    () => (options?.batches || []).filter((batch) => {
+      const progId = batch.program?.id || batch.program;
+      const matchesProg = !form.program || String(progId) === String(form.program);
+      const batchCat = batch.category || 'regular';
+      const matchesCat = !form.studentCategory || batchCat === form.studentCategory;
+      return matchesProg && matchesCat;
+    }),
     [options?.batches, form.program, form.studentCategory],
   );
-  const levels = selectedProgram?.qualificationType === 'diploma'
-    ? selectedProgram.levels?.length ? selectedProgram.levels : [1, 2, 3, 4]
-    : selectedProgram?.qualificationType === 'short-term'
-      ? [1]
-      : Array.from({ length: Math.max(1, Math.min(10, selectedProgram?.durationYears || form.level || 1)) }, (_, index) => index + 1);
+
+  const academicYears = useMemo(
+    () => (options?.academicYears || []).filter((year) => year.status !== 'closed'),
+    [options?.academicYears],
+  );
+
+  const levelOptions = useMemo(() => {
+    if (!selectedProgram) {
+      return [{ value: 1, label: 'Level 1' }];
+    }
+    if (selectedProgram.qualificationType === 'degree') {
+      const years = Number(selectedProgram.durationYears) || 4;
+      return Array.from({ length: years }, (_, i) => ({
+        value: i + 1,
+        label: `Year ${i + 1}`,
+      }));
+    }
+    if (selectedProgram.qualificationType === 'diploma') {
+      const lvls = selectedProgram.levels?.length ? selectedProgram.levels : [1, 2, 3, 4];
+      return lvls.map((lvl) => ({
+        value: lvl,
+        label: `Level ${lvl}`,
+      }));
+    }
+    if (selectedProgram.qualificationType === 'short-term') {
+      const dur = selectedProgram.shortTerm?.duration || 1;
+      const unit = selectedProgram.shortTerm?.unit || 'weeks';
+      return [{ value: 1, label: `${dur} ${unit}` }];
+    }
+    return [{ value: 1, label: 'Level 1' }];
+  }, [selectedProgram]);
 
   const set = (field, value) => setForm((current) => ({ ...current, [field]: value }));
 
@@ -361,14 +390,14 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
               ))}
             </SelectField>
             <SelectField label="Level / year" value={form.level} onChange={(event) => set('level', Number(event.target.value))} disabled={!form.program}>
-              {levels.map((level) => (
-                <option key={level} value={level}>{levelLabel(level, selectedProgram?.qualificationType)}</option>
+              {levelOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </SelectField>
             <SelectField label="Admission academic year" value={form.admissionAcademicYear} onChange={(event) => set('admissionAcademicYear', event.target.value)}>
               <option value="">Use the batch year</option>
-              {(options?.academicYears || []).map((year) => (
-                <option key={year.id} value={year.id}>{year.label}{year.isCurrent ? ' · current' : ''}</option>
+              {academicYears.map((year) => (
+                <option key={year.id} value={year.id}>{year.label}{year.isCurrent ? ' · current' : year.status ? ` · ${year.status}` : ''}</option>
               ))}
             </SelectField>
             <Field label="Admission date" type="date" value={form.admissionDate} onChange={(event) => set('admissionDate', event.target.value)} hint="Defaults to today (Ethiopian calendar)." />
