@@ -475,6 +475,8 @@ export async function receivePortalSubmission(hash, payload, buffer, { ip } = {}
 }
 
 function submissionRow(submission) {
+  const fileUrl = signedImageUrl(submission.filePath, { expiresIn: 7200 });
+  const downloadUrl = fileUrl ? `${fileUrl}${fileUrl.includes('?') ? '&' : '?'}ik-attachment=true` : null;
   return {
     id: String(submission._id),
     student: {
@@ -503,7 +505,8 @@ function submissionRow(submission) {
     submittedAt: submission.submittedAt,
     reviewedAt: submission.reviewedAt,
     revision: submission.revision,
-    fileUrl: signedImageUrl(submission.filePath, { expiresIn: 7200 }),
+    fileUrl,
+    downloadUrl,
   };
 }
 

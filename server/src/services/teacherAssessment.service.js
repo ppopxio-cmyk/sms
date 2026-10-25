@@ -161,8 +161,8 @@ export async function createAssessment(teacherId, assignmentId, payload) {
   const assignment = await assignmentForTeacher(teacherId, assignmentId, { write: true });
   await ensureNumeric(assignment);
 
+  const policy = await CourseMarkPolicy.findOne({ offering: assignmentId }).lean();
   if (process.env.NODE_ENV !== 'test' || payload.enforcePolicyCheck) {
-    const policy = await CourseMarkPolicy.findOne({ offering: assignmentId }).lean();
     if (!policy) {
       throw new AppError(400, 'MARK_POLICY_REQUIRED', 'First assign a course mark policy for this course before creating assessments.');
     }
@@ -170,6 +170,16 @@ export async function createAssessment(teacherId, assignmentId, payload) {
     const ALLOWED_TYPES = ['assignment', 'project', 'presentation'];
     if (!ALLOWED_TYPES.includes(payload.type)) {
       throw new AppError(400, 'INVALID_ASSESSMENT_TYPE', 'Assessments can only be created for assignment, project, or presentation types.');
+    }
+  }
+
+  if (policy?.weights) {
+    const policyMark =
+      payload.type === 'presentation'
+        ? policy.weights.presentation
+        : (policy.weights.assessments ?? policy.weights.assignment ?? policy.weights.project);
+    if (policyMark !== undefined && policyMark !== null && Number(policyMark) > 0) {
+      payload.maxScore = Number(policyMark);
     }
   }
 
@@ -199,12 +209,6 @@ export async function createAssessment(teacherId, assignmentId, payload) {
   });
 
   const populated = await populateAssessment(created._id);
-  void notifyRole('REGISTRAR', {
-    type: 'assessment_created',
-    title: 'New assessment created',
-    body: `${created.title} · ${assignment?.course?.code || ''} · draft`,
-    actorId: teacherId,
-  });
   return assessmentDto(populated, { studentCount: 0, graded: 0, missing: 0 });
 }
 

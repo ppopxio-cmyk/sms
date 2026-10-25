@@ -611,8 +611,10 @@ export const createBatch = asyncHandler(async (req, res) => {
 
   const year = await AcademicYear.findById(input.admissionAcademicYear).lean();
   if (!year) throw new AppError(400, 'ACADEMIC_YEAR_INVALID', 'Choose a valid academic year.');
-  const startYear = new Date(year.startDate).getFullYear();
-  const code = String(input.code || `REG-BAT-${startYear}`).trim().toUpperCase();
+  const labelYearMatch = String(year.label || '').match(/\d{4}/);
+  const startYear = labelYearMatch ? Number(labelYearMatch[0]) : new Date(year.startDate).getFullYear();
+  const streamPrefix = category === 'extension' ? 'EXT' : 'REG';
+  const code = String(input.code || `${streamPrefix}-${startYear}`).trim().toUpperCase();
   const name =
     String(input.name || '').trim() ||
     `${startYear} ${category === 'extension' ? 'Extension' : 'Regular'} Students`;

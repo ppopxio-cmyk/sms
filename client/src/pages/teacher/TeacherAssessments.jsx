@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
@@ -59,6 +59,25 @@ export default function TeacherAssessments() {
     enabled: Boolean(form.assignmentId),
   });
   const hasMarkPolicy = Boolean(markPolicyQuery.data?.policy);
+
+  const policyWeights = markPolicyQuery.data?.policy?.weights;
+  const policyMaxScore = useMemo(() => {
+    if (!policyWeights) return null;
+    if (form.type === 'presentation') {
+      return policyWeights.presentation ?? 20;
+    }
+    return policyWeights.assessments ?? policyWeights.assignment ?? policyWeights.project ?? 30;
+  }, [policyWeights, form.type]);
+
+  useEffect(() => {
+    if (policyMaxScore !== null && policyMaxScore !== undefined) {
+      setForm((current) => ({
+        ...current,
+        maxScore: String(policyMaxScore),
+        weight: current.weight === '0' || !current.weight ? String(policyMaxScore) : current.weight,
+      }));
+    }
+  }, [policyMaxScore]);
 
   const query = useQuery({
     queryKey: ['teacher', 'assessments', { assignmentId, status, type, page, limit }],
@@ -458,9 +477,16 @@ export default function TeacherAssessments() {
               </select>
             </div>
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700" htmlFor="assessment-max">
-                Maximum score
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-sm font-medium text-slate-700" htmlFor="assessment-max">
+                  Maximum score
+                </label>
+                {policyMaxScore !== null ? (
+                  <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                    From policy
+                  </span>
+                ) : null}
+              </div>
               <input
                 id="assessment-max"
                 type="number"
@@ -468,9 +494,13 @@ export default function TeacherAssessments() {
                 max="1000"
                 step="0.01"
                 value={form.maxScore}
-                onChange={(event) => setForm((current) => ({ ...current, maxScore: event.target.value }))}
-                className={inputClass}
+                readOnly
+                disabled
+                className={`${inputClass} cursor-not-allowed bg-slate-100/90 text-slate-600 select-none`}
               />
+              <p className="mt-1 text-xs text-slate-500">
+                Auto-assigned from Course Mark Policy ({form.maxScore || '—'} marks) and locked.
+              </p>
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate-700" htmlFor="assessment-weight">

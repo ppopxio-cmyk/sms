@@ -5,6 +5,7 @@ import {
   ClipboardCopy,
   Download,
   ExternalLink,
+  Eye,
   FileText,
   KeyRound,
   Link2,
@@ -401,15 +402,28 @@ export default function TeacherAssessmentPortal({ assessmentId, maxScore, sectio
                   </p>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => downloadDirect(`/teacher/assessments/${assessmentId}/portal/document/download`, data.document.fileName)}
+              <div className="flex flex-wrap items-center gap-2">
+                {data.document.url ? (
+                  <a
+                    href={data.document.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-3 text-xs font-semibold text-brand-700 transition hover:bg-brand-100"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    Read file
+                  </a>
+                ) : null}
+                <a
+                  href={data.document.url ? `${data.document.url}${data.document.url.includes('?') ? '&' : '?'}ik-attachment=true` : `/api/teacher/assessments/${assessmentId}/portal/document/download`}
+                  download={data.document.fileName}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   <Download className="h-3.5 w-3.5" />
                   Download
-                </button>
+                </a>
                 <Button
                   variant="ghost"
                   onClick={() => {
@@ -518,15 +532,37 @@ export default function TeacherAssessmentPortal({ assessmentId, maxScore, sectio
                           </div>
                         </td>
                         <td className="py-3 pr-4">
-                          <button
-                            type="button"
-                            onClick={() => downloadDirect(`/teacher/assessment-submissions/${row.id}/download`, row.fileName)}
-                            className="inline-flex max-w-44 items-center gap-1.5 truncate text-xs font-medium text-brand-700 hover:text-brand-900"
-                          >
-                            <Download className="h-3.5 w-3.5 shrink-0" />
-                            <span className="truncate">{row.fileName}</span>
-                          </button>
-                          <p className="text-[11px] text-slate-400">{formatBytes(row.bytes)}</p>
+                          <div className="flex flex-col gap-1 max-w-52">
+                            <span className="truncate text-xs font-semibold text-slate-800" title={row.fileName}>
+                              {row.fileName}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              {row.fileUrl ? (
+                                <a
+                                  href={row.fileUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:text-brand-900 hover:underline"
+                                  title="Read file in ImageKit"
+                                >
+                                  <Eye className="h-3.5 w-3.5" />
+                                  Read file
+                                </a>
+                              ) : null}
+                              <a
+                                href={row.downloadUrl || row.fileUrl || `/api/teacher/assessment-submissions/${row.id}/download`}
+                                download={row.fileName}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-800 hover:underline"
+                                title="Download file from ImageKit"
+                              >
+                                <Download className="h-3 w-3" />
+                                Download
+                              </a>
+                            </div>
+                            <p className="text-[11px] text-slate-400">{formatBytes(row.bytes)}</p>
+                          </div>
                         </td>
                         <td className="py-3 pr-4 text-xs text-slate-500">#{row.revision}</td>
                         <td className="py-3 pr-4 text-xs text-slate-500">{formatDate(row.submittedAt)}</td>
@@ -626,14 +662,29 @@ export default function TeacherAssessmentPortal({ assessmentId, maxScore, sectio
               placeholder="Tell the student what was strong or what to change."
             />
           </label>
-          <button
-            type="button"
-            onClick={() => downloadDirect(`/teacher/assessment-submissions/${review?.id}/download`, review?.fileName)}
-            className="inline-flex items-center gap-2 text-xs font-semibold text-brand-700 hover:text-brand-900"
-          >
-            <Download className="h-3.5 w-3.5" />
-            Download submitted file
-          </button>
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            {review?.fileUrl ? (
+              <a
+                href={review.fileUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 transition"
+              >
+                <Eye className="h-3.5 w-3.5" />
+                Read file in ImageKit
+              </a>
+            ) : null}
+            <a
+              href={review?.downloadUrl || review?.fileUrl || `/api/teacher/assessment-submissions/${review?.id}/download`}
+              download={review?.fileName}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Download submitted file
+            </a>
+          </div>
         </form>
       </Modal>
     </div>

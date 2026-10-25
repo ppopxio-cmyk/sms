@@ -362,9 +362,13 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
           status: editBatch.status || 'planned',
         });
       } else {
+        const currentYear = options?.academicYears?.find((y) => y.isCurrent) || options?.academicYears?.[0];
+        const yearNum = currentYear
+          ? (String(currentYear.label || '').match(/\d{4}/)?.[0] || String(new Date(currentYear.startDate).getFullYear()))
+          : '';
         setForm({
-          code: '',
-          name: '',
+          code: yearNum ? `REG-${yearNum}` : '',
+          name: yearNum ? `${yearNum} Regular Students` : '',
           programs: [],
           category: 'regular',
           admissionAcademicYear: currentYear?.id || '',
@@ -440,14 +444,30 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
     });
   };
 
-  // Auto-generate code and name when fields are blank
+  const getStreamPrefix = (stream) => (stream === 'extension' ? 'EXT' : 'REG');
+
+  const getAdmissionYearNumber = (yearObj) => {
+    if (!yearObj) return '';
+    const match = String(yearObj.label || '').match(/\d{4}/);
+    return match ? match[0] : String(new Date(yearObj.startDate).getFullYear());
+  };
+
+  const isAutoBatchCode = (code) => !code || /^(REG|EXT)(-BAT)?-\d{4}$/i.test(code.trim());
+
+  // Auto-generate code and name when fields are blank or follow auto pattern
   const handleAdmissionYearChange = (value) => {
     set('admissionAcademicYear', value);
     const year = (options?.academicYears || []).find((y) => y.id === value);
-    if (year && !form.code) {
-      const startYear = new Date(year.startDate).getFullYear();
-      set('code', `REG-BAT-${startYear}`);
-      set('name', `${startYear} ${form.category === 'extension' ? 'Extension' : 'Regular'} Students`);
+    if (year) {
+      const yearNum = getAdmissionYearNumber(year);
+      const stream = form.category || 'regular';
+      const prefix = getStreamPrefix(stream);
+      if (isAutoBatchCode(form.code)) {
+        set('code', `${prefix}-${yearNum}`);
+      }
+      if (!form.name || /^\d{4} (Extension|Regular) Students$/i.test(form.name.trim())) {
+        set('name', `${yearNum} ${stream === 'extension' ? 'Extension' : 'Regular'} Students`);
+      }
     }
   };
 
@@ -462,15 +482,23 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
     );
     setForm((current) => {
       let name = current.name;
+      let code = current.code;
       const year = (options?.academicYears || []).find((y) => y.id === current.admissionAcademicYear);
-      if (year && !current.name) {
-        const startYear = new Date(year.startDate).getFullYear();
-        name = `${startYear} ${value === 'extension' ? 'Extension' : 'Regular'} Students`;
+      if (year) {
+        const yearNum = getAdmissionYearNumber(year);
+        const prefix = getStreamPrefix(value);
+        if (isAutoBatchCode(code)) {
+          code = `${prefix}-${yearNum}`;
+        }
+        if (!name || /^\d{4} (Extension|Regular) Students$/i.test(name.trim())) {
+          name = `${yearNum} ${value === 'extension' ? 'Extension' : 'Regular'} Students`;
+        }
       }
       return {
         ...current,
         category: value,
         programs: (current.programs || []).filter((id) => validIds.has(id)),
+        code,
         name,
       };
     });
@@ -541,13 +569,13 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
             label="Batch code"
             value={form.code || ''}
             onChange={(event) => set('code', event.target.value)}
-            placeholder="Auto: REG-BAT-2026"
+            placeholder={form.category === 'extension' ? 'Auto: EXT-2026' : 'Auto: REG-2026'}
           />
           <Field
             label="Batch name"
             value={form.name || ''}
             onChange={(event) => set('name', event.target.value)}
-            placeholder="Auto: 2026 Regular Students"
+            placeholder={`Auto: 2026 ${form.category === 'extension' ? 'Extension' : 'Regular'} Students`}
           />
           <SelectField label="Status" value={form.status || 'planned'} onChange={(event) => set('status', event.target.value)}>
             {['planned', 'active', 'completed', 'archived'].map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}

@@ -43,11 +43,7 @@ export const downloadDocument = asyncHandler(async (req, res) => {
   if (!metaData.assessment?.hasDocument || !metaData.assessment?.documentUrl) {
     throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'No document has been attached to this assessment.');
   }
-  const response = await fetch(metaData.assessment.documentUrl);
-  if (!response.ok) throw new AppError(502, 'DOWNLOAD_FAILED', 'Could not stream document.');
-  const filename = (metaData.assessment.title || 'assessment-document').replace(/[^\w.\- ]+/g, '_') + '.pdf';
-  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-  res.setHeader('Content-Type', 'application/pdf');
-  const arrayBuffer = await response.arrayBuffer();
-  res.send(Buffer.from(arrayBuffer));
+  const downloadUrl = metaData.assessment.documentUrl;
+  const attachmentUrl = `${downloadUrl}${downloadUrl.includes('?') ? '&' : '?'}ik-attachment=true`;
+  return res.redirect(attachmentUrl);
 });

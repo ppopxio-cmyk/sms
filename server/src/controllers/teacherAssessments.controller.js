@@ -181,15 +181,10 @@ export const downloadSubmissionFile = asyncHandler(async (req, res) => {
   const submission = await AssessmentSubmission.findById(req.valid.params.submissionId).lean();
   if (!submission) throw new AppError(404, 'SUBMISSION_NOT_FOUND', 'That submission was not found.');
   await assessmentForTeacher(req.user.id, submission.assessment);
-  const downloadUrl = signedImageUrl(submission.filePath, { expiresIn: 300 });
-  const response = await fetch(downloadUrl);
-  if (!response.ok) throw new AppError(502, 'DOWNLOAD_FAILED', 'Could not stream file from storage.');
-  const cleanFilename = (submission.fileName || 'submission.pdf').replace(/[^\w.\- ]+/g, '_');
-  res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
-  res.setHeader('Content-Type', submission.contentType || 'application/octet-stream');
-  if (submission.bytes) res.setHeader('Content-Length', submission.bytes);
-  const arrayBuffer = await response.arrayBuffer();
-  res.send(Buffer.from(arrayBuffer));
+  const downloadUrl = signedImageUrl(submission.filePath, { expiresIn: 600 });
+  if (!downloadUrl) throw new AppError(404, 'FILE_NOT_FOUND', 'Storage URL could not be resolved.');
+  const attachmentUrl = `${downloadUrl}${downloadUrl.includes('?') ? '&' : '?'}ik-attachment=true`;
+  return res.redirect(attachmentUrl);
 });
 
 export const downloadDocumentFile = asyncHandler(async (req, res) => {
@@ -197,13 +192,8 @@ export const downloadDocumentFile = asyncHandler(async (req, res) => {
   if (!assessment.portalDocument?.filePath) {
     throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'No document has been attached to this assessment.');
   }
-  const downloadUrl = signedImageUrl(assessment.portalDocument.filePath, { expiresIn: 300 });
-  const response = await fetch(downloadUrl);
-  if (!response.ok) throw new AppError(502, 'DOWNLOAD_FAILED', 'Could not stream file from storage.');
-  const cleanFilename = (assessment.portalDocument.fileName || 'document.pdf').replace(/[^\w.\- ]+/g, '_');
-  res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
-  res.setHeader('Content-Type', assessment.portalDocument.contentType || 'application/octet-stream');
-  if (assessment.portalDocument.bytes) res.setHeader('Content-Length', assessment.portalDocument.bytes);
-  const arrayBuffer = await response.arrayBuffer();
-  res.send(Buffer.from(arrayBuffer));
+  const downloadUrl = signedImageUrl(assessment.portalDocument.filePath, { expiresIn: 600 });
+  if (!downloadUrl) throw new AppError(404, 'FILE_NOT_FOUND', 'Storage URL could not be resolved.');
+  const attachmentUrl = `${downloadUrl}${downloadUrl.includes('?') ? '&' : '?'}ik-attachment=true`;
+  return res.redirect(attachmentUrl);
 });
