@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import {
@@ -184,10 +184,30 @@ export default function TeacherClasses() {
                       </div>
                     </div>
 
-                    <span className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-brand-600">
-                      Open class
-                      <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
-                    </span>
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-600">
+                        Open class
+                        <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
+                      </span>
+                      {course.canManage ? (
+                        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          <Link
+                            to={`/teacher/attendance/${course.id}`}
+                            className="rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100 transition"
+                            title="Take attendance"
+                          >
+                            Attendance
+                          </Link>
+                          <Link
+                            to={`/teacher/materials?assignmentId=${course.id}`}
+                            className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200 transition"
+                            title="Course materials"
+                          >
+                            Materials
+                          </Link>
+                        </div>
+                      ) : null}
+                    </div>
                   </Link>
                 );
               })}

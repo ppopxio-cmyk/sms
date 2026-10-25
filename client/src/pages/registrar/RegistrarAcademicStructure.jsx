@@ -96,6 +96,7 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
   const [departmentModal, setDepartmentModal] = useState(null);
   const [programModal, setProgramModal] = useState(null);
   const [assignModal, setAssignModal] = useState(null);
+  const [courseModal, setCourseModal] = useState(false);
   const [deleting, setDeleting] = useState(null);
 
   useEffect(() => {
@@ -219,8 +220,9 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
       <Card>
         <CardHeader
           title={TABS.find((item) => item.key === tab)?.label}
-          subtitle={tab === 'departments' ? 'Edit a department, or remove one that has no programmes, courses, batches or students.' : tab === 'programs' ? 'Programmes belong to a department and can be inactivated without deleting their history.' : 'Master records supplied by the college owner.'}
+          subtitle={tab === 'departments' ? 'Edit a department, or remove one that has no programmes, courses, batches or students.' : tab === 'programs' ? 'Programmes belong to a department and can be inactivated without deleting their history.' : tab === 'courses' ? 'Catalogue of courses offered across programmes.' : 'Master records supplied by the college owner.'}
           icon={TABS.find((item) => item.key === tab)?.icon}
+          action={tab === 'courses' ? <Button size="sm" onClick={() => setCourseModal(true)} className="gap-1.5"><Plus className="h-4 w-4" /> Add course</Button> : null}
         />
         <CardBody className="space-y-4">
           <SearchInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search this section" />
@@ -393,7 +395,82 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
         onClose={() => setAssignModal(null)}
         onSaved={assignTeachers.mutate}
       />
+      <StructureCourseModal
+        open={Boolean(courseModal)}
+        departments={query.data?.departments || []}
+        programs={query.data?.programs || []}
+        onClose={() => setCourseModal(false)}
+        onSaved={invalidate}
+      />
     </div>
+  );
+}
+
+function StructureCourseModal({ open, departments, programs, onClose, onSaved }) {
+  const [form, setForm] = useState({ code: '', title: '', department: '', program: '', creditHours: 3 });
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setForm({ code: '', title: '', department: departments[0]?.id || '', program: '', creditHours: 3 });
+      setError('');
+    }
+  }, [open, departments]);
+
+  const filteredPrograms = useMemo(() => {
+    if (!form.department) return programs;
+    return programs.filter((p) => String(p.department?.id || p.department) === String(form.department));
+  }, [programs, form.department]);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      if (!form.code.trim() || !form.title.trim()) throw new Error('Code and title are required.');
+      return (await api.post(`${REGISTRAR}/academic-structure/courses`, {
+        code: form.code.trim().toUpperCase(),
+        title: form.title.trim(),
+        creditHours: Number(form.creditHours) || 3,
+        department: form.department || undefined,
+        program: form.program || undefined,
+      })).data;
+    },
+    onSuccess: () => {
+      toast.success('Course created.');
+      onSaved?.();
+      onClose?.();
+    },
+    onError: (err) => {
+      const msg = errorMessage(err, 'The course could not be created.');
+      setError(msg);
+      toast.error(msg);
+    },
+  });
+
+  return (
+    <Modal
+      open={open}
+      title="Add new course"
+      subtitle="Create a course in the institutional catalogue."
+      onClose={save.isPending ? undefined : onClose}
+      dismissible={!save.isPending}
+      footer={<><Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending}>Create course</Button></>}
+    >
+      <div className="grid gap-4">
+        {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
+        <FormGrid>
+          <Field label="Course code" value={form.code} onChange={(e) => setForm((c) => ({ ...c, code: e.target.value.toUpperCase() }))} placeholder="e.g. CS-101" required />
+          <Field label="Course title" value={form.title} onChange={(e) => setForm((c) => ({ ...c, title: e.target.value }))} placeholder="e.g. Introduction to Programming" required />
+          <SelectField label="Department" value={form.department} onChange={(e) => setForm((c) => ({ ...c, department: e.target.value, program: '' }))} required>
+            <option value="">Choose department</option>
+            {departments.map((d) => <option key={d.id} value={d.id}>{d.code} · {d.name}</option>)}
+          </SelectField>
+          <SelectField label="Programme (optional)" value={form.program} onChange={(e) => setForm((c) => ({ ...c, program: e.target.value }))}>
+            <option value="">Institutional / General</option>
+            {filteredPrograms.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}
+          </SelectField>
+          <Field label="Credit hours" type="number" min="0.5" max="30" step="0.5" value={form.creditHours} onChange={(e) => setForm((c) => ({ ...c, creditHours: e.target.value }))} required />
+        </FormGrid>
+      </div>
+    </Modal>
   );
 }
 

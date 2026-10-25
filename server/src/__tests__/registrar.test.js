@@ -265,4 +265,64 @@ describe('Registrar grading policy', () => {
     const denied = await GET('/api/registrar/grading-policy', f.teacherToken);
     expect(denied.status).toBe(403);
   });
+
+  it('loads curriculum options with active departments, programs, and academic years', async () => {
+    const f = await fixture();
+    const res = await GET('/api/registrar/curriculum/options', f.registrarToken);
+    expect(res.status).toBe(200);
+    expect(res.body.departments.length).toBeGreaterThan(0);
+    expect(res.body.programs.length).toBeGreaterThan(0);
+    expect(res.body.academicYears.length).toBeGreaterThan(0);
+    expect(res.body.academicYears[0].status).toBe('active');
+  });
+
+  it('creates courses and publishes curriculum plan activating classes and course materials', async () => {
+    const f = await fixture();
+    
+    // 1. Create a course
+    const courseRes = await POST('/api/registrar/academic-structure/courses', f.registrarToken).send({
+      code: 'CS-101',
+      title: 'Introduction to Computer Science',
+      creditHours: 3,
+      program: f.base.program._id,
+      department: f.base.department._id,
+    });
+    expect(courseRes.status).toBe(201);
+    expect(courseRes.body.course.code).toBe('CS-101');
+
+    // 2. Create curriculum plan
+    const planRes = await POST('/api/registrar/curriculum', f.registrarToken).send({
+      program: f.base.program._id,
+      academicYear: f.base.academicYear._id,
+      title: 'CS 2026 Curriculum',
+    });
+    expect(planRes.status).toBe(201);
+    const planId = planRes.body.plan._id;
+
+    // 3. Add course to plan
+    const addCourseRes = await POST(`/api/registrar/curriculum/${planId}/courses`, f.registrarToken).send({
+      course: courseRes.body.course.id,
+      level: 1,
+      term: 'Semester 1',
+      creditHours: 3,
+      category: 'required',
+    });
+    expect(addCourseRes.status).toBe(201);
+
+    // 4. Publish plan
+    const publishRes = await POST(`/api/registrar/curriculum/${planId}/publish`, f.registrarToken);
+    expect(publishRes.status).toBe(200);
+    expect(publishRes.body.plan.status).toBe('published');
+
+    // 5. Check teacher classes & materials
+    const teacherClasses = await GET('/api/teacher/courses', f.teacherToken);
+    expect(teacherClasses.status).toBe(200);
+    expect(teacherClasses.body.assignments.length).toBeGreaterThan(0);
+    expect(teacherClasses.body.assignments[0].canManage).toBe(true);
+
+    const teacherMaterials = await GET('/api/teacher/materials/course-resources', f.teacherToken);
+    expect(teacherMaterials.status).toBe(200);
+    expect(teacherMaterials.body.resources.length).toBeGreaterThan(0);
+    expect(teacherMaterials.body.resources[0].courseCode).toBe('CS-101');
+  });
 });

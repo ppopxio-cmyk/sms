@@ -214,6 +214,16 @@ export const progressionSchema = z.object({
   reason: optionalText(500),
 });
 
+export const courseCreateSchema = z.object({
+  code: z.string().min(1).max(24),
+  title: z.string().min(1).max(160),
+  creditHours: z.coerce.number().min(0.5).max(30).optional().default(3),
+  department: objectId.optional(),
+  program: objectId.optional(),
+  description: optionalText(1000),
+  prerequisites: z.array(objectId).optional().default([]),
+});
+
 export const curriculumPlanCreateSchema = z.object({
   program: objectId,
   academicYear: objectId,

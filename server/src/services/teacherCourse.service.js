@@ -8,7 +8,7 @@ import {
   assignmentDto,
   assignmentForTeacherRead,
 } from './teacherScope.service.js';
-import { activeProgramsForTeacher, teacherOfferingFilter } from './teacherAccess.service.js';
+import { activeProgramIdsForTeacher, activeProgramsForTeacher, teacherOfferingFilter } from './teacherAccess.service.js';
 import { ownFilter } from './registrar.helpers.js';
 
 const matches = (row, term) => {
@@ -93,8 +93,18 @@ export async function listTeacherAssignments(teacherId, query) {
   const total = filtered.length;
   const start = (query.page - 1) * query.limit;
   const programs = await activeProgramsForTeacher(teacherId);
+  const teacherProgramIds = new Set(programs.map((p) => String(p._id)));
+
+  // Enrich with teacherProgramIds for manage permissions
+  const enrichedAssignments = filtered.slice(start, start + query.limit).map((dto) => {
+    if (dto.programId && teacherProgramIds.has(String(dto.programId))) {
+      return { ...dto, canManage: true };
+    }
+    return dto;
+  });
+
   return {
-    assignments: filtered.slice(start, start + query.limit),
+    assignments: enrichedAssignments,
     programs: programs.map((row) => ({
       id: String(row._id),
       code: row.code,
@@ -125,6 +135,8 @@ export async function teacherAssignmentDetail(teacherId, assignmentId) {
   const assessmentCounts = { draft: 0, published: 0, closed: 0, submitted: 0 };
   for (const group of assessments) assessmentCounts[group._id] = group.count;
 
+  const teacherProgIds = new Set(await activeProgramIdsForTeacher(teacherId));
+
   return assignmentDto(
     row,
     {
@@ -138,5 +150,6 @@ export async function teacherAssignmentDetail(teacherId, assignmentId) {
       })),
     },
     teacherId,
+    teacherProgIds,
   );
 }

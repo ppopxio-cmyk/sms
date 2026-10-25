@@ -1,4 +1,4 @@
-﻿import express, { Router } from 'express';
+import express, { Router } from 'express';
 import { authenticate, requirePasswordChanged } from '../middleware/authenticate.js';
 import { requirePermission, requireRole } from '../middleware/authorize.js';
 import { validate } from '../middleware/validate.js';
@@ -24,6 +24,7 @@ import {
   batchDeleteSchema,
   batchAssignSchema,
   progressionSchema,
+  courseCreateSchema,
   curriculumPlanCreateSchema,
   curriculumPlanUpdateSchema,
   curriculumCourseSchema,
@@ -76,7 +77,7 @@ import {
   createCalendarEvent, updateCalendarEvent, deleteCalendarEvent,
   listBatches, listBatchGroups, requestBatchDeleteCode, deleteBatchGroup, getBatch, exportBatch, createBatch, updateBatch, batchAssignmentPreview, assignBatch, progressBatch,
   listPlans, planOptions, createPlan, getPlan, updatePlan, addPlanCourse, updatePlanCourse,
-  removePlanCourse, reorderPlanCourses, publishPlan, archivePlan, clonePlan,
+  removePlanCourse, reorderPlanCourses, publishPlan, archivePlan, clonePlan, createCourse,
   listOfferings, offeringOptions, planOfferings, createOffering, updateOffering,
   registrationEligible, createRegistrations, offeringCandidates, registerOfferingStudents,
   listRegistrations, dropRegistration, programDetail,
@@ -152,6 +153,8 @@ r.delete('/academic-structure/departments/:id', requirePermission('structure:man
 r.post('/academic-structure/programs', requirePermission('structure:manage'), validate(programSchema), createProgram);
 r.patch('/academic-structure/programs/:id', requirePermission('structure:manage'), validate(idParamSchema, 'params'), validate(programUpdateSchema), updateProgram);
 r.delete('/academic-structure/programs/:id', requirePermission('structure:manage'), validate(idParamSchema, 'params'), deleteProgram);
+r.post('/academic-structure/courses', requirePermission('structure:manage'), validate(courseCreateSchema), createCourse);
+r.post('/courses', requirePermission('curriculum:manage'), validate(courseCreateSchema), createCourse);
 r.get('/academic-calendar', requirePermission('calendar:view'), calendar);
 r.post('/academic-calendar/years', requirePermission('calendar:manage'), validate(academicYearSchema), createAcademicYear);
 r.patch('/academic-calendar/years/:id', requirePermission('calendar:manage'), validate(idParamSchema, 'params'), validate(academicYearSchema.partial()), updateAcademicYear);

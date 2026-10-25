@@ -5,7 +5,7 @@ import { Assessment } from '../models/Assessment.js';
 import { Material } from '../models/Material.js';
 import { AppError } from '../utils/AppError.js';
 import { ownFilter } from './registrar.helpers.js';
-import { teacherOfferingFilter } from './teacherAccess.service.js';
+import { activeProgramIdsForTeacher, teacherOfferingFilter } from './teacherAccess.service.js';
 import { signedImageUrl } from './imagekit.service.js';
 
 function photoView(photo) {
@@ -106,8 +106,13 @@ export async function assignmentForTeacherRead(teacherId, assignmentId, { popula
 
 export async function assignmentForTeacher(teacherId, assignmentId, { write = false, populate = true } = {}) {
   const statuses = write ? WRITE_STATUSES : READ_STATUSES;
+  const programIds = await activeProgramIdsForTeacher(teacherId);
+  const branches = [{ teacher: teacherId }];
+  if (programIds.length) {
+    branches.push({ program: { $in: programIds } });
+  }
   let query = CourseOffering.findOne(
-    ownFilter({ _id: assignmentId, teacher: teacherId, status: { $in: statuses } }),
+    ownFilter({ _id: assignmentId, $or: branches, status: { $in: statuses } }),
   );
   if (populate) query = query.populate(ASSIGNMENT_POPULATE);
   const assignment = await query.lean();
@@ -205,14 +210,20 @@ export async function materialForTeacher(teacherId, materialId, { write = false 
   return { material, assignment };
 }
 
-export function assignmentDto(row, extra = {}, teacherId = null) {
+export function assignmentDto(row, extra = {}, teacherId = null, teacherProgramIds = null) {
   const course = row.course && typeof row.course === 'object' ? row.course : null;
   const year = row.academicYear && typeof row.academicYear === 'object' ? row.academicYear : null;
   const program = row.program && typeof row.program === 'object' ? row.program : null;
   const department = row.department && typeof row.department === 'object' ? row.department : null;
   const batch = row.batch && typeof row.batch === 'object' ? row.batch : null;
   const owner = row.teacher?._id ?? row.teacher;
-  const canManage = teacherId ? Boolean(owner) && String(owner) === String(teacherId) : Boolean(extra.canManage);
+  const progIdStr = program?._id ? String(program._id) : String(row.program || '');
+  const isProgramTeacher = teacherProgramIds
+    ? (teacherProgramIds instanceof Set ? teacherProgramIds.has(progIdStr) : teacherProgramIds.includes(progIdStr))
+    : false;
+  const canManage = teacherId
+    ? (Boolean(owner) && String(owner) === String(teacherId)) || isProgramTeacher
+    : Boolean(extra.canManage);
 
   return {
     id: String(row._id),

@@ -14,6 +14,7 @@ import { notifyProgramTeachers, notifyUser } from '../services/notification.serv
 import { syncProgramTeachers } from '../services/teacherAccess.service.js';
 import { TeacherProgramAssignment } from '../models/Teaching.js';
 import { CourseResource } from '../models/CourseResource.js';
+import { Material } from '../models/Material.js';
 import { sendCode } from '../services/codeDelivery.js';
 import { checkCode } from '../services/code.service.js';
 import { sendCurriculumOfferingEmail } from '../services/mail.service.js';
@@ -980,7 +981,7 @@ export const listPlans = asyncHandler(async (req, res) => {
 export const planOptions = asyncHandler(async (_req, res) => {
   // Sync any CourseResource records into Course collection so uploaded course materials appear in catalogue
   try {
-    const resources = await CourseResource.find({ deletedAt: null })
+    const resources = await CourseResource.find(ownFilter({ deletedAt: null }))
       .populate('program', 'code name department')
       .populate('department', 'code name')
       .lean();
@@ -988,7 +989,7 @@ export const planOptions = asyncHandler(async (_req, res) => {
       if (r.courseCode) {
         let deptId = r.department?._id || r.department || r.program?.department?._id || r.program?.department;
         if (!deptId) {
-          const fallbackDept = await Department.findOne({ active: true }).lean();
+          const fallbackDept = await Department.findOne(ownFilter({ active: true })).lean() || await Department.findOne().lean();
           deptId = fallbackDept?._id;
         }
         if (deptId) {
@@ -1002,6 +1003,7 @@ export const planOptions = asyncHandler(async (_req, res) => {
               $set: {
                 title: r.courseName ? r.courseName.trim() : r.courseCode,
                 department: deptId,
+                program: r.program?._id || r.program || null,
                 creditHours: Number(r.creditHours) || 3,
                 active: true,
               },
@@ -1013,20 +1015,23 @@ export const planOptions = asyncHandler(async (_req, res) => {
     }
   } catch {}
 
-  // Ensure any inactive/legacy courses that have no active flag set default to active
-  await Course.updateMany({ active: { $exists: false } }, { $set: { active: true } }).catch(() => {});
+  // Ensure any inactive/legacy courses, departments, programs have active flag initialized
+  await Course.updateMany(ownFilter({ active: { $exists: false } }), { $set: { active: true } }).catch(() => {});
+  await Department.updateMany(ownFilter({ active: { $exists: false } }), { $set: { active: true } }).catch(() => {});
+  await Program.updateMany(ownFilter({ active: { $exists: false } }), { $set: { active: true } }).catch(() => {});
 
   const [departments, programs, years, courses, terms, resources] = await Promise.all([
-    Department.find({ active: true }).sort({ name: 1 }).lean(),
-    Program.find({ active: true }).populate('department', 'code name').sort({ name: 1 }).lean(),
+    Department.find(ownFilter({ active: { $ne: false } })).sort({ name: 1 }).lean(),
+    Program.find(ownFilter({ active: { $ne: false } })).populate('department', 'code name').sort({ name: 1 }).lean(),
     AcademicYear.find().sort({ startDate: -1 }).lean(),
-    Course.find({ active: { $ne: false } })
+    Course.find(ownFilter({ active: { $ne: false } }))
       .populate('department', 'code name')
+      .populate('program', 'code name')
       .populate('prerequisites', 'code title')
       .sort({ code: 1 })
       .lean(),
     AcademicTerm.find().populate('academicYear', 'label').sort({ sequence: 1 }).lean(),
-    CourseResource.find({ deletedAt: null })
+    CourseResource.find(ownFilter({ deletedAt: null }))
       .populate('program', 'code name department')
       .populate('department', 'code name')
       .lean(),
@@ -1046,7 +1051,12 @@ export const planOptions = asyncHandler(async (_req, res) => {
   }
 
   res.json({
-    departments: departments.map((row) => ({ id: String(row._id), code: row.code, name: row.name })),
+    departments: departments.map((row) => ({
+      id: String(row._id),
+      code: row.code,
+      name: row.name,
+      active: row.active !== false,
+    })),
     programs: programs.map((row) => ({
       id: String(row._id),
       code: row.code,
@@ -1055,17 +1065,30 @@ export const planOptions = asyncHandler(async (_req, res) => {
       durationYears: row.durationYears,
       levels: row.levels,
       department: row.department ? { id: String(row.department._id), code: row.department.code, name: row.department.name } : null,
+      active: row.active !== false,
     })),
-    academicYears: years.map((row) => ({ id: String(row._id), label: row.label, isCurrent: row.isCurrent })),
+    academicYears: years.map((row) => ({
+      id: String(row._id),
+      label: row.label,
+      isCurrent: Boolean(row.isCurrent),
+      status: row.status || (row.isCurrent ? 'active' : 'planned'),
+      startDate: row.startDate,
+      endDate: row.endDate,
+    })),
     courses: courses.map((row) => {
       const codeUpper = String(row.code || '').trim().toUpperCase();
-      const progMeta = resourceProgByCourseCode.get(codeUpper) || null;
+      const progFromResource = resourceProgByCourseCode.get(codeUpper) || null;
+      const progFromRow = row.program ? {
+        id: String(row.program._id || row.program),
+        code: row.program.code || '',
+        name: row.program.name || '',
+      } : null;
       return {
         id: String(row._id),
         code: row.code,
         title: row.title,
         creditHours: row.creditHours,
-        program: progMeta,
+        program: progFromRow || progFromResource,
         prerequisites: (row.prerequisites || []).map((course) =>
           course && typeof course === 'object'
             ? { id: String(course._id), code: course.code, title: course.title }
@@ -1081,6 +1104,90 @@ export const planOptions = asyncHandler(async (_req, res) => {
       type: row.type,
       academicYear: row.academicYear ? { id: String(row.academicYear._id), label: row.academicYear.label } : null,
     })),
+  });
+});
+
+export const createCourse = asyncHandler(async (req, res) => {
+  const { code, title, creditHours, department: deptId, program: progId, description, prerequisites } = req.body;
+  const cleanCode = String(code || '').trim().toUpperCase();
+  if (!cleanCode) throw new AppError(400, 'CODE_REQUIRED', 'Course code is required.');
+  const cleanTitle = String(title || '').trim();
+  if (!cleanTitle) throw new AppError(400, 'TITLE_REQUIRED', 'Course title is required.');
+
+  let targetDept = deptId;
+  let targetProg = progId;
+  if (!targetDept && targetProg) {
+    const prog = await Program.findById(targetProg).lean();
+    targetDept = prog?.department;
+  }
+  if (!targetDept) {
+    const fallback = await Department.findOne(ownFilter({ active: true })).lean() || await Department.findOne().lean();
+    targetDept = fallback?._id;
+  }
+  if (!targetDept) throw new AppError(400, 'DEPARTMENT_REQUIRED', 'A department is required for this course.');
+
+  const existing = await Course.findOne(ownFilter({ code: cleanCode }));
+  let course;
+  if (existing) {
+    existing.title = cleanTitle;
+    existing.creditHours = Number(creditHours) || existing.creditHours || 3;
+    existing.department = targetDept;
+    if (targetProg) existing.program = targetProg;
+    existing.active = true;
+    existing.updatedBy = req.user.id;
+    await existing.save();
+    course = existing;
+  } else {
+    course = await Course.create({
+      code: cleanCode,
+      title: cleanTitle,
+      department: targetDept,
+      program: targetProg || null,
+      creditHours: Number(creditHours) || 3,
+      description: description || '',
+      prerequisites: prerequisites || [],
+      active: true,
+      createdBy: req.user.id,
+      updatedBy: req.user.id,
+    });
+  }
+
+  // Also create a CourseResource entry if programme is specified so it has immediate course materials
+  if (targetProg) {
+    const progDoc = await Program.findById(targetProg).lean();
+    const existingResource = await CourseResource.findOne(ownFilter({
+      program: targetProg,
+      courseCode: cleanCode,
+      deletedAt: null,
+    }));
+    if (!existingResource) {
+      await CourseResource.create({
+        program: targetProg,
+        department: targetDept,
+        courseName: cleanTitle,
+        courseCode: cleanCode,
+        creditHours: Number(creditHours) || 3,
+        fileName: `${cleanCode}_Syllabus.pdf`,
+        filePath: `/courses/${progDoc?.code || 'general'}/${cleanCode}-syllabus.pdf`,
+        fileId: `init-${course._id}`,
+        contentType: 'application/pdf',
+        bytes: 1024 * 128,
+        uploadedBy: req.user.id,
+      }).catch(() => {});
+    }
+  }
+
+  audit({ req, action: 'registrar.academic.course.create', targetType: 'Course', targetId: course._id, meta: { code: cleanCode } });
+  res.status(201).json({
+    course: {
+      id: String(course._id),
+      code: course.code,
+      title: course.title,
+      creditHours: course.creditHours,
+      department: targetDept,
+      program: targetProg || null,
+      active: course.active,
+    },
   });
 });
 
@@ -1372,6 +1479,8 @@ export const publishPlan = asyncHandler(async (req, res) => {
       const term = entry.term || 'Semester 1';
       const level = entry.level || 1;
       const creditHours = entry.creditHours || 3;
+      const courseCode = String(entry.course?.code || '').trim().toUpperCase();
+      const courseTitle = String(entry.course?.title || '').trim();
 
       const existingOffering = await CourseOffering.findOne(ownFilter({
         course: entry.course._id,
@@ -1381,8 +1490,9 @@ export const publishPlan = asyncHandler(async (req, res) => {
         level,
       }));
 
+      let offeringId;
       if (!existingOffering) {
-        await CourseOffering.create({
+        const createdOffering = await CourseOffering.create({
           course: entry.course._id,
           curriculumPlan: plan._id,
           curriculumCourse: entry._id,
@@ -1399,12 +1509,85 @@ export const publishPlan = asyncHandler(async (req, res) => {
           createdBy: req.user.id,
           updatedBy: req.user.id,
         });
+        offeringId = createdOffering._id;
       } else {
         existingOffering.status = 'open';
         if (!existingOffering.teacher && primaryTeacherId) {
           existingOffering.teacher = primaryTeacherId;
         }
         await existingOffering.save();
+        offeringId = existingOffering._id;
+      }
+
+      // Auto-insert CourseResource so course documents appear in teacher/materials
+      if (courseCode) {
+        const existingRes = await CourseResource.findOne(ownFilter({
+          program: plan.program,
+          courseCode,
+          deletedAt: null,
+        }));
+        if (!existingRes) {
+          await CourseResource.create({
+            program: plan.program,
+            department: plan.department || program?.department,
+            courseName: courseTitle,
+            courseCode,
+            creditHours,
+            fileName: `${courseCode}_Course_Guide.pdf`,
+            filePath: `/courses/${program?.code || 'curriculum'}/${courseCode}-guide.pdf`,
+            fileId: `curriculum-${plan._id}-${entry._id}`,
+            contentType: 'application/pdf',
+            bytes: 1024 * 180,
+            uploadedBy: req.user.id,
+          }).catch(() => {});
+        }
+      }
+
+      // Auto-insert Material note for this offering so materials appear in teacher workspace
+      if (offeringId) {
+        const existingMat = await Material.findOne(ownFilter({
+          offering: offeringId,
+          deletedAt: null,
+        }));
+        if (!existingMat) {
+          await Material.create({
+            offering: offeringId,
+            kind: 'note',
+            title: `${courseCode} Syllabus & Lecture Outline`,
+            description: `Official syllabus and course guide for ${courseCode} - ${courseTitle}.`,
+            content: `Course: ${courseCode} - ${courseTitle}\nProgramme: ${program?.name || 'Programme'}\nLevel: ${level}\nTerm: ${term}\nCredit Hours: ${creditHours}\nCurriculum Plan: ${plan.title}\nStatus: Active\n\nApproved syllabus for classroom instruction. Attendance and marks are active.`,
+            visibility: 'published',
+            createdBy: req.user.id,
+          }).catch(() => {});
+        }
+
+        // Auto-register any active students of this programme so attendance roster has students
+        const activeStudents = await Student.find(ownFilter({
+          program: plan.program,
+          enrollmentStatus: 'active',
+        })).select('_id').lean();
+        if (activeStudents.length) {
+          for (const stu of activeStudents) {
+            await CourseRegistration.findOneAndUpdate(
+              { student: stu._id, offering: offeringId },
+              {
+                $setOnInsert: {
+                  student: stu._id,
+                  offering: offeringId,
+                  academicYear: plan.academicYear,
+                  status: 'registered',
+                  registeredAt: new Date(),
+                  registeredBy: req.user.id,
+                },
+              },
+              { upsert: true, new: true, setDefaultsOnInsert: true },
+            ).catch(() => {});
+          }
+          await CourseOffering.updateOne(
+            { _id: offeringId },
+            { $set: { registeredCount: activeStudents.length } },
+          ).catch(() => {});
+        }
       }
     } catch {
       // Continue with other courses

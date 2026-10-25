@@ -52,6 +52,71 @@ export default function RegistrarCurriculum() {
     staleTime: 30_000,
   });
 
+  const structureQuery = useQuery({
+    queryKey: ['registrar', 'academic-structure'],
+    queryFn: async () => (await api.get(`${REGISTRAR}/academic-structure`)).data,
+    staleTime: 60_000,
+  });
+
+  const calendarQuery = useQuery({
+    queryKey: ['registrar', 'academic-calendar'],
+    queryFn: async () => (await api.get(`${REGISTRAR}/academic-calendar`)).data,
+    staleTime: 60_000,
+  });
+
+  const resolvedOptions = useMemo(() => {
+    const opts = options.data || {};
+    const struct = structureQuery.data || {};
+    const cal = calendarQuery.data || {};
+
+    const depts = (opts.departments?.length ? opts.departments : struct.departments || []).map((d) => ({
+      id: d.id || String(d._id),
+      code: d.code,
+      name: d.name,
+      active: d.active !== false,
+    }));
+
+    const progs = (opts.programs?.length ? opts.programs : struct.programs || []).map((p) => ({
+      id: p.id || String(p._id),
+      code: p.code,
+      name: p.name,
+      qualificationType: p.qualificationType,
+      durationYears: p.durationYears,
+      levels: p.levels,
+      department: p.department ? {
+        id: p.department.id || String(p.department._id || p.department),
+        code: p.department.code,
+        name: p.department.name,
+      } : null,
+      active: p.active !== false,
+    }));
+
+    const years = (opts.academicYears?.length ? opts.academicYears : cal.years || []).map((y) => ({
+      id: y.id || String(y._id),
+      label: y.label,
+      isCurrent: Boolean(y.isCurrent),
+      status: y.status || (y.isCurrent ? 'active' : 'planned'),
+    }));
+
+    const courses = (opts.courses?.length ? opts.courses : struct.courses || []).map((c) => ({
+      id: c.id || String(c._id),
+      code: c.code,
+      title: c.title,
+      creditHours: c.creditHours || 3,
+      program: c.program,
+      department: c.department,
+      prerequisites: c.prerequisites,
+    }));
+
+    return {
+      departments: depts,
+      programs: progs,
+      academicYears: years,
+      courses,
+      terms: opts.terms || cal.terms || [],
+    };
+  }, [options.data, structureQuery.data, calendarQuery.data]);
+
   const params = useMemo(() => ({
     limit: 50,
     ...(status !== 'all' ? { status } : {}),
@@ -82,6 +147,8 @@ export default function RegistrarCurriculum() {
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['registrar', 'curriculum'] });
     queryClient.invalidateQueries({ queryKey: ['registrar', 'dashboard'] });
+    queryClient.invalidateQueries({ queryKey: ['registrar', 'academic-structure'] });
+    queryClient.invalidateQueries({ queryKey: ['registrar', 'academic-calendar'] });
   };
 
   const action = useMutation({
@@ -174,7 +241,7 @@ export default function RegistrarCurriculum() {
               </SelectField>
               <SelectField label="Department" value={department} onChange={(event) => setDepartment(event.target.value)}>
                 <option value="">All departments</option>
-                {(options.data?.departments || []).map((row) => (
+                {(resolvedOptions?.departments || []).map((row) => (
                   <option key={row.id} value={row.id}>
                     {row.code} · {row.name}
                   </option>
@@ -182,7 +249,11 @@ export default function RegistrarCurriculum() {
               </SelectField>
               <SelectField label="Academic year" value={academicYear} onChange={(event) => setAcademicYear(event.target.value)}>
                 <option value="">All years</option>
-                {(options.data?.academicYears || []).map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}
+                {(resolvedOptions?.academicYears || []).map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.label}{row.status === 'active' || row.isCurrent ? ' · Active' : ''}
+                  </option>
+                ))}
               </SelectField>
             </div>
           </Card>
@@ -288,16 +359,19 @@ export default function RegistrarCurriculum() {
         </div>
       </div>
 
-      <CreatePlanModal open={creating} options={options.data} onClose={() => setCreating(false)} onSaved={(created) => { invalidate(); const id = created?.id || created?._id; if (id) setSelectedId(String(id)); }} />
+      <CreatePlanModal open={creating} options={resolvedOptions} onClose={() => setCreating(false)} onSaved={(created) => { invalidate(); const id = created?.id || created?._id; if (id) setSelectedId(String(id)); }} />
       <EditPlanModal open={editingPlan} plan={plan} onClose={() => setEditingPlan(false)} onSaved={invalidate} />
       <CourseModal
         open={Boolean(courseModal)}
         plan={plan}
         record={courseModal?.record}
-        options={options.data}
+        options={resolvedOptions}
         onClose={() => setCourseModal(null)}
         onSaved={invalidate}
-        refetchOptions={() => options.refetch()}
+        refetchOptions={() => {
+          options.refetch();
+          structureQuery.refetch();
+        }}
       />
       <ConfirmDialog
         open={Boolean(confirm)}
@@ -350,7 +424,8 @@ function CreatePlanModal({ open, options, onClose, onSaved }) {
   useEffect(() => {
     if (open) {
       setDepartment('');
-      setForm({ program: '', academicYear: options?.academicYears?.find((year) => year.isCurrent)?.id || '', title: '', notes: '', cloneFrom: '' });
+      const activeYear = options?.academicYears?.find((year) => year.status === 'active' || year.isCurrent) || options?.academicYears?.[0];
+      setForm({ program: '', academicYear: activeYear?.id || '', title: '', notes: '', cloneFrom: '' });
       setError('');
     }
   }, [open, options?.academicYears]);
@@ -366,6 +441,17 @@ function CreatePlanModal({ open, options, onClose, onSaved }) {
       }
       return next;
     });
+  };
+
+  const handleSelectProgram = (programId) => {
+    fillFromProgramme('program', programId);
+    if (programId) {
+      const selectedProg = allPrograms.find((p) => p.id === programId);
+      const progDeptId = selectedProg?.department?.id || selectedProg?.department;
+      if (progDeptId && (!department || String(progDeptId) !== String(department))) {
+        setDepartment(String(progDeptId));
+      }
+    }
   };
 
   const save = useMutation({
@@ -406,11 +492,16 @@ function CreatePlanModal({ open, options, onClose, onSaved }) {
             onChange={(event) => {
               const deptId = event.target.value;
               setDepartment(deptId);
-              setForm((current) => ({ ...current, program: '' }));
+              if (deptId && form.program) {
+                const curProg = allPrograms.find((p) => p.id === form.program);
+                const curProgDept = curProg?.department?.id || curProg?.department;
+                if (String(curProgDept) !== String(deptId)) {
+                  setForm((current) => ({ ...current, program: '' }));
+                }
+              }
             }}
-            required
           >
-            <option value="">Choose a department</option>
+            <option value="">All departments</option>
             {departments.map((row) => (
               <option key={row.id} value={row.id}>
                 {row.code} · {row.name}
@@ -420,8 +511,7 @@ function CreatePlanModal({ open, options, onClose, onSaved }) {
           <SelectField
             label="Programme"
             value={form.program}
-            onChange={(event) => fillFromProgramme('program', event.target.value)}
-            disabled={!department && departments.length > 0}
+            onChange={(event) => handleSelectProgram(event.target.value)}
             required
           >
             <option value="">Choose a programme</option>
@@ -432,8 +522,12 @@ function CreatePlanModal({ open, options, onClose, onSaved }) {
             ))}
           </SelectField>
           <SelectField label="Academic year" value={form.academicYear} onChange={(event) => fillFromProgramme('academicYear', event.target.value)} required>
-            <option value="">Choose a year</option>
-            {(options?.academicYears || []).map((row) => <option key={row.id} value={row.id}>{row.label}{row.isCurrent ? ' · current' : ''}</option>)}
+            <option value="">Choose an academic year</option>
+            {(options?.academicYears || []).map((row) => (
+              <option key={row.id} value={row.id}>
+                {row.label}{row.status === 'active' || row.isCurrent ? ' · Active' : row.status ? ` · ${row.status}` : ''}
+              </option>
+            ))}
           </SelectField>
           <Field className="sm:col-span-2" label="Title" value={form.title} onChange={(event) => setForm((value) => ({ ...value, title: event.target.value }))} placeholder="Optional; the programme and year are used by default" />
           <TextAreaField className="sm:col-span-2" label="Notes" rows={3} value={form.notes} onChange={(event) => setForm((value) => ({ ...value, notes: event.target.value }))} />
@@ -493,6 +587,9 @@ function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOpt
   const [error, setError] = useState('');
   const [scopeFilter, setScopeFilter] = useState('programme'); // 'programme' | 'all'
   const [searchTerm, setSearchTerm] = useState('');
+  const [showAddCourse, setShowAddCourse] = useState(false);
+  const [newCourse, setNewCourse] = useState({ code: '', title: '', creditHours: 3 });
+  const [creatingCourse, setCreatingCourse] = useState(false);
 
   const defaultLevel = useMemo(() => {
     return plan?.program?.durationYears ? 1 : (plan?.program?.levels?.[0] || 1);
@@ -504,8 +601,8 @@ function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOpt
 
   const programmeCourses = useMemo(() => {
     return (options?.courses || []).filter((row) => {
-      // 1. Program ID directly linked via CourseResource
-      const rowProgId = String(row.program?.id || row.program?._id || '');
+      // 1. Program ID directly linked via CourseResource or course.program
+      const rowProgId = String(row.program?.id || row.program?._id || (typeof row.program === 'string' ? row.program : '') || '');
       if (planProgId && rowProgId && rowProgId === planProgId) return true;
 
       // 2. Program code match (e.g. course starts with CS- or HL- or row.program.code === planProgCode)
@@ -541,6 +638,8 @@ function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOpt
     if (!open) return;
     setError('');
     setSearchTerm('');
+    setShowAddCourse(false);
+    setNewCourse({ code: '', title: '', creditHours: 3 });
     setScopeFilter('programme');
     refetchOptions?.();
     setForm(record ? {
@@ -559,6 +658,37 @@ function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOpt
       prerequisites: [],
     });
   }, [open, record, plan, defaultLevel, refetchOptions]);
+
+  const handleCreateCourse = async (e) => {
+    e?.preventDefault();
+    if (!newCourse.code.trim() || !newCourse.title.trim()) {
+      setError('Course code and course name are required to create a new course.');
+      return;
+    }
+    setCreatingCourse(true);
+    setError('');
+    try {
+      const res = await api.post(`${REGISTRAR}/courses`, {
+        code: newCourse.code.trim().toUpperCase(),
+        title: newCourse.title.trim(),
+        creditHours: Number(newCourse.creditHours) || 3,
+        program: planProgId || undefined,
+        department: planDeptId || undefined,
+      });
+      toast.success(`Course ${res.data.course.code} created and added to selection.`);
+      await refetchOptions?.();
+      setForm((cur) => ({
+        ...cur,
+        courses: [...new Set([...cur.courses, res.data.course.id])],
+      }));
+      setNewCourse({ code: '', title: '', creditHours: 3 });
+      setShowAddCourse(false);
+    } catch (err) {
+      setError(errorMessage(err, 'Could not create course.'));
+    } finally {
+      setCreatingCourse(false);
+    }
+  };
 
   const save = useMutation({
     mutationFn: async () => {
@@ -640,30 +770,75 @@ function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOpt
         ) : (
           <div>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-semibold text-slate-800">Courses to include</span>
-              {(options?.courses || []).length > programmeCourses.length && programmeCourses.length > 0 ? (
-                <div className="flex rounded-lg bg-slate-100 p-0.5 text-xs font-medium">
-                  <button
-                    type="button"
-                    onClick={() => setScopeFilter('programme')}
-                    className={`rounded-md px-2.5 py-1 transition ${scopeFilter === 'programme' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-                  >
-                    {plan?.program?.code || 'Programme'} ({programmeCourses.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setScopeFilter('all')}
-                    className={`rounded-md px-2.5 py-1 transition ${scopeFilter === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-                  >
-                    All catalogue ({(options?.courses || []).length})
-                  </button>
-                </div>
-              ) : programmeCourses.length === 0 && (options?.courses || []).length > 0 ? (
-                <span className="rounded-md bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
-                  Showing all catalogue courses ({(options?.courses || []).length})
-                </span>
-              ) : null}
+              <span className="text-sm font-semibold text-slate-800">Courses in programme</span>
+              <div className="flex items-center gap-2">
+                <Button size="xs" variant="secondary" onClick={() => setShowAddCourse((v) => !v)}>
+                  {showAddCourse ? 'Cancel' : '+ New course'}
+                </Button>
+                {(options?.courses || []).length > programmeCourses.length && programmeCourses.length > 0 ? (
+                  <div className="flex rounded-lg bg-slate-100 p-0.5 text-xs font-medium">
+                    <button
+                      type="button"
+                      onClick={() => setScopeFilter('programme')}
+                      className={`rounded-md px-2.5 py-1 transition ${scopeFilter === 'programme' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                    >
+                      {plan?.program?.code || 'Programme'} ({programmeCourses.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setScopeFilter('all')}
+                      className={`rounded-md px-2.5 py-1 transition ${scopeFilter === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                    >
+                      All catalogue ({(options?.courses || []).length})
+                    </button>
+                  </div>
+                ) : programmeCourses.length === 0 && (options?.courses || []).length > 0 ? (
+                  <span className="rounded-md bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                    Showing all catalogue courses ({(options?.courses || []).length})
+                  </span>
+                ) : null}
+              </div>
             </div>
+
+            {showAddCourse ? (
+              <div className="mb-3 rounded-xl border border-brand-200 bg-brand-50/50 p-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-brand-900">Define course for {plan?.program?.name || 'programme'}</span>
+                  <button type="button" onClick={() => setShowAddCourse(false)} className="text-xs text-slate-500 hover:text-slate-800">Close</button>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <input
+                    type="text"
+                    placeholder="Course code (e.g. CS-101)"
+                    value={newCourse.code}
+                    onChange={(e) => setNewCourse((c) => ({ ...c, code: e.target.value.toUpperCase() }))}
+                    className="focus-ring rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs uppercase"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Course name (e.g. Intro to CS)"
+                    value={newCourse.title}
+                    onChange={(e) => setNewCourse((c) => ({ ...c, title: e.target.value }))}
+                    className="focus-ring rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs"
+                  />
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      min="0.5"
+                      max="30"
+                      step="0.5"
+                      placeholder="Credits"
+                      value={newCourse.creditHours}
+                      onChange={(e) => setNewCourse((c) => ({ ...c, creditHours: e.target.value }))}
+                      className="focus-ring w-20 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs"
+                    />
+                    <Button size="xs" onClick={handleCreateCourse} loading={creatingCourse} className="flex-1 whitespace-nowrap">
+                      Save & Select
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             <div className="relative mb-2">
               <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
@@ -707,13 +882,13 @@ function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOpt
                 <div className="py-6 text-center text-sm text-slate-500">
                   <p>No courses found{searchTerm ? ` matching "${searchTerm}"` : ''}.</p>
                   <p className="mt-1 text-xs text-slate-400">
-                    Upload materials in Course registration to add courses to the catalogue.
+                    Click &quot;+ New course&quot; above to quickly add a course for this programme.
                   </p>
                 </div>
               ) : null}
             </div>
             <div className="mt-1.5 flex items-center justify-between text-xs text-slate-500">
-              <span>{form.courses.length} selected</span>
+              <span className="font-medium text-brand-700">{form.courses.length} selected</span>
               {displayedCourses.length > 0 ? <span>Showing {displayedCourses.length} courses</span> : null}
             </div>
           </div>
