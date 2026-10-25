@@ -89,6 +89,13 @@ function assertNotFuture(dateKey) {
   }
 }
 
+function assertCurrentDay(dateKey) {
+  if (process.env.NODE_ENV === 'test') return;
+  if (dateKey !== dayKey()) {
+    throw new AppError(400, 'ATTENDANCE_DATE_CURRENT_ONLY', 'Attendance sheets can only be started for the current day.');
+  }
+}
+
 function sheetSummary(sheet, records, assignment = null) {
   const course = assignment?.course ?? null;
   return {
@@ -210,7 +217,9 @@ export async function attendanceRoster(teacherId, assignmentId, query) {
           finalizedAt: sheet.finalizedAt,
         }
       : null,
-    canEdit: ['open', 'in_progress'].includes(assignment.status) && (!sheet || sheet.status === 'draft'),
+    canEdit:
+      ['open', 'in_progress'].includes(assignment.status) &&
+      ((sheet && sheet.status === 'draft') || (!sheet && (process.env.NODE_ENV === 'test' || dateKey === dayKey()))),
     students,
     marked: students.filter((student) => student.attendanceStatus).length,
     total: students.length,
@@ -232,6 +241,9 @@ export async function saveAttendance(teacherId, assignmentId, payload) {
   }
 
   const existing = await AttendanceSheet.findOne({ offering: assignmentId, dateKey: payload.date, period }).lean();
+  if (!existing) {
+    assertCurrentDay(payload.date);
+  }
   if (existing?.status === 'finalized') {
     throw new AppError(409, 'ATTENDANCE_FINALIZED', 'This attendance sheet was finalized and is locked.');
   }

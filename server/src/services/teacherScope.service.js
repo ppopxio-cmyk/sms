@@ -24,7 +24,7 @@ function photoView(photo) {
 }
 
 export const TZ = 'Africa/Addis_Ababa';
-export const READ_STATUSES = ['open', 'in_progress', 'completed'];
+export const READ_STATUSES = ['open', 'in_progress', 'completed', 'draft', 'pending'];
 export const WRITE_STATUSES = ['open', 'in_progress'];
 
 export const ASSIGNMENT_POPULATE = [

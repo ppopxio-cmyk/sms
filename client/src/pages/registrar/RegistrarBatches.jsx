@@ -417,28 +417,25 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
   });
 
   const set = (field, value) => setForm((current) => ({ ...current, [field]: value }));
-  const chosen = (form.programs || []).map((id) => (options?.programs || []).find((row) => row.id === id)).filter(Boolean);
-  const categories = chosen.length
-    ? chosen.reduce((allowed, row) => {
-        const next = row.categories?.length ? row.categories : ['regular', 'extension'];
-        return allowed.filter((category) => next.includes(category));
-      }, ['regular', 'extension'])
-    : ['regular', 'extension'];
+  const categories = ['regular', 'extension'];
+
+  const availablePrograms = useMemo(() => {
+    const stream = form.category || 'regular';
+    return (options?.programs || []).filter((row) => {
+      const cats = row.categories?.length ? row.categories : (row.category ? [row.category] : ['regular', 'extension']);
+      return cats.includes(stream);
+    });
+  }, [options?.programs, form.category]);
 
   const toggleProgram = (programId) => {
     setForm((current) => {
-      const programs = (current.programs || []).includes(programId)
+      const exists = (current.programs || []).includes(programId);
+      const programs = exists
         ? current.programs.filter((id) => id !== programId)
         : [...(current.programs || []), programId];
-      const allowed = programs.length
-        ? (options?.programs || [])
-            .filter((row) => programs.includes(row.id))
-            .reduce((values, row) => values.filter((category) => (row.categories?.length ? row.categories : ['regular', 'extension']).includes(category)), ['regular', 'extension'])
-        : ['regular', 'extension'];
       return {
         ...current,
         programs,
-        category: allowed.includes(current.category) ? current.category : allowed[0] || 'regular',
       };
     });
   };
@@ -455,14 +452,28 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
   };
 
   const handleCategoryChange = (value) => {
-    set('category', value);
-    if (!form.name) {
-      const year = (options?.academicYears || []).find((y) => y.id === form.admissionAcademicYear);
-      if (year) {
+    const validIds = new Set(
+      (options?.programs || [])
+        .filter((row) => {
+          const cats = row.categories?.length ? row.categories : (row.category ? [row.category] : ['regular', 'extension']);
+          return cats.includes(value);
+        })
+        .map((p) => p.id),
+    );
+    setForm((current) => {
+      let name = current.name;
+      const year = (options?.academicYears || []).find((y) => y.id === current.admissionAcademicYear);
+      if (year && !current.name) {
         const startYear = new Date(year.startDate).getFullYear();
-        set('name', `${startYear} ${value === 'extension' ? 'Extension' : 'Regular'} Students`);
+        name = `${startYear} ${value === 'extension' ? 'Extension' : 'Regular'} Students`;
       }
-    }
+      return {
+        ...current,
+        category: value,
+        programs: (current.programs || []).filter((id) => validIds.has(id)),
+        name,
+      };
+    });
   };
 
   return (
@@ -504,21 +515,24 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
             </p>
             <span className="text-xs text-slate-400">{(form.programs || []).length} selected</span>
           </div>
-          <div className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-slate-100 bg-white p-2">
-            {(options?.programs || []).map((row) => (
+          <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-100 bg-white p-2">
+            {availablePrograms.map((row) => (
               <label key={row.id} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-slate-700 hover:bg-slate-50">
                 <input
                   type="checkbox"
                   checked={(form.programs || []).includes(row.id)}
                   onChange={() => toggleProgram(row.id)}
-                  disabled={isEdit}
                   className="h-4 w-4 rounded border-slate-300 text-brand-600"
                 />
                 <span className="min-w-0 flex-1 truncate font-medium">{row.code} · {row.name}</span>
                 <span className="text-xs text-slate-400">{row.qualificationType || ''}</span>
               </label>
             ))}
-            {!options?.programs?.length ? <p className="px-2 py-3 text-sm text-slate-500">No programmes available.</p> : null}
+            {!availablePrograms.length ? (
+              <p className="px-2 py-3 text-sm text-slate-500">
+                No programmes offered for {humanStatus(form.category || 'regular')} stream.
+              </p>
+            ) : null}
           </div>
         </div>
 

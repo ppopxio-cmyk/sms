@@ -6,11 +6,12 @@ import {
   publicAssessmentSubmitQuerySchema,
   publicAssessmentVerifySchema,
 } from '../validators/publicAssessment.schemas.js';
-import { meta, submit, verify } from '../controllers/publicAssessments.controller.js';
+import { downloadDocument, meta, submit, verify } from '../controllers/publicAssessments.controller.js';
 
 const r = Router();
 
 r.get('/assessments/:hash', validate(publicAssessmentParamSchema, 'params'), meta);
+r.get('/assessments/:hash/document/download', validate(publicAssessmentParamSchema, 'params'), downloadDocument);
 r.post(
   '/assessments/:hash/verify',
   codeLimiter,
@@ -30,7 +31,7 @@ r.post(
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/octet-stream',
     ],
-    limit: '10mb',
+    limit: '30mb',
   }),
   submit,
 );

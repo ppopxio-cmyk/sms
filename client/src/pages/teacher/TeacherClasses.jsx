@@ -65,6 +65,7 @@ export default function TeacherClasses() {
               tabs={[
                 { key: 'all', label: 'All classes' },
                 { key: 'active', label: 'Active' },
+                { key: 'pending', label: 'Pending' },
                 { key: 'completed', label: 'Completed' },
               ]}
             />
@@ -100,6 +101,12 @@ export default function TeacherClasses() {
             <ErrorState message="We could not load your classes." onRetry={query.refetch} />
           ) : query.isLoading ? (
             <SkeletonRows rows={5} />
+          ) : !rows.length && (status === 'completed' || status === 'active') ? (
+            <EmptyState
+              icon={GraduationCap}
+              title={status === 'completed' ? 'No completed classes' : 'No active classes'}
+              message={status === 'completed' ? 'You have no completed classes yet.' : 'You have no active classes open for teaching right now.'}
+            />
           ) : !rows.length && !programs.length ? (
             <EmptyState
               icon={GraduationCap}

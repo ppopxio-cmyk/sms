@@ -25,7 +25,7 @@ export const studentParamSchema = z.strictObject({ studentId: objectId });
 
 export const listAssignmentsQuerySchema = z.strictObject({
   search: z.string().trim().max(100).optional(),
-  status: z.enum(['all', 'active', 'completed']).default('all'),
+  status: z.enum(['all', 'active', 'pending', 'completed']).default('all'),
   program: objectId.optional(),
   batch: objectId.optional(),
   category: z.enum(['regular', 'extension']).optional(),

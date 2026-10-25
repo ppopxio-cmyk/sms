@@ -242,7 +242,7 @@ r.post(
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/octet-stream',
     ],
-    limit: '10mb',
+    limit: '50mb',
   }),
   uploadCourseResource,
 );

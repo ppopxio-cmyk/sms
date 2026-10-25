@@ -1,5 +1,9 @@
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { audit } from '../services/audit.service.js';
+import { AppError } from '../utils/AppError.js';
+import { AssessmentSubmission } from '../models/AssessmentSubmission.js';
+import { assessmentForTeacher } from '../services/teacherScope.service.js';
+import { signedImageUrl } from '../services/imagekit.service.js';
 import {
   configurePortal,
   listSubmissions,
@@ -171,4 +175,35 @@ export const reviewSubmissionController = asyncHandler(async (req, res) => {
     },
   });
   res.json(data);
+});
+
+export const downloadSubmissionFile = asyncHandler(async (req, res) => {
+  const submission = await AssessmentSubmission.findById(req.valid.params.submissionId).lean();
+  if (!submission) throw new AppError(404, 'SUBMISSION_NOT_FOUND', 'That submission was not found.');
+  await assessmentForTeacher(req.user.id, submission.assessment);
+  const downloadUrl = signedImageUrl(submission.filePath, { expiresIn: 300 });
+  const response = await fetch(downloadUrl);
+  if (!response.ok) throw new AppError(502, 'DOWNLOAD_FAILED', 'Could not stream file from storage.');
+  const cleanFilename = (submission.fileName || 'submission.pdf').replace(/[^\w.\- ]+/g, '_');
+  res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
+  res.setHeader('Content-Type', submission.contentType || 'application/octet-stream');
+  if (submission.bytes) res.setHeader('Content-Length', submission.bytes);
+  const arrayBuffer = await response.arrayBuffer();
+  res.send(Buffer.from(arrayBuffer));
+});
+
+export const downloadDocumentFile = asyncHandler(async (req, res) => {
+  const { assessment } = await assessmentForTeacher(req.user.id, req.valid.params.assessmentId);
+  if (!assessment.portalDocument?.filePath) {
+    throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'No document has been attached to this assessment.');
+  }
+  const downloadUrl = signedImageUrl(assessment.portalDocument.filePath, { expiresIn: 300 });
+  const response = await fetch(downloadUrl);
+  if (!response.ok) throw new AppError(502, 'DOWNLOAD_FAILED', 'Could not stream file from storage.');
+  const cleanFilename = (assessment.portalDocument.fileName || 'document.pdf').replace(/[^\w.\- ]+/g, '_');
+  res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
+  res.setHeader('Content-Type', assessment.portalDocument.contentType || 'application/octet-stream');
+  if (assessment.portalDocument.bytes) res.setHeader('Content-Length', assessment.portalDocument.bytes);
+  const arrayBuffer = await response.arrayBuffer();
+  res.send(Buffer.from(arrayBuffer));
 });

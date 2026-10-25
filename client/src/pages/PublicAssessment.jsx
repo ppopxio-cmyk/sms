@@ -51,6 +51,64 @@ function errorMessage(error) {
   return error?.response?.data?.message || 'Something went wrong. Check your connection and try again.';
 }
 
+function calculateTimeLeft(targetDate) {
+  if (!targetDate) return { expired: true, days: 0, hours: 0, minutes: 0, seconds: 0 };
+  const diff = new Date(targetDate).getTime() - Date.now();
+  if (diff <= 0) return { expired: true, days: 0, hours: 0, minutes: 0, seconds: 0 };
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+  const minutes = Math.floor((diff / 1000 / 60) % 60);
+  const seconds = Math.floor((diff / 1000) % 60);
+  return { expired: false, days, hours, minutes, seconds };
+}
+
+function CountdownTimer({ targetDate }) {
+  const [timeLeft, setTimeLeft] = useState(() => calculateTimeLeft(targetDate));
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeLeft(calculateTimeLeft(targetDate));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [targetDate]);
+
+  if (!targetDate) {
+    return <span className="text-xs text-slate-500">No deadline set</span>;
+  }
+
+  if (timeLeft.expired) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600 border border-rose-200">
+        Deadline has passed
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex flex-col items-center justify-center rounded-xl border border-sky-200 bg-sky-50 px-2.5 py-1 text-center min-w-[3rem]">
+        <span className="font-mono text-base font-bold text-sky-800">{String(timeLeft.days).padStart(2, '0')}</span>
+        <span className="text-[9px] uppercase tracking-wider text-sky-600">Days</span>
+      </div>
+      <span className="font-bold text-slate-400">:</span>
+      <div className="flex flex-col items-center justify-center rounded-xl border border-sky-200 bg-sky-50 px-2.5 py-1 text-center min-w-[3rem]">
+        <span className="font-mono text-base font-bold text-sky-800">{String(timeLeft.hours).padStart(2, '0')}</span>
+        <span className="text-[9px] uppercase tracking-wider text-sky-600">Hours</span>
+      </div>
+      <span className="font-bold text-slate-400">:</span>
+      <div className="flex flex-col items-center justify-center rounded-xl border border-sky-200 bg-sky-50 px-2.5 py-1 text-center min-w-[3rem]">
+        <span className="font-mono text-base font-bold text-sky-800">{String(timeLeft.minutes).padStart(2, '0')}</span>
+        <span className="text-[9px] uppercase tracking-wider text-sky-600">Mins</span>
+      </div>
+      <span className="font-bold text-slate-400">:</span>
+      <div className="flex flex-col items-center justify-center rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-1 text-center min-w-[3rem]">
+        <span className="font-mono text-base font-bold text-amber-700">{String(timeLeft.seconds).padStart(2, '0')}</span>
+        <span className="text-[9px] uppercase tracking-wider text-amber-600">Secs</span>
+      </div>
+    </div>
+  );
+}
+
 function Seal() {
   return (
     <span className="grid h-11 w-11 place-items-center rounded-full border border-white/20 bg-white/10 text-[#ffcf66] shadow-[inset_0_0_0_5px_rgba(255,255,255,0.04)]">
@@ -133,6 +191,10 @@ export default function PublicAssessment() {
     setUploadError('');
     if (!file) {
       setUploadError('Choose a PDF or Word document first.');
+      return;
+    }
+    if (file.size > 30 * 1024 * 1024) {
+      setUploadError('The document must be smaller than 30 MB.');
       return;
     }
     setUploading(true);
@@ -296,6 +358,16 @@ export default function PublicAssessment() {
                 </div>
               ) : verified ? (
                 <div className="space-y-5">
+                  <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                      <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-900">
+                        <Clock3 className="h-4 w-4 text-sky-600" /> Deadline countdown
+                      </span>
+                      <span className="text-xs font-medium text-slate-500">{deadline}</span>
+                    </div>
+                    <CountdownTimer targetDate={meta.closesAt || meta.dueDate} />
+                  </div>
+
                   <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-3">
                     <span className="grid h-10 w-10 place-items-center overflow-hidden rounded-full bg-emerald-100 text-emerald-700">
                       {verified.student?.photoUrl ? (
@@ -336,11 +408,10 @@ export default function PublicAssessment() {
                         ) : null}
                       </div>
                     </div>
-                    {verified.documentUrl ? (
+                    {meta.hasDocument ? (
                       <a
-                        href={verified.documentUrl}
-                        target="_blank"
-                        rel="noreferrer"
+                        href={`/api/public/assessments/${hash}/document/download`}
+                        download
                         className="mt-4 inline-flex h-10 items-center gap-2 rounded-xl bg-[#0b2a40] px-4 text-xs font-semibold text-white transition hover:bg-[#103c59]"
                       >
                         <ArrowDownToLine className="h-4 w-4" />
@@ -389,7 +460,7 @@ export default function PublicAssessment() {
                           <p className="text-sm font-semibold text-slate-900">
                             {submission ? 'Send a new version' : 'Submit your document'}
                           </p>
-                          <p className="text-xs text-slate-500">PDF or Word, up to 10 MB.</p>
+                          <p className="text-xs text-slate-500">PDF or Word, up to 30 MB.</p>
                         </div>
                         {submission?.status === 'returned' ? (
                           <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-800">
@@ -461,6 +532,16 @@ export default function PublicAssessment() {
                 </div>
               ) : (
                 <form onSubmit={onVerify} className="space-y-4">
+                  <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                      <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-900">
+                        <Clock3 className="h-4 w-4 text-sky-600" /> Deadline countdown
+                      </span>
+                      <span className="text-xs font-medium text-slate-500">{deadline}</span>
+                    </div>
+                    <CountdownTimer targetDate={meta?.closesAt || meta?.dueDate} />
+                  </div>
+
                   <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500">
                     <span className="inline-flex items-center gap-1.5">
                       <FileText className="h-3.5 w-3.5" />

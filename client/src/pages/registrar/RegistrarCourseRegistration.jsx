@@ -23,6 +23,16 @@ import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
 import SearchInput from '../../components/ui/SearchInput';
 
+function shortenFileName(fileName, maxBase = 12) {
+  if (!fileName) return '';
+  const str = String(fileName).trim();
+  const dotIndex = str.lastIndexOf('.');
+  const ext = dotIndex !== -1 ? str.slice(dotIndex) : '';
+  const base = dotIndex !== -1 ? str.slice(0, dotIndex) : str;
+  if (base.length <= maxBase) return str;
+  return `${base.slice(0, maxBase)}...${ext}`;
+}
+
 export default function RegistrarCourseRegistration() {
   const queryClient = useQueryClient();
   const [academicYear, setAcademicYear] = useState('');
@@ -189,7 +199,9 @@ export default function RegistrarCourseRegistration() {
         <div className="flex items-center gap-2">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-50 text-slate-500"><FileText className="h-4 w-4" /></span>
           <div className="min-w-0">
-            <p className="truncate text-sm text-slate-700">{row.fileName}</p>
+            <p className="truncate text-sm font-medium text-slate-700" title={row.fileName}>
+              {shortenFileName(row.fileName)}
+            </p>
             <p className="text-xs text-slate-400">{formatBytes(row.bytes)}</p>
           </div>
         </div>
@@ -284,13 +296,11 @@ export default function RegistrarCourseRegistration() {
   const recordColumns = [
     {
       key: 'student',
-      label: 'Student',
+      label: 'Student code',
       render: (row) => (
         <div>
-          <p className="text-sm font-semibold text-slate-900">{row.student?.fullName || '—'}</p>
-          <p className="text-xs text-slate-500">
-            {row.student?.studentId || '—'} · {levelLabel(row.student?.level)} · {humanStatus(row.student?.studentCategory || 'regular')}
-          </p>
+          <p className="text-sm font-semibold font-mono text-slate-900">{row.student?.studentId || '—'}</p>
+          <p className="text-xs text-slate-500">{row.student?.fullName || '—'}</p>
         </div>
       ),
     },
@@ -618,7 +628,7 @@ function CourseMaterialModal({ open, options, existingMaterials = [], initialPro
         throw new Error('Programme, course name, course code and a file are required.');
       }
       if (!file) throw new Error('Choose a PDF or Word document.');
-      if (file.size > 10 * 1024 * 1024) throw new Error('The course material must be smaller than 10 MB.');
+      if (file.size > 50 * 1024 * 1024) throw new Error('The course material must be smaller than 50 MB.');
       const extension = file.name.split('.').pop()?.toLowerCase();
       if (!['pdf', 'doc', 'docx'].includes(extension)) throw new Error('Upload a PDF, DOC or DOCX file.');
       const contentType = file.type || {
@@ -715,7 +725,7 @@ function CourseMaterialModal({ open, options, existingMaterials = [], initialPro
             label="Credit hours"
             type="number"
             min="0.5"
-            max="30"
+            max="1000"
             step="0.5"
             value={form.creditHours}
             onChange={(event) => set('creditHours', event.target.value)}
@@ -726,7 +736,7 @@ function CourseMaterialModal({ open, options, existingMaterials = [], initialPro
             type="file"
             accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             onChange={handleFileChange}
-            hint="Maximum 10 MB. PDF, DOC or DOCX."
+            hint="Maximum 50 MB. PDF, DOC or DOCX."
             required
           />
         </FormGrid>
@@ -1015,10 +1025,8 @@ function RegisterOfferingModal({ offering, options, onClose, onSaved }) {
                       className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
                     />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium text-slate-800">{row.fullName}</span>
-                      <span className="block text-xs text-slate-500">
-                        {row.studentId} · {humanStatus(row.studentCategory || 'regular')} · {row.batch?.code || 'No batch'}
-                      </span>
+                      <span className="block font-mono font-semibold text-slate-900">{row.studentId}</span>
+                      <span className="block text-xs text-slate-500">{row.fullName}</span>
                       {row.alreadyRegistered ? <span className="text-xs font-medium text-sky-700">Already registered</span> : null}
                       {row.missingPrerequisites?.length ? <span className="text-xs font-medium text-rose-700">Missing prerequisite result</span> : null}
                       {!row.eligible && !row.alreadyRegistered && !row.missingPrerequisites?.length ? <span className="text-xs font-medium text-slate-500">Not available for registration</span> : null}

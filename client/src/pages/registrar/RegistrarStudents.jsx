@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, Legend } from 'recharts';
 import { SlidersHorizontal, UserPlus, Users, Building2, BookOpen, GraduationCap, TrendingUp } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -35,6 +35,7 @@ const initials = (value) =>
 
 export default function RegistrarStudents() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const debounced = useDebounced(search, 300);
   const [status, setStatus] = useState('all');
@@ -400,7 +401,11 @@ export default function RegistrarStudents() {
         student={editing}
         options={options.data}
         onClose={() => { setCreating(false); setEditing(null); }}
-        onSaved={() => students.refetch()}
+        onSaved={() => {
+          students.refetch();
+          summary.refetch();
+          queryClient.invalidateQueries({ queryKey: ['registrar', 'students'] });
+        }}
       />
     </div>
   );

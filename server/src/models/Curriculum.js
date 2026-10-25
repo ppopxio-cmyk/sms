@@ -41,7 +41,7 @@ const curriculumCourseSchema = new Schema(
     academicYear: { type: Schema.Types.ObjectId, ref: 'AcademicYear', required: true, index: true },
     term: { type: String, trim: true, maxlength: 60, default: '' },
     level: { type: Number, min: 1, max: 20, required: true, index: true },
-    creditHours: { type: Number, required: true, min: 0.5, max: 30 },
+    creditHours: { type: Number, required: true, min: 0.5, max: 1000 },
     category: { type: String, enum: CURRICULUM_CATEGORIES, default: 'required', index: true },
     prerequisites: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
     order: { type: Number, default: 0 },

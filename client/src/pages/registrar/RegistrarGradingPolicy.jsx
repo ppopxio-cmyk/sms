@@ -19,7 +19,22 @@ const REPEAT_POLICIES = [
   { value: 'latest', label: 'Latest attempt counts' },
 ];
 
-const blankBand = () => ({ min: 0, max: 100, letter: '', points: 0, pass: true });
+export const STANDARD_12_BAND_SCALE = [
+  { min: 0, max: 29, letter: 'F', points: 0.0, pass: false, description: 'Complete Failure' },
+  { min: 30, max: 39, letter: 'Fx', points: 0.0, pass: false, description: 'Fail (Eligible for Re-Exam)' },
+  { min: 40, max: 44, letter: 'D', points: 1.0, pass: true, description: 'Lowest Conditional Pass' },
+  { min: 45, max: 49, letter: 'C-', points: 1.5, pass: true, description: 'Unsatisfactory Pass' },
+  { min: 50, max: 59, letter: 'C', points: 2.0, pass: true, description: 'Satisfactory Pass Minimum' },
+  { min: 60, max: 64, letter: 'C+', points: 2.5, pass: true, description: 'Satisfactory' },
+  { min: 65, max: 69, letter: 'B-', points: 2.75, pass: true, description: 'Fairly Good' },
+  { min: 70, max: 74, letter: 'B', points: 3.0, pass: true, description: 'Good Standard Baseline' },
+  { min: 75, max: 79, letter: 'B+', points: 3.5, pass: true, description: 'Very Good' },
+  { min: 80, max: 84, letter: 'A-', points: 3.75, pass: true, description: 'Very Good Achievement' },
+  { min: 85, max: 89, letter: 'A', points: 4.0, pass: true, description: 'Excellent' },
+  { min: 90, max: 100, letter: 'A+', points: 4.0, pass: true, description: 'Excellent / Outstanding' },
+];
+
+const blankBand = () => ({ min: 0, max: 100, letter: '', points: 0, pass: true, description: '' });
 
 export default function RegistrarGradingPolicy() {
   const queryClient = useQueryClient();
@@ -79,6 +94,7 @@ export default function RegistrarGradingPolicy() {
           letter: String(band.letter).trim().toUpperCase(),
           points: Number(band.points),
           pass: Boolean(band.pass),
+          description: String(band.description || '').trim(),
         })),
         repeatPolicy,
         rounding: Number(rounding),
@@ -125,6 +141,12 @@ export default function RegistrarGradingPolicy() {
 
   const removeBand = (index) => {
     setBands((current) => current.filter((_, position) => position !== index));
+  };
+
+  const loadStandardScale = () => {
+    const sorted = [...STANDARD_12_BAND_SCALE].sort((a, b) => a.min - b.min);
+    setBands(sorted.map((b) => ({ ...b })));
+    toast.success('Loaded standard 12-band scale. Review and edit any field before saving.');
   };
 
   const reset = () => {
@@ -184,10 +206,11 @@ export default function RegistrarGradingPolicy() {
       <Card>
         <CardHeader
           title="Grade bands"
-          subtitle="Enter published boundaries as 0–30, 31–40, 41–50 and so on. Bands must cover 0 to 100 with no gaps and no overlaps."
+          subtitle="Enter published boundaries as 0–29, 30–39, 40–44 and so on. Bands must cover 0 to 100 with no gaps and no overlaps."
           icon={CheckCircle2}
           action={
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="secondary" onClick={loadStandardScale}><Plus className="h-3.5 w-3.5" /> Load standard scale</Button>
               <Button size="sm" variant="ghost" onClick={reset} disabled={save.isPending}><RotateCcw className="h-3.5 w-3.5" /> Reset</Button>
               <Button size="sm" variant="secondary" onClick={addBand}><Plus className="h-3.5 w-3.5" /> Add band</Button>
             </div>
@@ -195,22 +218,24 @@ export default function RegistrarGradingPolicy() {
         />
         <CardBody className="space-y-4">
           {bands.length === 0 ? (
-            <p className="rounded-xl bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-              No grade bands yet. Add one to begin.
-            </p>
+            <div className="rounded-xl bg-slate-50 px-4 py-8 text-center space-y-3">
+              <p className="text-sm text-slate-500">No grade bands yet. You can load the official 12-band scale or add bands manually.</p>
+              <Button size="sm" onClick={loadStandardScale} className="gap-1.5"><Plus className="h-4 w-4" /> Load standard 12-band scale</Button>
+            </div>
           ) : (
             <div className="space-y-2">
               <div className="hidden grid-cols-12 gap-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 sm:grid">
-                <div className="col-span-2">From</div>
-                <div className="col-span-2">To</div>
-                <div className="col-span-3">Grade</div>
-                <div className="col-span-2">Points</div>
-                <div className="col-span-2">Pass</div>
+                <div className="col-span-1">From</div>
+                <div className="col-span-1">To</div>
+                <div className="col-span-2">Grade</div>
+                <div className="col-span-1">Points</div>
+                <div className="col-span-5">Performance descriptor</div>
+                <div className="col-span-1">Pass</div>
                 <div className="col-span-1" />
               </div>
               {bands.map((band, index) => (
                 <div key={index} className="grid grid-cols-2 gap-2 rounded-2xl border border-slate-100 p-3 sm:grid-cols-12 sm:items-end">
-                  <div className="sm:col-span-2">
+                  <div className="sm:col-span-1">
                     <label className="mb-1 block text-xs text-slate-500 sm:hidden">From</label>
                     <Field
                       type="number"
@@ -221,7 +246,7 @@ export default function RegistrarGradingPolicy() {
                       aria-label={`Band ${index + 1} minimum mark`}
                     />
                   </div>
-                  <div className="sm:col-span-2">
+                  <div className="sm:col-span-1">
                     <label className="mb-1 block text-xs text-slate-500 sm:hidden">To</label>
                     <Field
                       type="number"
@@ -232,17 +257,17 @@ export default function RegistrarGradingPolicy() {
                       aria-label={`Band ${index + 1} maximum mark`}
                     />
                   </div>
-                  <div className="sm:col-span-3">
+                  <div className="sm:col-span-2">
                     <label className="mb-1 block text-xs text-slate-500 sm:hidden">Grade</label>
                     <Field
                       value={band.letter}
                       onChange={(event) => setBand(index, 'letter', event.target.value)}
-                      placeholder="A"
+                      placeholder="A+"
                       maxLength={10}
                       aria-label={`Band ${index + 1} grade label`}
                     />
                   </div>
-                  <div className="sm:col-span-2">
+                  <div className="sm:col-span-1">
                     <label className="mb-1 block text-xs text-slate-500 sm:hidden">Points</label>
                     <Field
                       type="number"
@@ -254,7 +279,16 @@ export default function RegistrarGradingPolicy() {
                       aria-label={`Band ${index + 1} grade points`}
                     />
                   </div>
-                  <div className="sm:col-span-2">
+                  <div className="sm:col-span-5">
+                    <label className="mb-1 block text-xs text-slate-500 sm:hidden">Performance descriptor</label>
+                    <Field
+                      value={band.description || ''}
+                      onChange={(event) => setBand(index, 'description', event.target.value)}
+                      placeholder="e.g. Excellent / Outstanding"
+                      aria-label={`Band ${index + 1} performance descriptor`}
+                    />
+                  </div>
+                  <div className="sm:col-span-1">
                     <label className="mb-1 block text-xs text-slate-500 sm:hidden">Pass</label>
                     <SelectField
                       value={band.pass ? 'pass' : 'fail'}

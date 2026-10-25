@@ -217,7 +217,7 @@ export const progressionSchema = z.object({
 export const courseCreateSchema = z.object({
   code: z.string().min(1).max(24),
   title: z.string().min(1).max(160),
-  creditHours: z.coerce.number().min(0.5).max(30).optional().default(3),
+  creditHours: z.coerce.number().min(0.5).max(1000).optional().default(3),
   department: objectId.optional(),
   program: objectId.optional(),
   description: optionalText(1000),
@@ -241,7 +241,7 @@ export const curriculumCourseSchema = z.object({
   course: objectId,
   term: optionalText(60),
   level: z.coerce.number().int().min(1).max(20).optional().default(1),
-  creditHours: z.coerce.number().min(0.5).max(30),
+  creditHours: z.coerce.number().min(0.5).max(1000),
   category: z.enum(['required', 'elective']).optional().default('required'),
   prerequisites: z.array(objectId).max(20).optional().default([]),
   order: z.coerce.number().int().min(0).max(10000).optional().default(0),
@@ -325,7 +325,7 @@ export const courseResourceUploadSchema = z.object({
   courseName: text(160).min(1),
   courseCode: text(40).min(1),
   filename: text(255).min(1),
-  creditHours: z.coerce.number().min(0.5).max(30).optional().default(3),
+  creditHours: z.coerce.number().min(0.5).max(1000).optional().default(3),
 });
 
 export const listResultsQuerySchema = paginationSchema.extend({

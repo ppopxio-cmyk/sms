@@ -281,7 +281,7 @@ export default function StudentFormModal({ open, student, options, onClose, onSa
       title={editing ? 'Edit student record' : 'Admit a student'}
       subtitle={editing
         ? `Official student number ${student?.studentId || '—'} is permanent and cannot be edited.`
-        : 'The student number is generated from the programme, batch and delivery stream.'}
+        : 'Student ID will be auto-generated as programmecode-batchcode-nnn (e.g. CS-2024-001).'}
       onClose={save.isPending ? undefined : onClose}
       dismissible={!save.isPending}
       size="lg"

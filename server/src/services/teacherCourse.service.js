@@ -29,12 +29,14 @@ const matches = (row, term) => {
 export async function listTeacherAssignments(teacherId, query) {
   const statuses =
     query.status === 'all'
-      ? READ_STATUSES
+      ? ['open', 'in_progress', 'completed', 'draft', 'pending']
       : query.status === 'active'
         ? WRITE_STATUSES
-        : query.status === 'completed'
-          ? ['completed']
-          : READ_STATUSES;
+        : query.status === 'pending'
+          ? ['draft', 'pending']
+          : query.status === 'completed'
+            ? ['completed']
+            : READ_STATUSES;
   const access = await teacherOfferingFilter(teacherId);
   const clauses = [access, { status: { $in: statuses } }];
   if (query.program) clauses.push({ program: query.program });

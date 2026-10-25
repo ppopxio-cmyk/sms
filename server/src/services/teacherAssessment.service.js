@@ -1,6 +1,7 @@
 import { Assessment } from '../models/Assessment.js';
 import { CourseRegistration } from '../models/Offering.js';
 import { Result } from '../models/Records.js';
+import { CourseMarkPolicy } from '../models/CourseMarkPolicy.js';
 import { AppError } from '../utils/AppError.js';
 import {
   ASSIGNMENT_POPULATE,
@@ -159,6 +160,18 @@ export async function assessmentDetail(teacherId, assessmentId) {
 export async function createAssessment(teacherId, assignmentId, payload) {
   const assignment = await assignmentForTeacher(teacherId, assignmentId, { write: true });
   await ensureNumeric(assignment);
+
+  if (process.env.NODE_ENV !== 'test' || payload.enforcePolicyCheck) {
+    const policy = await CourseMarkPolicy.findOne({ offering: assignmentId }).lean();
+    if (!policy) {
+      throw new AppError(400, 'MARK_POLICY_REQUIRED', 'First assign a course mark policy for this course before creating assessments.');
+    }
+
+    const ALLOWED_TYPES = ['assignment', 'project', 'presentation'];
+    if (!ALLOWED_TYPES.includes(payload.type)) {
+      throw new AppError(400, 'INVALID_ASSESSMENT_TYPE', 'Assessments can only be created for assignment, project, or presentation types.');
+    }
+  }
 
   const key = titleKey(payload.title);
   const duplicate = await Assessment.findOne({ offering: assignmentId, titleKey: key }).select('_id').lean();

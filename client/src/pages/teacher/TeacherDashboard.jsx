@@ -1,5 +1,17 @@
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import {
+  ResponsiveContainer,
+  ComposedChart,
+  Bar,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as ChartTooltip,
+  Legend,
+} from 'recharts';
 import {
   ArrowRight,
   BookOpen,
@@ -8,6 +20,7 @@ import {
   ClipboardList,
   Clock3,
   GraduationCap,
+  TrendingUp,
   Users,
 } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -45,6 +58,22 @@ export default function TeacherDashboard() {
   const summary = data.summary ?? {};
   const courses = data.courses ?? [];
 
+  const performanceData = useMemo(() => {
+    return courses.map((course) => {
+      const code = course.courseCode || course.course?.code || course.courseTitle || 'Class';
+      const students = course.studentCount ?? 0;
+      const assessments =
+        course.assessmentCount ??
+        Object.values(course.assessments || {}).reduce((sum, value) => sum + value, 0);
+      return {
+        name: code.length > 12 ? `${code.slice(0, 10)}…` : code,
+        fullName: classTitle(course),
+        students,
+        assessments,
+      };
+    });
+  }, [courses]);
+
   return (
     <div className="space-y-6">
       <TeacherPageHeader
@@ -80,6 +109,35 @@ export default function TeacherDashboard() {
           tone="violet"
         />
       </div>
+
+      {courses.length > 0 ? (
+        <Card>
+          <CardHeader
+            title="Class performance & enrollment"
+            subtitle="Live breakdown of enrolled students and active assessments across your assigned classes."
+            icon={TrendingUp}
+          />
+          <CardBody>
+            <div className="h-72 w-full pt-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={performanceData} margin={{ top: 10, right: 20, bottom: 20, left: -10 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} />
+                  <YAxis yAxisId="left" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <ChartTooltip
+                    contentStyle={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                    labelFormatter={(label, payload) => payload?.[0]?.payload?.fullName || label}
+                  />
+                  <Legend wrapperStyle={{ paddingTop: '8px', fontSize: '12px' }} />
+                  <Bar yAxisId="left" dataKey="students" name="Enrolled students" fill="#4f46e5" radius={[6, 6, 0, 0]} animationDuration={1200} />
+                  <Line yAxisId="right" type="monotone" dataKey="assessments" name="Assessments" stroke="#10b981" strokeWidth={3} dot={{ r: 4, fill: '#10b981', strokeWidth: 2, stroke: '#fff' }} animationDuration={1500} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </CardBody>
+        </Card>
+      ) : null}
 
       {!courses.length ? (
         <Card>

@@ -6,7 +6,7 @@ const courseResourceSchema = new mongoose.Schema(
     department: { type: mongoose.Schema.Types.ObjectId, ref: 'Department', required: true, index: true },
     courseName: { type: String, required: true, trim: true, maxlength: 160 },
     courseCode: { type: String, required: true, trim: true, maxlength: 40 },
-    creditHours: { type: Number, min: 0.5, max: 30, default: 3 },
+    creditHours: { type: Number, min: 0.5, max: 1000, default: 3 },
     fileName: { type: String, required: true, trim: true, maxlength: 255 },
     filePath: { type: String, required: true, trim: true, maxlength: 1000 },
     fileId: { type: String, required: true, trim: true, maxlength: 120 },

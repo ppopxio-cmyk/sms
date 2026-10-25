@@ -118,16 +118,39 @@ async function nextStudentId({ program, batch }) {
   }
   const programCode = String(program.code || '').trim().toUpperCase();
   const rawBatchCode = String(batch.code || '').trim().toUpperCase();
-  const batchCode = rawBatchCode.startsWith('BAT')
-    ? rawBatchCode
-    : `BAT-${rawBatchCode || String(batch.admissionAcademicYear || '').slice(-4)}`;
+  const batchCode = rawBatchCode || String(batch.admissionAcademicYear || '').slice(-4) || 'BATCH';
   const prefix = `${programCode}-${batchCode}`.slice(0, 45).replace(/-+$/, '');
+
+  // Find the highest existing sequential number for this prefix (e.g. CS-2024-001)
+  const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const existingStudents = await Student.find({
+    studentId: new RegExp(`^${escapedPrefix}-\\d+$`, 'i'),
+  })
+    .select('studentId')
+    .lean();
+
+  let maxSeq = 0;
+  for (const s of existingStudents) {
+    const match = s.studentId?.match(/-(\d+)$/);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (!Number.isNaN(num) && num > maxSeq) maxSeq = num;
+    }
+  }
+
   const counter = await Counter.findOneAndUpdate(
     { key: `sid:${program._id}:${batchCode}` },
     { $inc: { value: 1 } },
     { upsert: true, new: true, setDefaultsOnInsert: true },
   );
-  return `${prefix}-${String(counter.value).padStart(3, '0')}`;
+
+  let nextSeq = counter.value;
+  if (nextSeq <= maxSeq) {
+    nextSeq = maxSeq + 1;
+    await Counter.updateOne({ key: `sid:${program._id}:${batchCode}` }, { value: nextSeq });
+  }
+
+  return `${prefix}-${String(nextSeq).padStart(3, '0')}`;
 }
 
 async function assertCapacity(program) {

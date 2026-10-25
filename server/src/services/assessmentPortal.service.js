@@ -3,7 +3,8 @@ import path from 'node:path';
 import { env } from '../config/env.js';
 import { Assessment } from '../models/Assessment.js';
 import { AssessmentSubmission } from '../models/AssessmentSubmission.js';
-import { CourseRegistration } from '../models/Offering.js';
+import { CourseOffering, CourseRegistration } from '../models/Offering.js';
+import { Result } from '../models/Records.js';
 import { Student } from '../models/Student.js';
 import { AppError } from '../utils/AppError.js';
 import { escapeRegex } from '../utils/text.js';
@@ -216,6 +217,9 @@ async function publicAssessment(hash) {
     .lean();
   if (!assessment || assessment.status === 'draft') {
     throw new AppError(404, 'ASSESSMENT_PORTAL_NOT_FOUND', 'That assessment link is not available.');
+  }
+  if (!['assignment', 'project', 'presentation'].includes(assessment.type)) {
+    throw new AppError(403, 'PORTAL_TYPE_RESTRICTED', 'The public portal is only available for assignments, projects, and presentations.');
   }
   return assessment;
 }
@@ -578,5 +582,43 @@ export async function reviewSubmission(teacherId, submissionId, payload) {
       ],
     })
     .lean();
+
+  if (payload.score !== null && payload.score !== undefined && submission.student) {
+    try {
+      const offering = await CourseOffering.findById(assessment.offering).lean();
+      if (offering) {
+        const studentId = submission.student?._id ?? submission.student;
+        const existingResult = await Result.findOne({
+          offering: offering._id,
+          student: studentId,
+        }).lean();
+
+        if (!existingResult || existingResult.status === 'draft') {
+          const components = (existingResult?.components || [])
+            .filter((c) => String(c.name || '').trim().toLowerCase() !== String(assessment.title || '').trim().toLowerCase())
+            .map((c) => ({ name: c.name, max: c.max, score: c.score }));
+          components.push({ name: assessment.title, max: assessment.maxScore, score: Number(payload.score) });
+          await Result.findOneAndUpdate(
+            { offering: offering._id, student: studentId },
+            {
+              $set: { components, enteredBy: teacherId, status: 'draft' },
+              $setOnInsert: {
+                student: studentId,
+                offering: offering._id,
+                course: offering.course?._id ?? offering.course,
+                academicYear: offering.academicYear?._id ?? offering.academicYear,
+                term: offering.term,
+                creditHours: offering.creditHours,
+              },
+            },
+            { upsert: true },
+          );
+        }
+      }
+    } catch {
+      // Non-fatal if course mark sync encounters race condition
+    }
+  }
+
   return { submission: submissionRow(updated) };
 }

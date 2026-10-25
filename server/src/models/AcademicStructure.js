@@ -94,7 +94,7 @@ const courseSchema = new Schema(
     title: { type: String, required: true, trim: true, maxlength: 160 },
     department: { type: Schema.Types.ObjectId, ref: 'Department', required: true, index: true },
     program: { type: Schema.Types.ObjectId, ref: 'Program', default: null, index: true },
-    creditHours: { type: Number, required: true, min: 0.5, max: 30 },
+    creditHours: { type: Number, required: true, min: 0.5, max: 1000 },
     description: { type: String, trim: true, maxlength: 1000, default: '' },
     prerequisites: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
     active: { type: Boolean, default: true, index: true },

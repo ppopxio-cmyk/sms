@@ -684,34 +684,49 @@ export const updateBatch = asyncHandler(async (req, res) => {
     }
     batch.category = input.category;
   }
-  // Allow adding/updating programmes by re-creating rows for new programmes and updating existing ones.
+  // Allow adding/updating programmes by synchronizing batch rows for selected programmes.
   if (input.programs?.length) {
-    const existingProgramIds = new Set([String(batch.program)]);
-    const newProgramIds = input.programs.filter((id) => !existingProgramIds.has(id)).map(String);
-    if (newProgramIds.length) {
-      const newPrograms = await Program.find(ownFilter({ _id: { $in: newProgramIds } })).lean();
-      if (newPrograms.length !== newProgramIds.length) {
+    const groupBatches = await Batch.find(ownFilter({
+      code: batch.code,
+      admissionAcademicYear: batch.admissionAcademicYear,
+      category: batch.category || 'regular',
+    })).lean();
+    const existingProgramIds = new Set(groupBatches.map((b) => String(b.program)));
+    const targetProgramIds = new Set(input.programs.map(String));
+
+    const toAdd = input.programs.filter((id) => !existingProgramIds.has(String(id))).map(String);
+    if (toAdd.length) {
+      const newPrograms = await Program.find(ownFilter({ _id: { $in: toAdd } })).lean();
+      if (newPrograms.length !== toAdd.length) {
         throw new AppError(400, 'PROGRAM_INVALID', 'One or more selected programmes were not found.');
       }
-      const category = input.category || batch.category || 'regular';
-      for (const program of newPrograms) {
-        if (!(program.categories?.length ? program.categories : ['regular', 'extension']).includes(category)) {
-          throw new AppError(409, 'PROGRAM_CATEGORY', `Programme ${program.code} is not offered in the ${category} stream.`);
+      const stream = input.category || batch.category || 'regular';
+      for (const p of newPrograms) {
+        if (!(p.categories?.length ? p.categories : ['regular', 'extension']).includes(stream)) {
+          throw new AppError(409, 'PROGRAM_CATEGORY', `Programme ${p.code} is not offered in the ${stream} stream.`);
         }
       }
       await Batch.insertMany(
-        newPrograms.map((program) => ({
+        newPrograms.map((p) => ({
           ...batch.toObject(),
           _id: undefined,
-          program: program._id,
-          department: program.department,
+          program: p._id,
+          department: p.department,
+          category: stream,
           createdAt: undefined,
           createdBy: req.user.id,
           updatedBy: req.user.id,
         })),
       );
     }
-    batch.program = newProgramIds.length ? newPrograms?.[0]?._id ?? batch.program : batch.program;
+
+    const toRemoveBatches = groupBatches.filter((b) => !targetProgramIds.has(String(b.program)));
+    for (const rb of toRemoveBatches) {
+      const studentCount = await Student.countDocuments(ownFilter({ batch: rb._id }));
+      if (studentCount === 0 && String(rb._id) !== String(batch._id)) {
+        await Batch.deleteOne({ _id: rb._id });
+      }
+    }
   }
   if (input.durationYears) {
     const year = await AcademicYear.findById(input.admissionAcademicYear || batch.admissionAcademicYear).lean();

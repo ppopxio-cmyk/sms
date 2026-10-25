@@ -27,8 +27,8 @@ import Pagination from '../../components/ui/Pagination';
 import { EmptyState, ErrorState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';
 
-const TYPES = ['quiz', 'assignment', 'project', 'midterm', 'final', 'practical', 'presentation', 'other'];
-const EMPTY_FORM = { assignmentId: '', title: '', type: 'quiz', maxScore: '20', weight: '0', dueDate: '', instructions: '' };
+const TYPES = ['assignment', 'project', 'presentation'];
+const EMPTY_FORM = { assignmentId: '', title: '', type: 'assignment', maxScore: '20', weight: '0', dueDate: '', instructions: '' };
 const inputClass =
   'focus-ring h-11 w-full rounded-xl border border-slate-200 bg-white/85 px-3.5 text-sm text-slate-800 transition placeholder:text-slate-400';
 
@@ -42,6 +42,8 @@ export default function TeacherAssessments() {
   const [limit, setLimit] = useState(20);
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM, assignmentId: params.get('assignmentId') || '' });
+  const [briefFile, setBriefFile] = useState(null);
+  const [briefError, setBriefError] = useState('');
   const [showSecret, setShowSecret] = useState({});
   const [copiedCode, setCopiedCode] = useState('');
   const queryClient = useQueryClient();
@@ -50,6 +52,13 @@ export default function TeacherAssessments() {
     queryKey: ['teacher', 'classes', 'options'],
     queryFn: async () => (await api.get('/teacher/courses', { params: { status: 'all', limit: 100 } })).data,
   });
+
+  const markPolicyQuery = useQuery({
+    queryKey: ['teacher', 'mark-policy', form.assignmentId],
+    queryFn: async () => (await api.get(`/teacher/courses/${form.assignmentId}/mark-policy`)).data,
+    enabled: Boolean(form.assignmentId),
+  });
+  const hasMarkPolicy = Boolean(markPolicyQuery.data?.policy);
 
   const query = useQuery({
     queryKey: ['teacher', 'assessments', { assignmentId, status, type, page, limit }],
@@ -69,9 +78,31 @@ export default function TeacherAssessments() {
   const rows = query.data?.assessments ?? [];
   const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0 };
 
+  const handleBriefChange = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      setBriefFile(null);
+      setBriefError('');
+      return;
+    }
+    if (file.size > 30 * 1024 * 1024) {
+      setBriefError('Brief file must be smaller than 30 MB.');
+      setBriefFile(null);
+      return;
+    }
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (!['pdf', 'doc', 'docx'].includes(ext)) {
+      setBriefError('Only PDF, DOC or DOCX files are allowed.');
+      setBriefFile(null);
+      return;
+    }
+    setBriefError('');
+    setBriefFile(file);
+  };
+
   const createMutation = useMutation({
-    mutationFn: async () =>
-      (
+    mutationFn: async () => {
+      const created = (
         await api.post(`/teacher/courses/${form.assignmentId}/assessments`, {
           title: form.title.trim(),
           type: form.type,
@@ -80,11 +111,26 @@ export default function TeacherAssessments() {
           dueDate: form.dueDate || null,
           instructions: form.instructions.trim(),
         })
-      ).data,
+      ).data;
+
+      if (briefFile && (form.type === 'assignment' || form.type === 'project')) {
+        try {
+          await api.post(`/teacher/assessments/${created.id}/portal/document`, briefFile, {
+            params: { filename: briefFile.name },
+            headers: { 'Content-Type': briefFile.type || 'application/octet-stream' },
+          });
+        } catch {
+          toast.error('Assessment created, but the brief file failed to upload.');
+        }
+      }
+      return created;
+    },
     onSuccess: (created) => {
       toast.success('Assessment created as a draft.');
       setFormOpen(false);
       setForm({ ...EMPTY_FORM, assignmentId });
+      setBriefFile(null);
+      setBriefError('');
       queryClient.invalidateQueries({ queryKey: ['teacher', 'assessments'] });
       queryClient.invalidateQueries({ queryKey: ['teacher', 'class', form.assignmentId] });
       navigate(`/teacher/assessments/${created.id}`);
@@ -344,7 +390,11 @@ export default function TeacherAssessments() {
             <Button variant="secondary" onClick={() => setFormOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={submit} loading={createMutation.isPending} disabled={competencyBlocked || !form.assignmentId}>
+            <Button
+              onClick={submit}
+              loading={createMutation.isPending}
+              disabled={competencyBlocked || !form.assignmentId || (markPolicyQuery.isSuccess && !hasMarkPolicy)}
+            >
               Create assessment
             </Button>
           </>
@@ -358,6 +408,19 @@ export default function TeacherAssessments() {
             label="Class"
             disabled={createMutation.isPending}
           />
+          {form.assignmentId && markPolicyQuery.isSuccess && !hasMarkPolicy ? (
+            <Alert tone="danger" title="Course mark policy required">
+              <p>A course mark policy must be configured for this class before creating assessments.</p>
+              <div className="mt-2">
+                <Link
+                  to={`/teacher/classes/${form.assignmentId}?tab=marks`}
+                  className="font-semibold text-brand-700 underline"
+                >
+                  Configure Course Mark Policy &rarr;
+                </Link>
+              </div>
+            </Alert>
+          ) : null}
           {selectedClass?.assessmentMode === 'competency' ? (
             <Alert tone="warning" title="This class uses competency assessment">
               The institution has not configured competency scales or passing rules, so numeric assessments cannot be created for this class.
@@ -371,7 +434,7 @@ export default function TeacherAssessments() {
               id="assessment-title"
               value={form.title}
               onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
-              placeholder="e.g. Quiz 1"
+              placeholder="e.g. Assignment 1"
               maxLength={160}
               className={inputClass}
             />
@@ -425,6 +488,26 @@ export default function TeacherAssessments() {
               />
             </div>
           </div>
+          {(form.type === 'assignment' || form.type === 'project') ? (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-slate-700" htmlFor="brief-file">
+                Assessment task brief / document (PDF or Word, max 30 MB)
+              </label>
+              <input
+                id="brief-file"
+                type="file"
+                accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={handleBriefChange}
+                className={inputClass}
+              />
+              {briefFile ? (
+                <p className="mt-1 text-xs font-medium text-emerald-600">Selected: {briefFile.name}</p>
+              ) : null}
+              {briefError ? (
+                <p className="mt-1 text-xs font-medium text-rose-600">{briefError}</p>
+              ) : null}
+            </div>
+          ) : null}
           <EthiopianDateField
             label="Due date (optional)"
             value={form.dueDate}

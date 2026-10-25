@@ -105,8 +105,8 @@ export function validateDocument(buffer, fileName) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) {
     throw new AppError(400, 'EMPTY_DOCUMENT', 'Choose a PDF or Word document to upload.');
   }
-  if (buffer.length > 10 * 1024 * 1024) {
-    throw new AppError(413, 'DOCUMENT_TOO_LARGE', 'The course material must be smaller than 10 MB.');
+  if (buffer.length > 50 * 1024 * 1024) {
+    throw new AppError(413, 'DOCUMENT_TOO_LARGE', 'The course material must be smaller than 50 MB.');
   }
   const extension = String(fileName || '').split('.').pop()?.toLowerCase();
   if (!DOCUMENT_TYPES[extension]) {

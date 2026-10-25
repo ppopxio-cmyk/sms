@@ -1,7 +1,18 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
-import { ArrowRight, CalendarCheck, ClipboardCheck, Clock3, Play } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  ComposedChart,
+  Bar,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as ChartTooltip,
+  Legend,
+} from 'recharts';
+import { ArrowRight, CalendarCheck, ClipboardCheck, Clock3, Play, TrendingUp } from 'lucide-react';
 import { api } from '../../lib/api';
 import { displayDate, periodLabel, statusLabel, statusTone, todayKey } from '../../lib/teacher';
 import ClassSelect from '../../components/teacher/ClassSelect';
@@ -67,6 +78,23 @@ export default function TeacherAttendance() {
   const sessions = query.data?.sessions ?? [];
   const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0 };
 
+  const chartData = useMemo(() => {
+    return sessions.slice(0, 8).reverse().map((session) => {
+      const label = displayDate(session.dateKey);
+      const present = session.present ?? 0;
+      const absent = session.absent ?? 0;
+      const marked = session.marked ?? (present + absent);
+      const rate = marked > 0 ? Math.round((present / marked) * 100) : 0;
+      return {
+        name: `${label} (${session.courseCode || 'Class'})`,
+        present,
+        absent,
+        marked,
+        rate,
+      };
+    });
+  }, [sessions]);
+
   return (
     <div className="space-y-6">
       <TeacherPageHeader
@@ -76,7 +104,11 @@ export default function TeacherAttendance() {
       />
 
       <Card>
-        <CardHeader title="Start a sheet" subtitle="Choose one of your active classes and the meeting date." icon={Play} />
+        <CardHeader
+          title="Start a sheet"
+          subtitle="Attendance sheets can only be started for the current day. Choose an active class below."
+          icon={Play}
+        />
         <CardBody>
           {activeClasses.length ? (
             <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr_auto] lg:items-end">
@@ -86,9 +118,15 @@ export default function TeacherAttendance() {
                 onChange={setStartClass}
                 label="Class"
               />
-              <EthiopianDateField label="Meeting date" value={date} max={todayKey()} onChange={setDate} />
+              <div className="flex flex-col">
+                <span className="mb-1 text-xs font-medium text-slate-700">Meeting date</span>
+                <div className="flex h-11 items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-sm text-slate-700">
+                  <span>{displayDate(todayKey())}</span>
+                  <Badge tone="brand">Today only</Badge>
+                </div>
+              </div>
               <Button
-                onClick={() => navigate(`/teacher/attendance/${selectedStart}?date=${date}&period=day`)}
+                onClick={() => navigate(`/teacher/attendance/${selectedStart}?date=${todayKey()}&period=day`)}
                 disabled={!selectedStart}
                 className="w-full lg:w-auto"
               >
@@ -101,6 +139,35 @@ export default function TeacherAttendance() {
           )}
         </CardBody>
       </Card>
+
+      {chartData.length > 0 ? (
+        <Card>
+          <CardHeader
+            title="Attendance performance"
+            subtitle="Student present and absent volume alongside attendance rate percentage across recent sessions."
+            icon={TrendingUp}
+          />
+          <CardBody>
+            <div className="h-64 w-full pt-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 20, left: -10 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} />
+                  <YAxis yAxisId="left" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} unit="%" domain={[0, 100]} />
+                  <ChartTooltip
+                    contentStyle={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  />
+                  <Legend wrapperStyle={{ paddingTop: '8px', fontSize: '12px' }} />
+                  <Bar yAxisId="left" dataKey="present" name="Present students" fill="#10b981" radius={[4, 4, 0, 0]} animationDuration={1200} />
+                  <Bar yAxisId="left" dataKey="absent" name="Absent students" fill="#f43f5e" radius={[4, 4, 0, 0]} animationDuration={1200} />
+                  <Line yAxisId="right" type="monotone" dataKey="rate" name="Present rate (%)" stroke="#6366f1" strokeWidth={3} dot={{ r: 4, fill: '#6366f1', strokeWidth: 2, stroke: '#fff' }} animationDuration={1500} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </CardBody>
+        </Card>
+      ) : null}
 
       <Card>
         <CardBody className="space-y-4">

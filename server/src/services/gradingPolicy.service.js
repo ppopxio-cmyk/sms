@@ -76,6 +76,7 @@ export function previewMarks(policy, marks) {
       letter: band?.letter ?? null,
       points: band?.points ?? null,
       pass: band?.pass ?? null,
+      description: band?.description ?? '',
     });
   }
   return results;
@@ -91,7 +92,8 @@ const sameBands = (a, b) =>
       band.max === b[index].max &&
       band.letter === b[index].letter &&
       Number(band.points) === Number(b[index].points) &&
-      Boolean(band.pass) === Boolean(b[index].pass),
+      Boolean(band.pass) === Boolean(b[index].pass) &&
+      String(band.description || '') === String(b[index].description || ''),
   );
 
 export async function updatePolicy({ bands, repeatPolicy, rounding, effectiveFrom, reason, req }) {

@@ -28,6 +28,22 @@ import { EmptyState } from '../ui/StatePanel';
 import { SkeletonRows } from '../ui/Skeleton';
 import StatCard from '../ui/StatCard';
 
+async function downloadDirect(url, fileName) {
+  try {
+    const res = await api.get(url, { responseType: 'blob' });
+    const blobUrl = URL.createObjectURL(res.data);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = fileName || 'download';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch {
+    toast.error('File could not be downloaded.');
+  }
+}
+
 const inputClass =
   'focus-ring h-11 w-full rounded-xl border border-slate-200 bg-white/85 px-3.5 text-sm text-slate-800 transition placeholder:text-slate-400';
 const ACCEPT = '.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -386,15 +402,14 @@ export default function TeacherAssessmentPortal({ assessmentId, maxScore, sectio
                 </div>
               </div>
               <div className="flex gap-2">
-                <a
-                  href={data.document.url}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  onClick={() => downloadDirect(`/teacher/assessments/${assessmentId}/portal/document/download`, data.document.fileName)}
                   className="focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   <Download className="h-3.5 w-3.5" />
-                  Open
-                </a>
+                  Download
+                </button>
                 <Button
                   variant="ghost"
                   onClick={() => {
@@ -503,15 +518,14 @@ export default function TeacherAssessmentPortal({ assessmentId, maxScore, sectio
                           </div>
                         </td>
                         <td className="py-3 pr-4">
-                          <a
-                            href={row.fileUrl}
-                            target="_blank"
-                            rel="noreferrer"
+                          <button
+                            type="button"
+                            onClick={() => downloadDirect(`/teacher/assessment-submissions/${row.id}/download`, row.fileName)}
                             className="inline-flex max-w-44 items-center gap-1.5 truncate text-xs font-medium text-brand-700 hover:text-brand-900"
                           >
                             <Download className="h-3.5 w-3.5 shrink-0" />
                             <span className="truncate">{row.fileName}</span>
-                          </a>
+                          </button>
                           <p className="text-[11px] text-slate-400">{formatBytes(row.bytes)}</p>
                         </td>
                         <td className="py-3 pr-4 text-xs text-slate-500">#{row.revision}</td>
@@ -612,15 +626,14 @@ export default function TeacherAssessmentPortal({ assessmentId, maxScore, sectio
               placeholder="Tell the student what was strong or what to change."
             />
           </label>
-          <a
-            href={review?.fileUrl}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            type="button"
+            onClick={() => downloadDirect(`/teacher/assessment-submissions/${review?.id}/download`, review?.fileName)}
             className="inline-flex items-center gap-2 text-xs font-semibold text-brand-700 hover:text-brand-900"
           >
             <Download className="h-3.5 w-3.5" />
-            Open submitted file
-          </a>
+            Download submitted file
+          </button>
         </form>
       </Modal>
     </div>

@@ -50,7 +50,7 @@ const resultSchema = new Schema(
     course: { type: Schema.Types.ObjectId, ref: 'Course', required: true, index: true },
     academicYear: { type: Schema.Types.ObjectId, ref: 'AcademicYear', required: true, index: true },
     term: { type: String, trim: true, maxlength: 60, required: true, index: true },
-    creditHours: { type: Number, required: true, min: 0.5, max: 30 },
+    creditHours: { type: Number, required: true, min: 0.5, max: 1000 },
     components: { type: [resultComponentSchema], default: [] },
     totalMark: { type: Number, min: 0, max: 100, default: null },
     letterGrade: { type: String, trim: true, maxlength: 10, default: null },
@@ -80,6 +80,7 @@ const gradeBandSchema = new Schema(
     letter: { type: String, trim: true, maxlength: 10, required: true },
     points: { type: Number, min: 0, max: 4, required: true },
     pass: { type: Boolean, default: true },
+    description: { type: String, trim: true, default: '' },
   },
   { _id: false },
 );

@@ -59,6 +59,8 @@ import {
   close,
   create as createAssessment,
   detail as assessmentDetail,
+  downloadDocumentFile,
+  downloadSubmissionFile,
   grades,
   list as listAssessments,
   portal,
@@ -191,9 +193,15 @@ r.post(
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/octet-stream',
     ],
-    limit: '10mb',
+    limit: '30mb',
   }),
   uploadDocument,
+);
+r.get(
+  '/assessments/:assessmentId/portal/document/download',
+  requirePermission('teacher:assessments:view'),
+  validate(assessmentParamSchema, 'params'),
+  downloadDocumentFile,
 );
 r.delete(
   '/assessments/:assessmentId/portal/document',
@@ -207,6 +215,12 @@ r.get(
   validate(assessmentParamSchema, 'params'),
   validate(listAssessmentSubmissionsQuerySchema, 'query'),
   submissions,
+);
+r.get(
+  '/assessment-submissions/:submissionId/download',
+  requirePermission('teacher:assessments:view'),
+  validate(assessmentSubmissionParamSchema, 'params'),
+  downloadSubmissionFile,
 );
 r.patch(
   '/assessment-submissions/:submissionId',
