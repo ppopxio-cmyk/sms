@@ -150,6 +150,7 @@ export default function RegistrarCurriculum() {
     queryClient.invalidateQueries({ queryKey: ['registrar', 'dashboard'] });
     queryClient.invalidateQueries({ queryKey: ['registrar', 'academic-structure'] });
     queryClient.invalidateQueries({ queryKey: ['registrar', 'academic-calendar'] });
+    queryClient.invalidateQueries({ queryKey: ['teacher'] });
   };
 
   const action = useMutation({
@@ -210,7 +211,7 @@ export default function RegistrarCurriculum() {
       label: 'Prerequisites',
       render: (row) => row.prerequisites?.length ? row.prerequisites.map((item) => item.code).join(', ') : '—',
     },
-    ...(plan?.status === 'draft' ? [{
+    ...(plan?.status === 'draft' || plan?.status === 'published' ? [{
       key: 'actions',
       label: '',
       className: 'text-right',
@@ -220,7 +221,7 @@ export default function RegistrarCurriculum() {
           <Button size="sm" variant="ghost" onClick={() => setCourseModal({ record: row })} aria-label={`Edit ${row.course?.code}`}>
             <Pencil className="h-3.5 w-3.5" />
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setConfirm({ kind: 'delete-course', record: row, title: 'Remove course?', message: `${row.course?.code} will be removed from this draft plan.`, confirmLabel: 'Remove course', tone: 'danger' })} aria-label={`Remove ${row.course?.code}`}>
+          <Button size="sm" variant="ghost" onClick={() => setConfirm({ kind: 'delete-course', record: row, title: 'Remove course?', message: `${row.course?.code} will be removed from this plan.`, confirmLabel: 'Remove course', tone: 'danger' })} aria-label={`Remove ${row.course?.code}`}>
             <Trash2 className="h-3.5 w-3.5 text-rose-500" />
           </Button>
         </div>
@@ -332,31 +333,33 @@ export default function RegistrarCurriculum() {
                     </div>
                   ) : null}
                   <div className="flex flex-wrap gap-2">
-                    {plan.status === 'draft' ? (
+                    {['draft', 'published'].includes(plan.status) ? (
                       <>
                         <Button size="sm" variant="secondary" onClick={() => setEditingPlan(true)} className="gap-1.5"><Pencil className="h-3.5 w-3.5" /> Edit details</Button>
                         <Button size="sm" variant="secondary" onClick={() => setCourseModal({ record: null })} className="gap-1.5"><Plus className="h-3.5 w-3.5" /> Add course</Button>
-                        <Button
-                          size="sm"
-                          disabled={courses.length === 0}
-                          title={courses.length === 0 ? 'Add at least one course before publishing' : 'Publish curriculum'}
-                          onClick={() => {
-                            if (courses.length === 0) {
-                              toast.error('Add at least one course before publishing.');
-                              return;
-                            }
-                            setConfirm({
-                              kind: 'publish',
-                              record: plan,
-                              title: 'Publish curriculum?',
-                              message: 'The plan will become the official plan for this programme and academic year. A previous published plan will be archived.',
-                              confirmLabel: 'Publish plan',
-                            });
-                          }}
-                          className="gap-1.5"
-                        >
-                          <CheckCircle2 className="h-3.5 w-3.5" /> Publish
-                        </Button>
+                        {plan.status === 'draft' ? (
+                          <Button
+                            size="sm"
+                            disabled={courses.length === 0}
+                            title={courses.length === 0 ? 'Add at least one course before publishing' : 'Publish curriculum'}
+                            onClick={() => {
+                              if (courses.length === 0) {
+                                toast.error('Add at least one course before publishing.');
+                                return;
+                              }
+                              setConfirm({
+                                kind: 'publish',
+                                record: plan,
+                                title: 'Publish curriculum?',
+                                message: 'The plan will become the official plan for this programme and academic year. A previous published plan will be archived.',
+                                confirmLabel: 'Publish plan',
+                              });
+                            }}
+                            className="gap-1.5"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" /> Publish
+                          </Button>
+                        ) : null}
                       </>
                     ) : null}
                     <Button size="sm" variant="secondary" onClick={() => setConfirm({ kind: 'clone', record: plan, title: 'Clone this plan?', message: 'A new draft copy will be created for the same programme and academic year. Existing versions are preserved.', confirmLabel: 'Clone to draft' })} className="gap-1.5"><Copy className="h-3.5 w-3.5" /> Clone</Button>
@@ -370,9 +373,9 @@ export default function RegistrarCurriculum() {
               <Card>
                 <CardHeader
                   title="Plan courses"
-                  subtitle={plan.status === 'draft' ? 'Courses can be edited until the plan is published.' : 'This version is read-only. Clone it to draft a new version.'}
+                  subtitle={plan.status === 'archived' ? 'This version is archived and read-only. Clone it to draft a new version.' : 'Courses can be added and managed for this programme.'}
                   icon={BookOpen}
-                  action={plan.status === 'draft' ? <Button size="sm" variant="secondary" onClick={() => setCourseModal({ record: null })}><Plus className="h-3.5 w-3.5" /> Add</Button> : null}
+                  action={['draft', 'published'].includes(plan.status) ? <Button size="sm" variant="secondary" onClick={() => setCourseModal({ record: null })}><Plus className="h-3.5 w-3.5" /> Add course</Button> : null}
                 />
                 <RegistrarTable
                   columns={courseColumns}
@@ -752,7 +755,7 @@ function CourseModal({ open, plan, existingCourses, record, options, onClose, on
       return form.courses.length;
     },
     onSuccess: (count) => {
-      toast.success(record ? 'Course updated in the draft.' : `${count} course${count === 1 ? '' : 's'} added to the draft.`);
+      toast.success(record ? 'Course updated.' : plan?.status === 'published' ? `${count} course${count === 1 ? '' : 's'} added to published plan & activated.` : `${count} course${count === 1 ? '' : 's'} added to the draft.`);
       onSaved?.();
       onClose?.();
     },

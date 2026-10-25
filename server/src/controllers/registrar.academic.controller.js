@@ -28,8 +28,11 @@ async function recalcPlan(planId) {
 async function requirePlan(planId, { status } = {}) {
   const plan = await CurriculumPlan.findById(planId);
   if (!plan) throw new AppError(404, 'PLAN_NOT_FOUND', 'That curriculum plan was not found.');
-  if (status && plan.status !== status) {
-    throw new AppError(409, 'PLAN_STATE', `This plan is ${plan.status}; that action needs a ${status} plan.`);
+  if (status) {
+    const allowed = Array.isArray(status) ? status : [status];
+    if (!allowed.includes(plan.status)) {
+      throw new AppError(409, 'PLAN_STATE', `This plan is ${plan.status}; that action needs a ${allowed.join(' or ')} plan.`);
+    }
   }
   return plan;
 }
@@ -1289,8 +1292,195 @@ export const updatePlan = asyncHandler(async (req, res) => {
   res.json({ plan });
 });
 
+async function activatePlanCourses({ plan, entries, req }) {
+  const program = await Program.findById(plan.program).populate('teachers', 'name email').lean();
+  let programTeachers = (program?.teachers || []).filter(Boolean);
+
+  if (!programTeachers.length) {
+    const assignments = await TeacherProgramAssignment.find({ program: plan.program, status: 'active' })
+      .populate('teacher', 'name email')
+      .lean();
+    programTeachers = assignments.map((a) => a.teacher).filter(Boolean);
+  }
+
+  const deptId = program?.department || plan.department;
+  if (!programTeachers.length && deptId) {
+    programTeachers = await User.find({
+      role: { $in: ['TEACHER', 'teacher'] },
+      department: deptId,
+      status: { $ne: 'disabled' },
+      deletedAt: null,
+    }).select('name email').lean();
+  }
+
+  if (!programTeachers.length) {
+    programTeachers = await User.find({
+      role: { $in: ['TEACHER', 'teacher'] },
+      status: { $ne: 'disabled' },
+      deletedAt: null,
+    }).limit(5).select('name email').lean();
+  }
+
+  const primaryTeacherId = programTeachers[0]?._id || null;
+
+  if (programTeachers.length > 0) {
+    await syncProgramTeachers({
+      programId: plan.program,
+      teacherIds: programTeachers.map((t) => t._id),
+      source: 'program',
+      actorId: req.user.id,
+    }).catch(() => {});
+
+    await Program.updateOne(
+      { _id: plan.program },
+      { $addToSet: { teachers: { $each: programTeachers.map((t) => t._id) } }, $set: { active: true } },
+    ).catch(() => {});
+  } else {
+    await Program.updateOne({ _id: plan.program }, { $set: { active: true } }).catch(() => {});
+  }
+
+  await Batch.updateMany(
+    ownFilter({ program: plan.program, status: { $in: ['planned', 'pending'] } }),
+    { $set: { status: 'active' } },
+  ).catch(() => {});
+
+  await Student.updateMany(
+    ownFilter({ program: plan.program, enrollmentStatus: { $in: ['pending', 'planned'] } }),
+    { $set: { enrollmentStatus: 'active' } },
+  ).catch(() => {});
+
+  await CourseOffering.updateMany(
+    ownFilter({ program: plan.program, status: { $in: ['draft', 'pending'] } }),
+    { $set: { status: 'open', ...(primaryTeacherId ? { teacher: primaryTeacherId } : {}) } },
+  ).catch(() => {});
+
+  for (const entry of entries) {
+    let courseObj = entry.course;
+    if (!courseObj?._id || !courseObj?.code) {
+      courseObj = await Course.findById(entry.course?._id || entry.course).lean();
+    }
+    if (!courseObj?._id) continue;
+    try {
+      const term = entry.term || 'Semester 1';
+      const level = entry.level || 1;
+      const creditHours = entry.creditHours || courseObj.creditHours || 3;
+      const courseCode = String(courseObj.code || '').trim().toUpperCase();
+      const courseTitle = String(courseObj.title || courseObj.name || '').trim();
+
+      const existingOffering = await CourseOffering.findOne(ownFilter({
+        course: courseObj._id,
+        program: plan.program,
+        academicYear: plan.academicYear,
+        term,
+        level,
+      }));
+
+      let offeringId;
+      if (!existingOffering) {
+        const createdOffering = await CourseOffering.create({
+          course: courseObj._id,
+          curriculumPlan: plan._id,
+          curriculumCourse: entry._id,
+          program: plan.program,
+          department: plan.department || program?.department,
+          academicYear: plan.academicYear,
+          term,
+          level,
+          creditHours,
+          teacher: primaryTeacherId,
+          capacity: 60,
+          registeredCount: 0,
+          status: 'open',
+          createdBy: req.user.id,
+          updatedBy: req.user.id,
+        });
+        offeringId = createdOffering._id;
+      } else {
+        existingOffering.status = 'open';
+        if (!existingOffering.teacher && primaryTeacherId) {
+          existingOffering.teacher = primaryTeacherId;
+        }
+        await existingOffering.save();
+        offeringId = existingOffering._id;
+      }
+
+      if (courseCode) {
+        const existingRes = await CourseResource.findOne(ownFilter({
+          program: plan.program,
+          courseCode,
+          deletedAt: null,
+        }));
+        if (!existingRes) {
+          await CourseResource.create({
+            program: plan.program,
+            department: plan.department || program?.department,
+            courseName: courseTitle,
+            courseCode,
+            creditHours,
+            fileName: `${courseCode}_Course_Guide.pdf`,
+            filePath: `/courses/${program?.code || 'curriculum'}/${courseCode}-guide.pdf`,
+            fileId: `curriculum-${plan._id}-${entry._id}`,
+            contentType: 'application/pdf',
+            bytes: 1024 * 180,
+            uploadedBy: req.user.id,
+          }).catch(() => {});
+        }
+      }
+
+      if (offeringId) {
+        const existingMat = await Material.findOne(ownFilter({
+          offering: offeringId,
+          deletedAt: null,
+        }));
+        if (!existingMat) {
+          await Material.create({
+            offering: offeringId,
+            kind: 'note',
+            title: `${courseCode} Syllabus & Lecture Outline`,
+            description: `Official syllabus and course guide for ${courseCode} - ${courseTitle}.`,
+            content: `Course: ${courseCode} - ${courseTitle}\nProgramme: ${program?.name || 'Programme'}\nLevel: ${level}\nTerm: ${term}\nCredit Hours: ${creditHours}\nCurriculum Plan: ${plan.title}\nStatus: Active\n\nApproved syllabus for classroom instruction. Attendance and marks are active.`,
+            visibility: 'published',
+            createdBy: req.user.id,
+          }).catch(() => {});
+        }
+
+        const activeStudents = await Student.find(ownFilter({
+          program: plan.program,
+          enrollmentStatus: 'active',
+        })).select('_id').lean();
+        if (activeStudents.length) {
+          for (const stu of activeStudents) {
+            await CourseRegistration.findOneAndUpdate(
+              { student: stu._id, offering: offeringId },
+              {
+                $setOnInsert: {
+                  student: stu._id,
+                  offering: offeringId,
+                  academicYear: plan.academicYear,
+                  status: 'registered',
+                  registeredAt: new Date(),
+                  registeredBy: req.user.id,
+                },
+              },
+              { upsert: true, new: true, setDefaultsOnInsert: true },
+            ).catch(() => {});
+          }
+          await CourseOffering.updateOne(
+            { _id: offeringId },
+            { $set: { registeredCount: activeStudents.length } },
+          ).catch(() => {});
+        }
+      }
+    } catch {
+      // Continue with other courses
+    }
+  }
+
+  return { programTeachers, primaryTeacherId, program };
+}
+
 export const addPlanCourse = asyncHandler(async (req, res) => {
-  const plan = await requirePlan(req.valid.params.id, { status: 'draft' });
+  const plan = await requirePlan(req.valid.params.id, { status: ['draft', 'published'] });
   const input = req.body;
   const course = await Course.findById(input.course).lean();
   if (!course || !course.active) throw new AppError(400, 'COURSE_INVALID', 'Choose an active course.');
@@ -1317,11 +1507,21 @@ export const addPlanCourse = asyncHandler(async (req, res) => {
     updatedBy: req.user.id,
   });
   const totalCredits = await recalcPlan(plan._id);
+
+  // If the plan is already published, immediately activate the course offering, materials, and student registrations
+  if (plan.status === 'published') {
+    await activatePlanCourses({
+      plan,
+      entries: [{ ...entry.toObject(), course }],
+      req,
+    });
+  }
+
   audit({ req, action: 'registrar.curriculum.course.add', targetType: 'CurriculumPlan', targetId: plan._id, meta: { course: course.code } });
   void notifyProgramTeachers(plan.program, {
     type: 'curriculum_course',
     title: `New course added to ${plan.title}`,
-    body: `${course.code} Â· ${course.title} was added at level ${entry.level}${entry.term ? `, ${entry.term}` : ''}.`,
+    body: `${course.code} · ${course.title} was added at level ${entry.level}${entry.term ? `, ${entry.term}` : ''}.`,
     actorId: req.user.id,
     actorName: req.user.name || 'Registrar',
     meta: { planId: String(plan._id), course: course.code, level: entry.level, term: entry.term },
@@ -1330,7 +1530,7 @@ export const addPlanCourse = asyncHandler(async (req, res) => {
 });
 
 export const updatePlanCourse = asyncHandler(async (req, res) => {
-  const plan = await requirePlan(req.valid.params.id, { status: 'draft' });
+  const plan = await requirePlan(req.valid.params.id, { status: ['draft', 'published'] });
   const entry = await CurriculumCourse.findOne({ _id: req.valid.params.courseId, plan: plan._id });
   if (!entry) throw new AppError(404, 'PLAN_COURSE_NOT_FOUND', 'That curriculum course was not found.');
   if (req.body.prerequisites?.length) {
@@ -1345,7 +1545,7 @@ export const updatePlanCourse = asyncHandler(async (req, res) => {
 });
 
 export const removePlanCourse = asyncHandler(async (req, res) => {
-  const plan = await requirePlan(req.valid.params.id, { status: 'draft' });
+  const plan = await requirePlan(req.valid.params.id, { status: ['draft', 'published'] });
   const entry = await CurriculumCourse.findOneAndDelete({ _id: req.valid.params.courseId, plan: plan._id });
   if (!entry) throw new AppError(404, 'PLAN_COURSE_NOT_FOUND', 'That curriculum course was not found.');
   const totalCredits = await recalcPlan(plan._id);
@@ -1354,7 +1554,7 @@ export const removePlanCourse = asyncHandler(async (req, res) => {
 });
 
 export const reorderPlanCourses = asyncHandler(async (req, res) => {
-  const plan = await requirePlan(req.valid.params.id, { status: 'draft' });
+  const plan = await requirePlan(req.valid.params.id, { status: ['draft', 'published'] });
   await Promise.all(
     req.body.items.map((item) =>
       CurriculumCourse.updateOne({ _id: item.id, plan: plan._id }, { $set: { order: item.order, updatedBy: req.user.id } }),
@@ -1405,194 +1605,7 @@ export const publishPlan = asyncHandler(async (req, res) => {
     }
     throw err;
   }
-  // Get programme and assigned teachers
-  const program = await Program.findById(plan.program).populate('teachers', 'name email').lean();
-  let programTeachers = (program?.teachers || []).filter(Boolean);
-
-  // If no direct teachers on program, check active TeacherProgramAssignment records
-  if (!programTeachers.length) {
-    const assignments = await TeacherProgramAssignment.find({ program: plan.program, status: 'active' })
-      .populate('teacher', 'name email')
-      .lean();
-    programTeachers = assignments.map((a) => a.teacher).filter(Boolean);
-  }
-
-  // If still none, check teachers belonging to this department
-  const deptId = program?.department || plan.department;
-  if (!programTeachers.length && deptId) {
-    programTeachers = await User.find({
-      role: { $in: ['TEACHER', 'teacher'] },
-      department: deptId,
-      status: { $ne: 'disabled' },
-      deletedAt: null,
-    }).select('name email').lean();
-  }
-
-  // Fallback to any active teachers if needed so classes have an instructor
-  if (!programTeachers.length) {
-    programTeachers = await User.find({
-      role: { $in: ['TEACHER', 'teacher'] },
-      status: { $ne: 'disabled' },
-      deletedAt: null,
-    }).limit(5).select('name email').lean();
-  }
-
-  const primaryTeacherId = programTeachers[0]?._id || null;
-
-  // Make programme active and ensure teacher assignment sync
-  if (programTeachers.length > 0) {
-    await syncProgramTeachers({
-      programId: plan.program,
-      teacherIds: programTeachers.map((t) => t._id),
-      source: 'program',
-      actorId: req.user.id,
-    }).catch(() => {});
-
-    await Program.updateOne(
-      { _id: plan.program },
-      { $addToSet: { teachers: { $each: programTeachers.map((t) => t._id) } }, $set: { active: true } },
-    ).catch(() => {});
-  } else {
-    await Program.updateOne({ _id: plan.program }, { $set: { active: true } }).catch(() => {});
-  }
-
-  // Make programme pending to active class: activate batches, student enrollments, and course offerings
-  await Batch.updateMany(
-    ownFilter({ program: plan.program, status: { $in: ['planned', 'pending'] } }),
-    { $set: { status: 'active' } },
-  ).catch(() => {});
-
-  await Student.updateMany(
-    ownFilter({ program: plan.program, enrollmentStatus: { $in: ['pending', 'planned'] } }),
-    { $set: { enrollmentStatus: 'active' } },
-  ).catch(() => {});
-
-  await CourseOffering.updateMany(
-    ownFilter({ program: plan.program, status: { $in: ['draft', 'pending'] } }),
-    { $set: { status: 'open', ...(primaryTeacherId ? { teacher: primaryTeacherId } : {}) } },
-  ).catch(() => {});
-
-  // Auto-create/upsert course offerings for each curriculum course in this published plan
-  for (const entry of entries) {
-    if (!entry.course?._id) continue;
-    try {
-      const term = entry.term || 'Semester 1';
-      const level = entry.level || 1;
-      const creditHours = entry.creditHours || 3;
-      const courseCode = String(entry.course?.code || '').trim().toUpperCase();
-      const courseTitle = String(entry.course?.title || '').trim();
-
-      const existingOffering = await CourseOffering.findOne(ownFilter({
-        course: entry.course._id,
-        program: plan.program,
-        academicYear: plan.academicYear,
-        term,
-        level,
-      }));
-
-      let offeringId;
-      if (!existingOffering) {
-        const createdOffering = await CourseOffering.create({
-          course: entry.course._id,
-          curriculumPlan: plan._id,
-          curriculumCourse: entry._id,
-          program: plan.program,
-          department: plan.department || program?.department,
-          academicYear: plan.academicYear,
-          term,
-          level,
-          creditHours,
-          teacher: primaryTeacherId,
-          capacity: 60,
-          registeredCount: 0,
-          status: 'open',
-          createdBy: req.user.id,
-          updatedBy: req.user.id,
-        });
-        offeringId = createdOffering._id;
-      } else {
-        existingOffering.status = 'open';
-        if (!existingOffering.teacher && primaryTeacherId) {
-          existingOffering.teacher = primaryTeacherId;
-        }
-        await existingOffering.save();
-        offeringId = existingOffering._id;
-      }
-
-      // Auto-insert CourseResource so course documents appear in teacher/materials
-      if (courseCode) {
-        const existingRes = await CourseResource.findOne(ownFilter({
-          program: plan.program,
-          courseCode,
-          deletedAt: null,
-        }));
-        if (!existingRes) {
-          await CourseResource.create({
-            program: plan.program,
-            department: plan.department || program?.department,
-            courseName: courseTitle,
-            courseCode,
-            creditHours,
-            fileName: `${courseCode}_Course_Guide.pdf`,
-            filePath: `/courses/${program?.code || 'curriculum'}/${courseCode}-guide.pdf`,
-            fileId: `curriculum-${plan._id}-${entry._id}`,
-            contentType: 'application/pdf',
-            bytes: 1024 * 180,
-            uploadedBy: req.user.id,
-          }).catch(() => {});
-        }
-      }
-
-      // Auto-insert Material note for this offering so materials appear in teacher workspace
-      if (offeringId) {
-        const existingMat = await Material.findOne(ownFilter({
-          offering: offeringId,
-          deletedAt: null,
-        }));
-        if (!existingMat) {
-          await Material.create({
-            offering: offeringId,
-            kind: 'note',
-            title: `${courseCode} Syllabus & Lecture Outline`,
-            description: `Official syllabus and course guide for ${courseCode} - ${courseTitle}.`,
-            content: `Course: ${courseCode} - ${courseTitle}\nProgramme: ${program?.name || 'Programme'}\nLevel: ${level}\nTerm: ${term}\nCredit Hours: ${creditHours}\nCurriculum Plan: ${plan.title}\nStatus: Active\n\nApproved syllabus for classroom instruction. Attendance and marks are active.`,
-            visibility: 'published',
-            createdBy: req.user.id,
-          }).catch(() => {});
-        }
-
-        // Auto-register any active students of this programme so attendance roster has students
-        const activeStudents = await Student.find(ownFilter({
-          program: plan.program,
-          enrollmentStatus: 'active',
-        })).select('_id').lean();
-        if (activeStudents.length) {
-          for (const stu of activeStudents) {
-            await CourseRegistration.findOneAndUpdate(
-              { student: stu._id, offering: offeringId },
-              {
-                $setOnInsert: {
-                  student: stu._id,
-                  offering: offeringId,
-                  academicYear: plan.academicYear,
-                  status: 'registered',
-                  registeredAt: new Date(),
-                  registeredBy: req.user.id,
-                },
-              },
-              { upsert: true, new: true, setDefaultsOnInsert: true },
-            ).catch(() => {});
-          }
-          await CourseOffering.updateOne(
-            { _id: offeringId },
-            { $set: { registeredCount: activeStudents.length } },
-          ).catch(() => {});
-        }
-      }
-    } catch {
-      // Continue with other courses
-    }
-  }
+  const { programTeachers, program } = await activatePlanCourses({ plan, entries, req });
 
   audit({ req, action: 'registrar.curriculum.plan.publish', targetType: 'CurriculumPlan', targetId: plan._id, meta: { totalCredits } });
 
