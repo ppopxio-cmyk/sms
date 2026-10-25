@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  AlertCircle,
   Archive,
   BookOpen,
   CheckCircle2,
@@ -153,7 +154,12 @@ export default function RegistrarCurriculum() {
 
   const action = useMutation({
     mutationFn: async ({ kind, record }) => {
-      if (kind === 'publish') return (await api.post(`${REGISTRAR}/curriculum/${record.id}/publish`)).data;
+      if (kind === 'publish') {
+        if (!courses.length) {
+          throw new Error('Cannot publish a curriculum plan with 0 courses. Add at least one course first.');
+        }
+        return (await api.post(`${REGISTRAR}/curriculum/${record.id}/publish`)).data;
+      }
       if (kind === 'archive') return (await api.post(`${REGISTRAR}/curriculum/${record.id}/archive`)).data;
       if (kind === 'clone') return (await api.post(`${REGISTRAR}/curriculum/${record.id}/clone`)).data;
       if (kind === 'delete-course') return (await api.delete(`${REGISTRAR}/curriculum/${effectiveId}/courses/${record.id}`)).data;
@@ -199,7 +205,6 @@ export default function RegistrarCurriculum() {
       ),
     },
     { key: 'credits', label: 'Credits', render: (row) => row.creditHours },
-    { key: 'category', label: 'Category', render: (row) => <Badge tone={row.category === 'elective' ? 'warning' : 'neutral'}>{humanStatus(row.category)}</Badge> },
     {
       key: 'prerequisites',
       label: 'Prerequisites',
@@ -320,12 +325,38 @@ export default function RegistrarCurriculum() {
                     </div>
                   </div>
                   {plan.notes ? <p className="text-sm leading-relaxed text-slate-600">{plan.notes}</p> : null}
+                  {plan.status === 'draft' && courses.length === 0 ? (
+                    <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800">
+                      <AlertCircle className="h-4 w-4 shrink-0 text-amber-600" />
+                      <span>This curriculum plan has 0 courses. Add at least one course before publishing.</span>
+                    </div>
+                  ) : null}
                   <div className="flex flex-wrap gap-2">
                     {plan.status === 'draft' ? (
                       <>
                         <Button size="sm" variant="secondary" onClick={() => setEditingPlan(true)} className="gap-1.5"><Pencil className="h-3.5 w-3.5" /> Edit details</Button>
                         <Button size="sm" variant="secondary" onClick={() => setCourseModal({ record: null })} className="gap-1.5"><Plus className="h-3.5 w-3.5" /> Add course</Button>
-                        <Button size="sm" onClick={() => setConfirm({ kind: 'publish', record: plan, title: 'Publish curriculum?', message: 'The plan will become the official plan for this programme and academic year. A previous published plan will be archived.', confirmLabel: 'Publish plan' })} className="gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Publish</Button>
+                        <Button
+                          size="sm"
+                          disabled={courses.length === 0}
+                          title={courses.length === 0 ? 'Add at least one course before publishing' : 'Publish curriculum'}
+                          onClick={() => {
+                            if (courses.length === 0) {
+                              toast.error('Add at least one course before publishing.');
+                              return;
+                            }
+                            setConfirm({
+                              kind: 'publish',
+                              record: plan,
+                              title: 'Publish curriculum?',
+                              message: 'The plan will become the official plan for this programme and academic year. A previous published plan will be archived.',
+                              confirmLabel: 'Publish plan',
+                            });
+                          }}
+                          className="gap-1.5"
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5" /> Publish
+                        </Button>
                       </>
                     ) : null}
                     <Button size="sm" variant="secondary" onClick={() => setConfirm({ kind: 'clone', record: plan, title: 'Clone this plan?', message: 'A new draft copy will be created for the same programme and academic year. Existing versions are preserved.', confirmLabel: 'Clone to draft' })} className="gap-1.5"><Copy className="h-3.5 w-3.5" /> Clone</Button>
@@ -364,14 +395,11 @@ export default function RegistrarCurriculum() {
       <CourseModal
         open={Boolean(courseModal)}
         plan={plan}
+        existingCourses={courses}
         record={courseModal?.record}
         options={resolvedOptions}
         onClose={() => setCourseModal(null)}
         onSaved={invalidate}
-        refetchOptions={() => {
-          options.refetch();
-          structureQuery.refetch();
-        }}
       />
       <ConfirmDialog
         open={Boolean(confirm)}
@@ -582,14 +610,12 @@ function EditPlanModal({ open, plan, onClose, onSaved }) {
   );
 }
 
-function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOptions }) {
-  const [form, setForm] = useState({ courses: [], level: 1, term: '', creditHours: 3, category: 'required', prerequisites: [] });
+function CourseModal({ open, plan, existingCourses, record, options, onClose, onSaved }) {
+  const [form, setForm] = useState({ courses: [], level: 1, term: '', creditHours: 3, prerequisites: [] });
   const [error, setError] = useState('');
   const [scopeFilter, setScopeFilter] = useState('programme'); // 'programme' | 'all'
   const [searchTerm, setSearchTerm] = useState('');
-  const [showAddCourse, setShowAddCourse] = useState(false);
-  const [newCourse, setNewCourse] = useState({ code: '', title: '', creditHours: 3 });
-  const [creatingCourse, setCreatingCourse] = useState(false);
+  const wasOpenRef = useRef(false);
 
   const defaultLevel = useMemo(() => {
     return plan?.program?.durationYears ? 1 : (plan?.program?.levels?.[0] || 1);
@@ -598,6 +624,18 @@ function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOpt
   const planProgId = String(plan?.program?.id || plan?.program?._id || (typeof plan?.program === 'string' ? plan.program : '') || '');
   const planProgCode = String(plan?.program?.code || '').trim().toUpperCase();
   const planDeptId = String(plan?.department?.id || plan?.department?._id || plan?.department || plan?.program?.department?.id || plan?.program?.department?._id || plan?.program?.department || '');
+
+  // IDs of courses already added to this curriculum plan
+  const existingCourseIds = useMemo(() => {
+    if (record) return new Set();
+    const list = existingCourses || plan?.courses || [];
+    const set = new Set();
+    for (const item of list) {
+      const id = item?.course?.id || item?.course?._id || (typeof item?.course === 'string' ? item.course : null) || item?.id;
+      if (id) set.add(String(id));
+    }
+    return set;
+  }, [existingCourses, plan?.courses, record]);
 
   const programmeCourses = useMemo(() => {
     return (options?.courses || []).filter((row) => {
@@ -621,81 +659,83 @@ function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOpt
     });
   }, [options?.courses, planProgId, planProgCode, planDeptId]);
 
-  const displayedCourses = useMemo(() => {
-    if (record) return (options?.courses || []).filter((row) => row.id === record.course?.id);
+  // Candidates after excluding already added courses
+  const availableCourses = useMemo(() => {
+    if (record) return (options?.courses || []).filter((row) => String(row.id || row._id) === String(record.course?.id || record.course?._id));
     const allCourses = options?.courses || [];
-    // If scope is 'programme' but no programme-specific courses found, fallback to all courses
     const baseList = scopeFilter === 'programme' && programmeCourses.length > 0 ? programmeCourses : allCourses;
-    if (!searchTerm.trim()) return baseList;
+    return baseList.filter((c) => !existingCourseIds.has(String(c.id || c._id)));
+  }, [record, options?.courses, scopeFilter, programmeCourses, existingCourseIds]);
+
+  const displayedCourses = useMemo(() => {
+    if (record) return availableCourses;
+    if (!searchTerm.trim()) return availableCourses;
     const term = searchTerm.trim().toLowerCase();
-    return baseList.filter((c) =>
+    return availableCourses.filter((c) =>
       String(c.code || '').toLowerCase().includes(term) ||
       String(c.title || '').toLowerCase().includes(term)
     );
-  }, [record, options?.courses, scopeFilter, programmeCourses, searchTerm]);
+  }, [record, availableCourses, searchTerm]);
 
+  // Only initialize form when opening the modal, NEVER on subsequent background renders
   useEffect(() => {
-    if (!open) return;
-    setError('');
-    setSearchTerm('');
-    setShowAddCourse(false);
-    setNewCourse({ code: '', title: '', creditHours: 3 });
-    setScopeFilter('programme');
-    refetchOptions?.();
-    setForm(record ? {
-      courses: [record.course?.id].filter(Boolean),
-      level: record.level || defaultLevel,
-      term: record.term || '',
-      creditHours: record.creditHours || 1,
-      category: record.category || 'required',
-      prerequisites: (record.prerequisites || []).map((item) => item.id),
-    } : {
-      courses: [],
-      level: defaultLevel,
-      term: '',
-      creditHours: 3,
-      category: 'required',
-      prerequisites: [],
-    });
-  }, [open, record, plan, defaultLevel, refetchOptions]);
-
-  const handleCreateCourse = async (e) => {
-    e?.preventDefault();
-    if (!newCourse.code.trim() || !newCourse.title.trim()) {
-      setError('Course code and course name are required to create a new course.');
-      return;
-    }
-    setCreatingCourse(true);
-    setError('');
-    try {
-      const res = await api.post(`${REGISTRAR}/courses`, {
-        code: newCourse.code.trim().toUpperCase(),
-        title: newCourse.title.trim(),
-        creditHours: Number(newCourse.creditHours) || 3,
-        program: planProgId || undefined,
-        department: planDeptId || undefined,
+    if (open && !wasOpenRef.current) {
+      setError('');
+      setSearchTerm('');
+      setScopeFilter('programme');
+      setForm(record ? {
+        courses: [String(record.course?.id || record.course?._id || '')].filter(Boolean),
+        level: record.level || defaultLevel,
+        term: record.term || '',
+        creditHours: record.creditHours || 1,
+        prerequisites: (record.prerequisites || []).map((item) => String(item.id || item._id || item)),
+      } : {
+        courses: [],
+        level: defaultLevel,
+        term: '',
+        creditHours: 3,
+        prerequisites: [],
       });
-      toast.success(`Course ${res.data.course.code} created and added to selection.`);
-      await refetchOptions?.();
-      setForm((cur) => ({
-        ...cur,
-        courses: [...new Set([...cur.courses, res.data.course.id])],
-      }));
-      setNewCourse({ code: '', title: '', creditHours: 3 });
-      setShowAddCourse(false);
-    } catch (err) {
-      setError(errorMessage(err, 'Could not create course.'));
-    } finally {
-      setCreatingCourse(false);
     }
+    wasOpenRef.current = open;
+  }, [open, record, defaultLevel]);
+
+  const toggleCourse = (rawId) => {
+    const courseId = String(rawId);
+    setForm((current) => {
+      const isSelected = current.courses.includes(courseId);
+      const newCourses = isSelected
+        ? current.courses.filter((id) => id !== courseId)
+        : [...current.courses, courseId];
+
+      // Automatically fill prerequisites based on selected courses
+      const autoPrereqs = new Set();
+      for (const cId of newCourses) {
+        const cObj = (options?.courses || []).find((c) => String(c.id || c._id) === cId);
+        if (cObj?.prerequisites?.length) {
+          for (const p of cObj.prerequisites) {
+            const pId = String(p.id || p._id || p);
+            if (pId && !newCourses.includes(pId)) {
+              autoPrereqs.add(pId);
+            }
+          }
+        }
+      }
+
+      return {
+        ...current,
+        courses: newCourses,
+        prerequisites: Array.from(autoPrereqs),
+      };
+    });
   };
 
   const save = useMutation({
     mutationFn: async () => {
-      if (!form.courses.length) throw new Error('Choose at least one course.');
+      if (!form.courses.length) throw new Error('Please select at least one course.');
       if (record && !form.creditHours) throw new Error('Credits are required.');
       for (const courseId of form.courses) {
-        const course = (options?.courses || []).find((row) => row.id === courseId);
+        const course = (options?.courses || []).find((row) => String(row.id || row._id) === String(courseId));
         await api.request({
           url: `${REGISTRAR}/curriculum/${plan.id}/courses${record ? `/${record.id}` : ''}`,
           method: record ? 'patch' : 'post',
@@ -704,7 +744,7 @@ function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOpt
             level: Number(form.level || defaultLevel),
             term: form.term || undefined,
             creditHours: record ? Number(form.creditHours) : course?.creditHours || 3,
-            category: form.category || 'required',
+            category: 'required',
             prerequisites: form.prerequisites,
           },
         });
@@ -725,32 +765,13 @@ function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOpt
 
   const set = (field, value) => setForm((current) => ({ ...current, [field]: value }));
 
-  const toggleCourse = (courseId) => setForm((current) => {
-    const isSelected = current.courses.includes(courseId);
-    const newCourses = isSelected
-      ? current.courses.filter((id) => id !== courseId)
-      : [...current.courses, courseId];
+  const remainingProgrammeCount = useMemo(() => {
+    return programmeCourses.filter((c) => !existingCourseIds.has(String(c.id || c._id))).length;
+  }, [programmeCourses, existingCourseIds]);
 
-    // Automatically fill prerequisites based on selected courses
-    const autoPrereqs = new Set();
-    for (const cId of newCourses) {
-      const cObj = (options?.courses || []).find((c) => c.id === cId);
-      if (cObj?.prerequisites?.length) {
-        for (const p of cObj.prerequisites) {
-          const pId = p.id || String(p);
-          if (pId && !newCourses.includes(pId)) {
-            autoPrereqs.add(pId);
-          }
-        }
-      }
-    }
-
-    return {
-      ...current,
-      courses: newCourses,
-      prerequisites: Array.from(autoPrereqs),
-    };
-  });
+  const remainingAllCount = useMemo(() => {
+    return (options?.courses || []).filter((c) => !existingCourseIds.has(String(c.id || c._id))).length;
+  }, [options?.courses, existingCourseIds]);
 
   return (
     <Modal
@@ -759,7 +780,30 @@ function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOpt
       subtitle={`Select courses for ${plan?.program?.name || 'this programme'}. Prerequisites fill automatically.`}
       onClose={save.isPending ? undefined : onClose}
       dismissible={!save.isPending}
-      footer={<><Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending}>{record ? 'Save course' : form.courses.length ? `Add ${form.courses.length} course${form.courses.length === 1 ? '' : 's'}` : 'Add courses'}</Button></>}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={save.isPending}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              if (!form.courses.length) {
+                setError('Please select at least one course to add.');
+                return;
+              }
+              save.mutate();
+            }}
+            disabled={!form.courses.length || save.isPending}
+            loading={save.isPending}
+          >
+            {record
+              ? 'Save course'
+              : form.courses.length
+                ? `Add ${form.courses.length} course${form.courses.length === 1 ? '' : 's'}`
+                : 'Select course(s)'}
+          </Button>
+        </>
+      }
     >
       <div className="grid gap-4">
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
@@ -770,75 +814,30 @@ function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOpt
         ) : (
           <div>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-semibold text-slate-800">Courses in programme</span>
-              <div className="flex items-center gap-2">
-                <Button size="xs" variant="secondary" onClick={() => setShowAddCourse((v) => !v)}>
-                  {showAddCourse ? 'Cancel' : '+ New course'}
-                </Button>
-                {(options?.courses || []).length > programmeCourses.length && programmeCourses.length > 0 ? (
-                  <div className="flex rounded-lg bg-slate-100 p-0.5 text-xs font-medium">
-                    <button
-                      type="button"
-                      onClick={() => setScopeFilter('programme')}
-                      className={`rounded-md px-2.5 py-1 transition ${scopeFilter === 'programme' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-                    >
-                      {plan?.program?.code || 'Programme'} ({programmeCourses.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setScopeFilter('all')}
-                      className={`rounded-md px-2.5 py-1 transition ${scopeFilter === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-                    >
-                      All catalogue ({(options?.courses || []).length})
-                    </button>
-                  </div>
-                ) : programmeCourses.length === 0 && (options?.courses || []).length > 0 ? (
-                  <span className="rounded-md bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
-                    Showing all catalogue courses ({(options?.courses || []).length})
-                  </span>
-                ) : null}
-              </div>
+              <span className="text-sm font-semibold text-slate-800">Available programme courses</span>
+              {remainingAllCount > remainingProgrammeCount && remainingProgrammeCount > 0 ? (
+                <div className="flex rounded-lg bg-slate-100 p-0.5 text-xs font-medium">
+                  <button
+                    type="button"
+                    onClick={() => setScopeFilter('programme')}
+                    className={`rounded-md px-2.5 py-1 transition ${scopeFilter === 'programme' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                  >
+                    {plan?.program?.code || 'Programme'} ({remainingProgrammeCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScopeFilter('all')}
+                    className={`rounded-md px-2.5 py-1 transition ${scopeFilter === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                  >
+                    All catalogue ({remainingAllCount})
+                  </button>
+                </div>
+              ) : remainingProgrammeCount === 0 && remainingAllCount > 0 ? (
+                <span className="rounded-md bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                  Showing all catalogue courses ({remainingAllCount})
+                </span>
+              ) : null}
             </div>
-
-            {showAddCourse ? (
-              <div className="mb-3 rounded-xl border border-brand-200 bg-brand-50/50 p-3 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-brand-900">Define course for {plan?.program?.name || 'programme'}</span>
-                  <button type="button" onClick={() => setShowAddCourse(false)} className="text-xs text-slate-500 hover:text-slate-800">Close</button>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-3">
-                  <input
-                    type="text"
-                    placeholder="Course code (e.g. CS-101)"
-                    value={newCourse.code}
-                    onChange={(e) => setNewCourse((c) => ({ ...c, code: e.target.value.toUpperCase() }))}
-                    className="focus-ring rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs uppercase"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Course name (e.g. Intro to CS)"
-                    value={newCourse.title}
-                    onChange={(e) => setNewCourse((c) => ({ ...c, title: e.target.value }))}
-                    className="focus-ring rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs"
-                  />
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="number"
-                      min="0.5"
-                      max="30"
-                      step="0.5"
-                      placeholder="Credits"
-                      value={newCourse.creditHours}
-                      onChange={(e) => setNewCourse((c) => ({ ...c, creditHours: e.target.value }))}
-                      className="focus-ring w-20 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs"
-                    />
-                    <Button size="xs" onClick={handleCreateCourse} loading={creatingCourse} className="flex-1 whitespace-nowrap">
-                      Save & Select
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
 
             <div className="relative mb-2">
               <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
@@ -853,18 +852,19 @@ function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOpt
 
             <div className="max-h-60 space-y-1 overflow-y-auto rounded-xl border border-slate-200/80 bg-slate-50/30 p-2">
               {displayedCourses.map((row) => {
-                const isSelected = form.courses.includes(row.id);
+                const rowId = String(row.id || row._id);
+                const isSelected = form.courses.includes(rowId);
                 return (
                   <label
-                    key={row.id}
-                    className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition ${
-                      isSelected ? 'bg-brand-50/80 font-medium text-brand-900' : 'text-slate-700 hover:bg-slate-100/70'
+                    key={rowId}
+                    className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm select-none transition ${
+                      isSelected ? 'bg-brand-50/80 font-medium text-brand-900 ring-1 ring-brand-200' : 'text-slate-700 hover:bg-slate-100/70'
                     }`}
                   >
                     <input
                       type="checkbox"
                       checked={isSelected}
-                      onChange={() => toggleCourse(row.id)}
+                      onChange={() => toggleCourse(rowId)}
                       className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                     />
                     <div className="min-w-0 flex-1 truncate">
@@ -880,26 +880,27 @@ function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOpt
               })}
               {!displayedCourses.length ? (
                 <div className="py-6 text-center text-sm text-slate-500">
-                  <p>No courses found{searchTerm ? ` matching "${searchTerm}"` : ''}.</p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    Click &quot;+ New course&quot; above to quickly add a course for this programme.
-                  </p>
+                  {existingCourseIds.size > 0 && availableCourses.length === 0 ? (
+                    <p>All courses for this programme have already been added to this curriculum plan.</p>
+                  ) : (
+                    <p>No courses found{searchTerm ? ` matching "${searchTerm}"` : ''}.</p>
+                  )}
                 </div>
               ) : null}
             </div>
             <div className="mt-1.5 flex items-center justify-between text-xs text-slate-500">
               <span className="font-medium text-brand-700">{form.courses.length} selected</span>
-              {displayedCourses.length > 0 ? <span>Showing {displayedCourses.length} courses</span> : null}
+              {displayedCourses.length > 0 ? <span>Showing {displayedCourses.length} available</span> : null}
             </div>
           </div>
         )}
-        <FormGrid>
-          {record ? <Field label="Credit hours" type="number" min="0.5" step="0.5" value={form.creditHours} onChange={(event) => set('creditHours', event.target.value)} required /> : null}
-          <SelectField label="Category" value={form.category} onChange={(event) => set('category', event.target.value)}>
-            <option value="required">Required</option>
-            <option value="elective">Elective</option>
-          </SelectField>
-        </FormGrid>
+
+        {record ? (
+          <div>
+            <Field label="Credit hours" type="number" min="0.5" step="0.5" value={form.creditHours} onChange={(event) => set('creditHours', event.target.value)} required />
+          </div>
+        ) : null}
+
         <div>
           <span className="mb-1.5 block text-sm font-medium text-slate-700">Prerequisites</span>
           <select
@@ -908,8 +909,8 @@ function CourseModal({ open, plan, record, options, onClose, onSaved, refetchOpt
             onChange={(event) => set('prerequisites', Array.from(event.target.selectedOptions, (option) => option.value))}
             className="focus-ring min-h-24 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
           >
-            {(options?.courses || []).filter((row) => !form.courses.includes(row.id)).map((row) => (
-              <option key={row.id} value={row.id}>{row.code} · {row.title}</option>
+            {(options?.courses || []).filter((row) => !form.courses.includes(String(row.id || row._id))).map((row) => (
+              <option key={row.id || row._id} value={String(row.id || row._id)}>{row.code} · {row.title}</option>
             ))}
           </select>
           <p className="mt-1.5 text-xs text-slate-500">Automatically filled based on selected courses. Hold Ctrl/Cmd to customize.</p>
