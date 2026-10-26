@@ -591,6 +591,36 @@ function CourseMaterialModal({ open, options, existingMaterials = [], initialPro
   const allPrograms = options?.programs || [];
   const allBatches = (options?.batches || []).filter((b) => b.status === 'active' || !b.status);
 
+  const uniqueBatches = useMemo(() => {
+    const map = new Map();
+    for (const b of allBatches) {
+      const cat = b.category || 'regular';
+      const key = `${b.code}::${cat}`;
+      const progId = b.program?.id || b.program;
+      const bId = b.id || b._id;
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          code: b.code,
+          category: cat,
+          rawBatches: [b],
+          ids: bId ? [bId] : [],
+          programs: progId ? [progId] : [],
+        });
+      } else {
+        const item = map.get(key);
+        item.rawBatches.push(b);
+        if (bId && !item.ids.includes(bId)) {
+          item.ids.push(bId);
+        }
+        if (progId && !item.programs.includes(progId)) {
+          item.programs.push(progId);
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [allBatches]);
+
   const filteredPrograms = useMemo(() => {
     if (!department) return allPrograms;
     return allPrograms.filter((p) => String(p.department?.id || p.department) === String(department));
@@ -644,30 +674,33 @@ function CourseMaterialModal({ open, options, existingMaterials = [], initialPro
     return { type: 'Short-term', unit: 'Duration', total: `${duration} ${unit}`, courseStage: '1st Week Course' };
   }, [selectedProgObj]);
 
-  const toggleBatch = (batch) => {
-    const bId = batch.id;
-    const isSelected = selectedBatches.includes(bId);
+  const toggleBatch = (batchGroup) => {
+    const key = batchGroup.key;
+    const isSelected = selectedBatches.includes(key);
 
     if (isSelected) {
-      setSelectedBatches((prev) => prev.filter((id) => id !== bId));
+      setSelectedBatches((prev) => prev.filter((k) => k !== key));
     } else {
       if (selectedBatches.length >= 2) {
         toast.info('You can select up to 2 active batches (e.g. Regular & Extension).');
         return;
       }
-      setSelectedBatches((prev) => [...prev, bId]);
+      setSelectedBatches((prev) => [...prev, key]);
 
       // If batch has an associated program, pre-select it and its department
-      if (batch.program) {
-        const prog = allPrograms.find((p) => p.id === batch.program);
+      const targetProgId = form.program && batchGroup.programs?.includes(form.program)
+        ? form.program
+        : batchGroup.programs?.[0];
+      if (targetProgId) {
+        const prog = allPrograms.find((p) => p.id === targetProgId);
         if (prog) {
           setForm((c) => ({
             ...c,
-            program: prog.id,
+            program: c.program || prog.id,
             courseCode: c.courseCode || autoGenerateCode(prog.id),
           }));
           if (prog.department) {
-            setDepartment(prog.department?.id || prog.department);
+            setDepartment((d) => d || (prog.department?.id || prog.department));
           }
         }
       }
@@ -713,6 +746,23 @@ function CourseMaterialModal({ open, options, existingMaterials = [], initialPro
         doc: 'application/msword',
         docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       }[extension];
+      const batchIds = [];
+      for (const key of selectedBatches) {
+        const group = uniqueBatches.find((ub) => ub.key === key);
+        if (!group) continue;
+        if (form.program) {
+          const match = group.rawBatches?.find(
+            (b) => String(b.program?.id || b.program) === String(form.program),
+          );
+          if (match) {
+            batchIds.push(match.id || match._id);
+          } else {
+            batchIds.push(...(group.ids || []));
+          }
+        } else {
+          batchIds.push(...(group.ids || []));
+        }
+      }
       return (await api.post(`${REGISTRAR}/course-registration/resources`, file, {
         params: {
           program: form.program,
@@ -721,7 +771,7 @@ function CourseMaterialModal({ open, options, existingMaterials = [], initialPro
           creditHours: Number(form.creditHours) || 3,
           filename: file.name,
           level: 1,
-          batches: selectedBatches.join(','),
+          batches: Array.from(new Set(batchIds.filter(Boolean))).join(','),
         },
         headers: { 'Content-Type': contentType },
         timeout: 60_000,
@@ -777,11 +827,11 @@ function CourseMaterialModal({ open, options, existingMaterials = [], initialPro
             One programme can have both Regular and Extension active batches taking this course.
           </p>
           <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pt-1">
-            {allBatches.map((b) => {
-              const isChecked = selectedBatches.includes(b.id);
+            {uniqueBatches.map((b) => {
+              const isChecked = selectedBatches.includes(b.key);
               return (
                 <label
-                  key={b.id}
+                  key={b.key}
                   className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-1.5 text-xs transition ${
                     isChecked
                       ? 'border-brand-500 bg-brand-50 text-brand-900 font-semibold shadow-sm'
@@ -799,7 +849,7 @@ function CourseMaterialModal({ open, options, existingMaterials = [], initialPro
                 </label>
               );
             })}
-            {!allBatches.length && <p className="text-xs text-slate-500">No active batches found.</p>}
+            {!uniqueBatches.length && <p className="text-xs text-slate-500">No active batches found.</p>}
           </div>
         </div>
 
@@ -1081,10 +1131,19 @@ function RegisterOfferingModal({ offering, options, onClose, onSaved }) {
     enabled: Boolean(offering?.id),
   });
 
-  const batches = (options?.batches || []).filter((row) =>
-    offering?.program?.id && row.program === offering.program.id
-    && (!category || (row.category || 'regular') === category),
-  );
+  const batches = useMemo(() => {
+    const raw = (options?.batches || []).filter((row) =>
+      offering?.program?.id && (row.program === offering.program.id || row.program?.id === offering.program.id)
+      && (!category || (row.category || 'regular') === category),
+    );
+    const seen = new Set();
+    return raw.filter((row) => {
+      const key = `${row.code}::${row.category || 'regular'}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [options?.batches, offering?.program?.id, category]);
 
   const save = useMutation({
     mutationFn: async () => {

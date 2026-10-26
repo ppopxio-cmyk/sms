@@ -42,8 +42,16 @@ export default function RegistrarGpa() {
   );
 
   const availableBatches = useMemo(() => {
-    if (!program) return options.data?.batches || [];
-    return (options.data?.batches || []).filter((b) => b.program === program);
+    const raw = !program
+      ? options.data?.batches || []
+      : (options.data?.batches || []).filter((b) => b.program === program);
+    const seen = new Set();
+    return raw.filter((row) => {
+      const key = `${row.code}::${row.category || 'regular'}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }, [options.data?.batches, program]);
 
   const durationUnit = useMemo(() => {

@@ -104,10 +104,19 @@ export default function RegistrarStudents() {
   const pagination = students.data?.pagination ?? { page: 1, pages: 1, total: 0, limit };
   const counts = students.data?.counts ?? {};
   const filtered = Boolean(debounced.trim() || status !== 'all' || program || department || batch || category !== 'all');
-  const availableBatches = (options.data?.batches || []).filter((row) =>
-    (!program || row.program === program)
-    && (category === 'all' || (row.category || 'regular') === category),
-  );
+  const availableBatches = useMemo(() => {
+    const raw = (options.data?.batches || []).filter((row) =>
+      (!program || row.program === program)
+      && (category === 'all' || (row.category || 'regular') === category),
+    );
+    const seen = new Set();
+    return raw.filter((row) => {
+      const key = `${row.code}::${row.category || 'regular'}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [options.data?.batches, program, category]);
   const exportParams = {
     type: 'students',
     ...(status !== 'all' ? { status } : {}),
