@@ -38,6 +38,8 @@ export default function TeacherStudents() {
   const [search, setSearch] = useState('');
   const [status] = useState('active');
   const [program, setProgram] = useState('');
+  const [category, setCategory] = useState('');
+  const [batch, setBatch] = useState('');
   const [assignmentId, setAssignmentId] = useState(params.get('assignmentId') || '');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
@@ -49,11 +51,20 @@ export default function TeacherStudents() {
   });
 
   const query = useQuery({
-    queryKey: ['teacher', 'students', { search: debounced, status, program, assignmentId, page, limit }],
+    queryKey: ['teacher', 'students', { search: debounced, status, program, batch, category, assignmentId, page, limit }],
     queryFn: async () =>
       (
         await api.get('/teacher/students', {
-          params: { search: debounced || undefined, status, program: program || undefined, assignmentId: assignmentId || undefined, page, limit },
+          params: {
+            search: debounced || undefined,
+            status,
+            program: program || undefined,
+            batch: batch || undefined,
+            category: category || undefined,
+            assignmentId: assignmentId || undefined,
+            page,
+            limit,
+          },
         })
       ).data,
     placeholderData: keepPreviousData,
@@ -61,6 +72,25 @@ export default function TeacherStudents() {
 
   const students = query.data?.students ?? [];
   const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0 };
+
+  const allBatches = useMemo(() => classes.data?.batches || [], [classes.data?.batches]);
+  const availableBatches = useMemo(() => {
+    let list = allBatches;
+    if (program) {
+      list = list.filter((b) => b.program === program);
+    }
+    if (category) {
+      list = list.filter((b) => b.category === category);
+    }
+    const seen = new Set();
+    return list.filter((b) => {
+      const key = `${b.code}::${b.category}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [allBatches, program, category]);
+
   // When no CourseOfferings exist yet, derive programme tabs from the
   // teacher's programme assignments so the page never shows "no students"
   // just because the registrar hasn't created course offerings.
@@ -91,6 +121,7 @@ export default function TeacherStudents() {
               value={program}
               onChange={(next) => {
                 setProgram(next);
+                setBatch('');
                 setPage(1);
               }}
               tabs={[
@@ -98,6 +129,25 @@ export default function TeacherStudents() {
                 ...allProgramTabs.map((p) => ({ key: p.value, label: p.label })),
               ]}
             />
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-slate-500">Stream:</span>
+              <FilterTabs
+                label="Delivery stream"
+                value={category}
+                onChange={(next) => {
+                  setCategory(next);
+                  setBatch('');
+                  setPage(1);
+                }}
+                tabs={[
+                  { key: '', label: 'All streams' },
+                  { key: 'regular', label: 'Regular' },
+                  { key: 'extension', label: 'Extension' },
+                ]}
+              />
+            </div>
+
             <div className="flex items-center gap-2">
               <p className="text-xs text-slate-500">{pagination.total} student{pagination.total === 1 ? '' : 's'}</p>
               <button
@@ -109,6 +159,7 @@ export default function TeacherStudents() {
                       studentNumber: s.studentId || s.studentNumber,
                       program: s.program,
                       batch: s.batch,
+                      category: s.category || s.batchCategory || 'regular',
                       level: s.level,
                       sex: s.sex,
                       studentStatus: s.studentStatus,
@@ -124,7 +175,7 @@ export default function TeacherStudents() {
             </div>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-[1fr_280px]">
+          <div className="grid gap-3 sm:grid-cols-[1fr_200px_260px]">
             <SearchInput
               value={search}
               onChange={(event) => {
@@ -134,6 +185,22 @@ export default function TeacherStudents() {
               placeholder="Search name, student ID, programme or batch"
               loading={query.isFetching}
             />
+            <select
+              value={batch}
+              onChange={(event) => {
+                setBatch(event.target.value);
+                setPage(1);
+              }}
+              className="focus-ring h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700"
+              aria-label="Filter by batch"
+            >
+              <option value="">All batches</option>
+              {availableBatches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.code} ({b.category || 'regular'})
+                </option>
+              ))}
+            </select>
             <ClassSelect
               assignments={classes.data?.assignments ?? []}
               value={assignmentId}
@@ -204,7 +271,14 @@ export default function TeacherStudents() {
                         <td className="py-3.5 pr-4 font-mono text-xs text-slate-600">{student.studentNumber || '—'}</td>
                         <td className="py-3.5 pr-4 text-slate-600">{student.program || '—'}</td>
                         <td className="py-3.5 pr-4 text-slate-600">
-                          {[student.batch, student.level ? `Level ${student.level}` : ''].filter(Boolean).join(' · ') || '—'}
+                          <div className="flex items-center gap-1.5">
+                            <span>{[student.batch, student.level ? `Level ${student.level}` : ''].filter(Boolean).join(' · ') || '—'}</span>
+                            {(student.category || student.batchCategory) ? (
+                              <Badge tone={(student.category || student.batchCategory) === 'extension' ? 'warning' : 'neutral'}>
+                                {(student.category || student.batchCategory) === 'extension' ? 'Ext' : 'Reg'}
+                              </Badge>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="py-3.5 pr-4">
                           <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">

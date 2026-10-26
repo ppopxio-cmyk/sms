@@ -28,16 +28,26 @@ export default function TeacherClasses() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const [program, setProgram] = useState('');
+  const [category, setCategory] = useState('');
+  const [batch, setBatch] = useState('');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const debounced = useDebounced(search);
 
   const query = useQuery({
-    queryKey: ['teacher', 'classes', { search: debounced, status, program, page, limit }],
+    queryKey: ['teacher', 'classes', { search: debounced, status, program, batch, category, page, limit }],
     queryFn: async () =>
       (
         await api.get('/teacher/courses', {
-          params: { search: debounced || undefined, status, program: program || undefined, page, limit },
+          params: {
+            search: debounced || undefined,
+            status,
+            program: program || undefined,
+            batch: batch || undefined,
+            category: category || undefined,
+            page,
+            limit,
+          },
         })
       ).data,
     placeholderData: keepPreviousData,
@@ -45,7 +55,25 @@ export default function TeacherClasses() {
 
   const rows = query.data?.assignments ?? [];
   const programs = query.data?.programs ?? [];
+  const allBatches = query.data?.batches ?? [];
   const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0 };
+
+  const availableBatches = useMemo(() => {
+    let list = allBatches;
+    if (program) {
+      list = list.filter((b) => b.program === program);
+    }
+    if (category) {
+      list = list.filter((b) => b.category === category);
+    }
+    const seen = new Set();
+    return list.filter((b) => {
+      const key = `${b.code}::${b.category}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [allBatches, program, category]);
 
   const groupedPrograms = useMemo(() => {
     const groups = new Map();
@@ -63,8 +91,8 @@ export default function TeacherClasses() {
           programName: course.program?.name || course.programName || course.program || 'Programme',
           qualificationType: course.program?.qualificationType || course.qualificationType || 'degree',
           level,
-          batchCode: course.batch?.code || '',
-          stream: course.batch?.category || 'regular',
+          batchCode: course.batchCode || course.batch?.code || '',
+          stream: course.category || course.batch?.category || 'regular',
           courses: [],
         });
       }
@@ -108,26 +136,58 @@ export default function TeacherClasses() {
 
       <Card>
         <CardBody className="space-y-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <FilterTabs
-              label="Class status"
-              value={status}
-              onChange={(next) => {
-                setStatus(next);
-                setPage(1);
-              }}
-              tabs={[
-                { key: 'all', label: 'All classes' },
-                { key: 'active', label: 'Active' },
-                { key: 'pending', label: 'Pending' },
-                { key: 'completed', label: 'Completed' },
-              ]}
-            />
-            <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-xl">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <FilterTabs
+                label="Class status"
+                value={status}
+                onChange={(next) => {
+                  setStatus(next);
+                  setPage(1);
+                }}
+                tabs={[
+                  { key: 'all', label: 'All classes' },
+                  { key: 'active', label: 'Active' },
+                  { key: 'pending', label: 'Pending' },
+                  { key: 'completed', label: 'Completed' },
+                ]}
+              />
+
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-slate-500">Stream:</span>
+                <FilterTabs
+                  label="Delivery stream"
+                  value={category}
+                  onChange={(next) => {
+                    setCategory(next);
+                    setBatch('');
+                    setPage(1);
+                  }}
+                  tabs={[
+                    { key: '', label: 'All streams' },
+                    { key: 'regular', label: 'Regular' },
+                    { key: 'extension', label: 'Extension' },
+                  ]}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-[1fr_220px_200px]">
+              <SearchInput
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search course, code or programme"
+                loading={query.isFetching}
+                className="w-full"
+              />
               <select
                 value={program}
                 onChange={(event) => {
                   setProgram(event.target.value);
+                  setBatch('');
                   setPage(1);
                 }}
                 className="focus-ring h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700"
@@ -138,16 +198,22 @@ export default function TeacherClasses() {
                   <option key={row.id} value={row.id}>{row.code} · {row.name}</option>
                 ))}
               </select>
-              <SearchInput
-                value={search}
+              <select
+                value={batch}
                 onChange={(event) => {
-                  setSearch(event.target.value);
+                  setBatch(event.target.value);
                   setPage(1);
                 }}
-                placeholder="Search course, programme or year"
-                loading={query.isFetching}
-                className="w-full"
-              />
+                className="focus-ring h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700"
+                aria-label="Filter by batch"
+              >
+                <option value="">All batches</option>
+                {availableBatches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.code} ({b.category || 'regular'})
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 

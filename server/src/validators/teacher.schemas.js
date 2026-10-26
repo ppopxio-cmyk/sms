@@ -26,19 +26,19 @@ export const studentParamSchema = z.strictObject({ studentId: objectId });
 export const listAssignmentsQuerySchema = z.strictObject({
   search: z.string().trim().max(100).optional(),
   status: z.enum(['all', 'active', 'pending', 'completed']).default('all'),
-  program: objectId.optional(),
-  batch: objectId.optional(),
-  category: z.enum(['regular', 'extension']).optional(),
+  program: z.union([objectId, z.literal('')]).optional().transform((v) => v || undefined),
+  batch: z.union([objectId, z.literal('')]).optional().transform((v) => v || undefined),
+  category: z.enum(['all', 'regular', 'extension', '']).optional().transform((v) => (v === 'all' || !v ? undefined : v)),
   page,
   limit,
 });
 
 export const listStudentsQuerySchema = z.strictObject({
   search: z.string().trim().max(100).optional(),
-  assignmentId: objectId.optional(),
-  program: objectId.optional(),
-  batch: objectId.optional(),
-  category: z.enum(['regular', 'extension']).optional(),
+  assignmentId: z.union([objectId, z.literal('')]).optional().transform((v) => v || undefined),
+  program: z.union([objectId, z.literal('')]).optional().transform((v) => v || undefined),
+  batch: z.union([objectId, z.literal('')]).optional().transform((v) => v || undefined),
+  category: z.enum(['all', 'regular', 'extension', '']).optional().transform((v) => (v === 'all' || !v ? undefined : v)),
   level: z.coerce.number().int().min(1).max(20).optional(),
   status: z.enum(['all', 'active', 'completed', 'withdrawn', 'cancelled', 'pending']).default('active'),
   page,

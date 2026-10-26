@@ -163,8 +163,33 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
   const rawCourses = query.data?.courses || [];
   const rawPlans = query.data?.plans || [];
 
-  const selectedBatchObj = allBatches.find((b) => b.id === selectedBatch);
-  const batchProgId = selectedBatchObj?.program;
+  const uniqueBatches = useMemo(() => {
+    const map = new Map();
+    for (const b of allBatches) {
+      const key = `${b.code}::${b.category || 'regular'}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          code: b.code,
+          category: b.category || 'regular',
+          programs: b.program ? [b.program] : [],
+        });
+      } else {
+        const item = map.get(key);
+        if (b.program && !item.programs.includes(b.program)) {
+          item.programs.push(b.program);
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [allBatches]);
+
+  const selectedBatchGroup = useMemo(() => {
+    if (!selectedBatch) return null;
+    return uniqueBatches.find((b) => b.key === selectedBatch || b.code === selectedBatch);
+  }, [uniqueBatches, selectedBatch]);
+
+  const batchProgIds = selectedBatchGroup ? selectedBatchGroup.programs : [];
 
   const programsInSelectedDept = useMemo(() => {
     if (!selectedDept) return rawPrograms;
@@ -173,9 +198,10 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
 
   const departments = rawDepartments.filter((row) => {
     if (selectedDept && row.id !== selectedDept) return false;
-    if (batchProgId) {
-      const batchProg = rawPrograms.find((p) => p.id === batchProgId);
-      if (batchProg && batchProg.department?.id !== row.id && batchProg.department !== row.id) return false;
+    if (batchProgIds.length > 0) {
+      const progsInBatch = rawPrograms.filter((p) => batchProgIds.includes(p.id));
+      const hasDept = progsInBatch.some((p) => (p.department?.id || p.department) === row.id);
+      if (!hasDept) return false;
     }
     return matches([row.code, row.name]);
   });
@@ -183,13 +209,14 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
   const programs = rawPrograms.filter((row) => {
     if (selectedDept && row.department?.id !== selectedDept && row.department !== selectedDept) return false;
     if (selectedProg && row.id !== selectedProg) return false;
-    if (batchProgId && row.id !== batchProgId) return false;
+    if (batchProgIds.length > 0 && !batchProgIds.includes(row.id)) return false;
     return matches([row.code, row.name, row.department?.name, row.qualificationType, ...(row.categories || [])]);
   });
 
   const courses = rawCourses.filter((row) => {
     if (selectedDept && row.department?.id !== selectedDept && row.department !== selectedDept) return false;
     if (selectedProg && row.program?.id !== selectedProg && row.program !== selectedProg) return false;
+    if (batchProgIds.length > 0 && row.program && !batchProgIds.includes(row.program?.id || row.program)) return false;
     return matches([row.code, row.title, row.department?.name]);
   });
 
@@ -274,14 +301,14 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
               >
                 All batches
               </button>
-              {allBatches.map((b) => (
+              {uniqueBatches.map((b) => (
                 <button
-                  key={b.id}
+                  key={b.key}
                   type="button"
-                  onClick={() => setSelectedBatch(b.id)}
-                  className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${selectedBatch === b.id ? 'bg-slate-900 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+                  onClick={() => setSelectedBatch(selectedBatch === b.key ? '' : b.key)}
+                  className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${selectedBatch === b.key ? 'bg-slate-900 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
                 >
-                  {b.code} ({b.category || 'regular'})
+                  {b.code} ({b.category})
                 </button>
               ))}
             </div>
@@ -407,7 +434,7 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
                     </p>
                     <p className="text-slate-500">
                       Capacity: {row.capacity ? `${row.capacity} students` : 'No limit set'}
-                      {(row.batches || []).length ? ` · Batches: ${(row.batches || []).map((b) => b.code).join(', ')}` : ''}
+                      {(row.batches || []).length ? ` · Batches: ${[...new Set((row.batches || []).map((b) => b.code))].join(', ')}` : ''}
                     </p>
                   </div>
 

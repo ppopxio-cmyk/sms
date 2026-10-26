@@ -1,6 +1,7 @@
 import { CourseOffering, CourseRegistration } from '../models/Offering.js';
 import { Assessment } from '../models/Assessment.js';
 import { AttendanceSheet } from '../models/AttendanceSheet.js';
+import { Batch } from '../models/AcademicStructure.js';
 import {
   ASSIGNMENT_POPULATE,
   READ_STATUSES,
@@ -105,6 +106,11 @@ export async function listTeacherAssignments(teacherId, query) {
     return dto;
   });
 
+  const progIds = programs.map((p) => p._id);
+  const batches = progIds.length
+    ? await Batch.find(ownFilter({ program: { $in: progIds } })).sort({ code: 1, category: 1 }).lean()
+    : [];
+
   return {
     assignments: enrichedAssignments,
     programs: programs.map((row) => ({
@@ -113,6 +119,14 @@ export async function listTeacherAssignments(teacherId, query) {
       name: row.name,
       qualificationType: row.qualificationType,
       department: row.department ? { id: String(row.department._id), code: row.department.code, name: row.department.name } : null,
+    })),
+    batches: batches.map((b) => ({
+      id: String(b._id),
+      code: b.code,
+      name: b.name,
+      category: b.category || 'regular',
+      program: String(b.program),
+      status: b.status,
     })),
     pagination: { page: query.page, limit: query.limit, total, pages: Math.max(1, Math.ceil(total / query.limit)) },
   };
