@@ -164,22 +164,15 @@ async function main() {
   await connectDB();
   console.log('Database connected.');
 
-  // Clean up previous institutional data (preserving Users and GradingPolicy as requested)
+  // Clean up previous institutional data sequentially (preserving Users and GradingPolicy as requested)
   console.log('Clearing previous records to ensure pristine seed...');
-  await Promise.all([
-    Student.deleteMany({}),
-    CourseOffering.deleteMany({}),
-    CourseRegistration.deleteMany({}),
-    AttendanceRecord.deleteMany({}),
-    AttendanceSheet.deleteMany({}),
-    Result.deleteMany({}),
-    CourseMarkPolicy.deleteMany({}),
-    Batch.deleteMany({}),
-    Program.deleteMany({}),
-    Course.deleteMany({}),
-    Department.deleteMany({}),
-    TeacherProgramAssignment.deleteMany({}),
-  ]);
+  const toClean = [
+    Student, CourseOffering, CourseRegistration, AttendanceRecord,
+    AttendanceSheet, Result, CourseMarkPolicy, Batch, Program, Course, Department, TeacherProgramAssignment
+  ];
+  for (const model of toClean) {
+    await model.deleteMany({});
+  }
   console.log('Previous data cleared.');
 
   // 1. Academic Years
@@ -195,7 +188,7 @@ async function main() {
         status: 'active',
       },
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true },
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
   );
   console.log(`Academic Year 2019 (Active, Current): ${year2019._id}`);
 
@@ -210,7 +203,7 @@ async function main() {
         status: 'planned',
       },
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true },
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
   );
   console.log(`Academic Year 2020 (Planned): ${year2020._id}`);
 
@@ -261,7 +254,7 @@ async function main() {
         verificationBaseUrl: 'http://localhost:5173/verify',
       },
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true },
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
   );
   console.log(`Certificate template active: ${certTemplate.name} (v${certTemplate.version})`);
 
@@ -285,7 +278,7 @@ async function main() {
           active: true,
         },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
     );
 
     for (const progData of deptData.programs) {
@@ -306,14 +299,14 @@ async function main() {
             academicYears: year2019._id,
           },
         },
-        { upsert: true, new: true, setDefaultsOnInsert: true },
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
       );
 
       // Assign teacher to program
       await TeacherProgramAssignment.findOneAndUpdate(
         { teacher: teacherOne._id, program: progDoc._id },
         { $set: { status: 'active', source: 'program', assignedAt: new Date() } },
-        { upsert: true, new: true, setDefaultsOnInsert: true },
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
       );
 
       // Create Regular and Extension Batches
@@ -329,7 +322,7 @@ async function main() {
             status: 'active',
           },
         },
-        { upsert: true, new: true, setDefaultsOnInsert: true },
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
       );
 
       await Batch.findOneAndUpdate(
@@ -344,7 +337,7 @@ async function main() {
             status: 'active',
           },
         },
-        { upsert: true, new: true, setDefaultsOnInsert: true },
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
       );
 
       // 1st Year Course
@@ -361,7 +354,7 @@ async function main() {
             active: true,
           },
         },
-        { upsert: true, new: true, setDefaultsOnInsert: true },
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
       );
 
       // Course Offering for Regular Batch
@@ -386,7 +379,7 @@ async function main() {
             status: 'open',
           },
         },
-        { upsert: true, new: true, setDefaultsOnInsert: true },
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
       );
 
       // Course Mark Policy (Assignment: 20, Project: 20, Quizzes: 30, Presentation: 15, Attendance: 10, Bonus: 5 = 100)
@@ -408,7 +401,7 @@ async function main() {
             updatedBy: teacherOne._id,
           },
         },
-        { upsert: true, new: true, setDefaultsOnInsert: true },
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
       );
 
       // 5 Students in batch REG-2019
@@ -458,7 +451,7 @@ async function main() {
               status: 'registered',
             },
           },
-          { upsert: true, new: true, setDefaultsOnInsert: true },
+          { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
         );
 
         // Course Marks and Results Calculation
@@ -492,15 +485,15 @@ async function main() {
               gradingPolicyVersion: gradingPolicy?.version || 1,
             },
           },
-          { upsert: true, new: true, setDefaultsOnInsert: true },
+          { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
         );
       }
 
-      // Attendance: 30 days in Tikimt
-      for (const tDay of TIKIMT_DATES) {
-        await AttendanceSheet.findOneAndUpdate(
-          { offering: offering._id, dateKey: tDay.dateKey, period: 'day' },
-          {
+      // Attendance: 30 days in Tikimt (Optimized bulk writes)
+      const sheetOps = TIKIMT_DATES.map((tDay) => ({
+        updateOne: {
+          filter: { offering: offering._id, dateKey: tDay.dateKey, period: 'day' },
+          update: {
             $set: {
               date: tDay.date,
               status: 'finalized',
@@ -510,23 +503,30 @@ async function main() {
               finalizedBy: teacherOne._id,
             },
           },
-          { upsert: true, new: true, setDefaultsOnInsert: true },
-        );
+          upsert: true,
+        },
+      }));
+      await AttendanceSheet.bulkWrite(sheetOps);
 
+      const recordOps = [];
+      for (const tDay of TIKIMT_DATES) {
         for (const { student } of enrolledStudents) {
-          await AttendanceRecord.findOneAndUpdate(
-            { offering: offering._id, student: student._id, date: tDay.date, period: 'day' },
-            {
-              $set: {
-                status: 'present',
-                markedBy: teacherOne._id,
-                markedAt: tDay.date,
+          recordOps.push({
+            updateOne: {
+              filter: { offering: offering._id, student: student._id, date: tDay.date, period: 'day' },
+              update: {
+                $set: {
+                  status: 'present',
+                  markedBy: teacherOne._id,
+                  markedAt: tDay.date,
+                },
               },
+              upsert: true,
             },
-            { upsert: true, new: true, setDefaultsOnInsert: true },
-          );
+          });
         }
       }
+      await AttendanceRecord.bulkWrite(recordOps);
 
       console.log(`  ✓ Programme ${progData.code} · ${progData.name}: 5 students seeded, marks submitted & 30-day Tikimt attendance recorded.`);
     }
