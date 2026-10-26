@@ -39,16 +39,18 @@ async function requirePlan(planId, { status } = {}) {
 
 export async function getTeacherWorkloads(teacherIds = []) {
   if (!teacherIds.length) return {};
+  const cleanTeacherIds = teacherIds.filter(Boolean);
+  if (!cleanTeacherIds.length) return {};
   const [programs, offerings] = await Promise.all([
-    Program.find({ active: true, teachers: { $in: teacherIds } }).select('_id teachers categories').lean(),
-    CourseOffering.find({
-      teacher: { $in: teacherIds },
+    Program.find(ownFilter({ active: true, teachers: { $in: cleanTeacherIds } })).select('_id teachers categories').lean(),
+    CourseOffering.find(ownFilter({
+      teacher: { $in: cleanTeacherIds },
       status: { $in: ['open', 'in_progress', 'draft'] },
-    }).select('teacher category program').lean(),
+    })).select('teacher category program').lean(),
   ]);
 
   const workloads = {};
-  for (const tid of teacherIds) {
+  for (const tid of cleanTeacherIds) {
     const sId = String(tid);
     const regKeys = new Set();
     const extKeys = new Set();
@@ -79,9 +81,10 @@ export async function getTeacherWorkloads(teacherIds = []) {
 }
 
 export async function validateTeacherWorkloads(teacherIds = [], categories = ['regular'], excludeProgramId = null) {
-  if (!teacherIds.length) return;
-  const workloads = await getTeacherWorkloads(teacherIds);
-  const teachers = await User.find({ _id: { $in: teacherIds } }).select('name email').lean();
+  const cleanTeacherIds = (teacherIds || []).filter(Boolean);
+  if (!cleanTeacherIds.length) return;
+  const workloads = await getTeacherWorkloads(cleanTeacherIds);
+  const teachers = await User.find(ownFilter({ _id: { $in: cleanTeacherIds } })).select('name email').lean();
   const teacherMap = new Map(teachers.map((t) => [String(t._id), t.name || t.email]));
 
   for (const tid of teacherIds) {
@@ -401,7 +404,7 @@ export const programDetail = asyncHandler(async (req, res) => {
   const deptId = program.department?._id || program.department;
   const [batches, deptCourses, plans, assignments, studentCount, allTeachers] = await Promise.all([
     Batch.find({ program: program._id }).sort({ code: 1, category: 1 }).lean(),
-    Course.find({ $or: [{ program: program._id }, { department: deptId }] }).sort({ code: 1 }).lean(),
+    Course.find(ownFilter({ $or: [{ program: program._id }, { department: deptId }] })).sort({ code: 1 }).lean(),
     CurriculumPlan.find({ program: program._id }).sort({ version: -1 }).lean(),
     TeacherProgramAssignment.find(ownFilter({ program: program._id, status: 'active' }))
       .populate('teacher', 'name email')
@@ -412,7 +415,7 @@ export const programDetail = asyncHandler(async (req, res) => {
   ]);
 
   const planIds = plans.map((p) => p._id);
-  const planCourses = await CurriculumCourse.find({ curriculumPlan: { $in: planIds } })
+  const planCourses = await CurriculumCourse.find(ownFilter({ curriculumPlan: { $in: planIds } }))
     .populate('course')
     .lean();
 
@@ -476,7 +479,7 @@ export const assignProgramTeacher = asyncHandler(async (req, res) => {
   }
 
   const assignment = await TeacherProgramAssignment.findOneAndUpdate(
-    { teacher: teacherId, program: program._id },
+    ownFilter({ teacher: teacherId, program: program._id }),
     { $set: { status: 'active', source: 'program', assignedBy: req.user.id, assignedAt: new Date(), ...(courseId ? { course: courseId } : {}) } },
     { upsert: true, new: true },
   );
