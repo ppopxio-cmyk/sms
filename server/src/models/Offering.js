@@ -18,8 +18,8 @@ const teacherChangeSchema = new Schema(
 const offeringSchema = new Schema(
   {
     course: { type: Schema.Types.ObjectId, ref: 'Course', required: true, index: true },
-    curriculumPlan: { type: Schema.Types.ObjectId, ref: 'CurriculumPlan', required: true, index: true },
-    curriculumCourse: { type: Schema.Types.ObjectId, ref: 'CurriculumCourse', required: true },
+    curriculumPlan: { type: Schema.Types.ObjectId, ref: 'CurriculumPlan', default: null, index: true },
+    curriculumCourse: { type: Schema.Types.ObjectId, ref: 'CurriculumCourse', default: null },
     program: { type: Schema.Types.ObjectId, ref: 'Program', required: true, index: true },
     department: { type: Schema.Types.ObjectId, ref: 'Department', required: true, index: true },
     academicYear: { type: Schema.Types.ObjectId, ref: 'AcademicYear', required: true, index: true },

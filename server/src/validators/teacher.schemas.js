@@ -280,6 +280,8 @@ const markComponent = z.coerce.number().finite().min(0).max(100).nullable().opti
 
 export const courseMarkPolicySchema = z
   .strictObject({
+    assignment: markComponent,
+    project: markComponent,
     assessments: markComponent,
     quizzes: markComponent,
     bonus: markComponent,
@@ -287,9 +289,10 @@ export const courseMarkPolicySchema = z
     presentation: markComponent,
   })
   .superRefine((value, ctx) => {
-    const total = ['assessments', 'quizzes', 'bonus', 'attendance', 'presentation'].reduce(
+    const assignmentVal = Number(value.assignment ?? value.assessments ?? 0);
+    const total = ['project', 'quizzes', 'bonus', 'attendance', 'presentation'].reduce(
       (sum, key) => sum + Number(value[key] || 0),
-      0,
+      assignmentVal,
     );
     if (Math.abs(total - 100) > 0.001) {
       ctx.addIssue({ code: 'custom', message: 'The policy must add up to exactly 100 marks.' });
@@ -302,6 +305,8 @@ export const listCourseMarksQuerySchema = z.strictObject({
 
 const courseMarkRow = z.strictObject({
   studentId: objectId,
+  assignment: markComponent,
+  project: markComponent,
   assessments: markComponent,
   quizzes: markComponent,
   bonus: markComponent,

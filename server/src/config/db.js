@@ -5,7 +5,7 @@ mongoose.set('strictQuery', true);
 mongoose.set('sanitizeFilter', true);
 
 export async function connectDB(uri = env.MONGODB_URI) {
-  await mongoose.connect(uri, { maxPoolSize: 20, serverSelectionTimeoutMS: 8000 });
+  await mongoose.connect(uri, { maxPoolSize: 20, serverSelectionTimeoutMS: 30000 });
   return mongoose.connection;
 }
 

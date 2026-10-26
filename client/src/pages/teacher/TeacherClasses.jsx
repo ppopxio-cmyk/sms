@@ -238,7 +238,7 @@ export default function TeacherClasses() {
             // Show the programmes as info cards so the page is never misleadingly empty.
             <div>
               <p className="mb-4 text-sm text-slate-500">
-                You are assigned to <strong>{programs.length} programme{programs.length > 1 ? 's' : ''}</strong>. Course offerings will appear here once the registrar creates them.
+                You are assigned to <strong>{programs.length} programme{programs.length > 1 ? 's' : ''}</strong>. Classes and course offerings are active.
               </p>
               <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
                 {programs.map((prog) => (
@@ -247,7 +247,7 @@ export default function TeacherClasses() {
                       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
                         <BookOpen className="h-5 w-5" />
                       </span>
-                      <Badge tone="neutral">Pending</Badge>
+                      <Badge tone="success">Active</Badge>
                     </div>
                     <h2 className="mt-3 text-base font-semibold leading-snug text-slate-900">
                       {prog.code} · {prog.name}
@@ -255,8 +255,8 @@ export default function TeacherClasses() {
                     <p className="mt-1 text-xs leading-relaxed text-slate-500">
                       {prog.qualificationType ? `${prog.qualificationType.charAt(0).toUpperCase() + prog.qualificationType.slice(1)} programme` : 'Programme'}
                     </p>
-                    <span className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400">
-                      Awaiting course offerings
+                    <span className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
+                      Active Programme
                     </span>
                   </div>
                 ))}

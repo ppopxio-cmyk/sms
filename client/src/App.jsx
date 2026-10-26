@@ -94,6 +94,32 @@ export default function App() {
     bootstrap();
   }, [bootstrap]);
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.ctrlKey && (e.key === 'e' || e.key === 'E')) {
+        e.preventDefault();
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(() => {});
+        } else {
+          document.exitFullscreen().catch(() => {});
+        }
+      }
+    };
+
+    const handleFirstInteraction = () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('click', handleFirstInteraction, { once: true });
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('click', handleFirstInteraction);
+    };
+  }, []);
+
   if (status === 'loading') return <SplashScreen />;
 
   return (
@@ -184,7 +210,7 @@ export default function App() {
               <Route path="/registrar/batches" element={<RegistrarBatches />} />
               <Route path="/registrar/batches/:batchId" element={<RegistrarBatch />} />
               <Route path="/registrar/curriculum" element={<RegistrarCurriculum />} />
-              <Route path="/registrar/course-offering" element={<RegistrarCourseOffering />} />
+              <Route path="/registrar/course-offering" element={<Navigate to="/registrar/course-registration" replace />} />
               <Route path="/registrar/course-registration" element={<RegistrarCourseRegistration />} />
               <Route path="/registrar/course-registration/programme/:id" element={<RegistrarProgramCourses />} />
               <Route path="/registrar/course-registration/programs/:id" element={<RegistrarProgramCourses />} />
