@@ -2,12 +2,21 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { BookOpen, ClipboardCheck, Download, FileText, Plus, Trash2, Upload, UsersRound } from 'lucide-react';
+import {
+  BookOpen,
+  ChevronDown,
+  ChevronUp,
+  ClipboardCheck,
+  GraduationCap,
+  Layers,
+  UsersRound,
+} from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import {
   REGISTRAR,
   humanStatus,
   levelLabel,
+  qualificationLabel,
   toneForStatus,
 } from '../../lib/registrar';
 import { useDebounced } from '../../lib/useDebounced';
@@ -18,23 +27,15 @@ import { FormGrid, SelectField } from '../../components/registrar/Fields';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
-import Field from '../../components/ui/Field';
-import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
 import SearchInput from '../../components/ui/SearchInput';
 
-function shortenFileName(fileName, maxBase = 12) {
-  if (!fileName) return '';
-  const str = String(fileName).trim();
-  const dotIndex = str.lastIndexOf('.');
-  const ext = dotIndex !== -1 ? str.slice(dotIndex) : '';
-  const base = dotIndex !== -1 ? str.slice(0, dotIndex) : str;
-  if (base.length <= maxBase) return str;
-  return `${base.slice(0, maxBase)}...${ext}`;
-}
-
 export default function RegistrarCourseRegistration() {
   const queryClient = useQueryClient();
+  const [selectedBatchKey, setSelectedBatchKey] = useState('');
+  const [expandedDepts, setExpandedDepts] = useState({});
+
+  // Offerings filters
   const [academicYear, setAcademicYear] = useState('');
   const [term, setTerm] = useState('');
   const [program, setProgram] = useState('');
@@ -43,18 +44,14 @@ export default function RegistrarCourseRegistration() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [registering, setRegistering] = useState(null);
+
+  // Records filters
   const [search, setSearch] = useState('');
   const debounced = useDebounced(search, 300);
   const [recordStatus, setRecordStatus] = useState('all');
   const [recordPage, setRecordPage] = useState(1);
   const [recordLimit, setRecordLimit] = useState(20);
   const [dropping, setDropping] = useState(null);
-  const [materialDepartment, setMaterialDepartment] = useState('');
-  const [materialProgram, setMaterialProgram] = useState('');
-  const [materialLevel, setMaterialLevel] = useState('');
-  const [materialSearch, setMaterialSearch] = useState('');
-  const [materialModal, setMaterialModal] = useState(false);
-  const [removingMaterial, setRemovingMaterial] = useState(null);
 
   const options = useQuery({
     queryKey: ['registrar', 'offering-options'],
@@ -67,6 +64,90 @@ export default function RegistrarCourseRegistration() {
     queryFn: async () => (await api.get(`${REGISTRAR}/academic-calendar`)).data,
     staleTime: 5 * 60_000,
   });
+
+  const rawBatches = options.data?.batches || [];
+  const uniqueBatches = useMemo(() => {
+    const map = new Map();
+    for (const b of rawBatches) {
+      if (b.status === 'archived') continue;
+      const cat = b.category || 'regular';
+      const key = `${b.code}::${cat}`;
+      const progId = String(b.program?.id || b.program || '');
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          code: b.code,
+          category: cat,
+          name: b.name,
+          programIds: progId ? [progId] : [],
+        });
+      } else {
+        const item = map.get(key);
+        if (progId && !item.programIds.includes(progId)) {
+          item.programIds.push(progId);
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [rawBatches]);
+
+  // Default to first batch if none selected
+  useEffect(() => {
+    if (!selectedBatchKey && uniqueBatches.length > 0) {
+      setSelectedBatchKey(uniqueBatches[0].key);
+    }
+  }, [selectedBatchKey, uniqueBatches]);
+
+  const activeBatchGroup = useMemo(() => {
+    return uniqueBatches.find((b) => b.key === selectedBatchKey) || uniqueBatches[0] || null;
+  }, [uniqueBatches, selectedBatchKey]);
+
+  // Group programmes by department for the selected batch
+  const departmentsWithPrograms = useMemo(() => {
+    const depts = options.data?.departments || [];
+    const progs = options.data?.programs || [];
+    if (!activeBatchGroup) return [];
+
+    const allowedProgIds = new Set(activeBatchGroup.programIds || []);
+    // If batch has explicit programIds, filter by them; otherwise show all programs
+    const batchPrograms = allowedProgIds.size > 0
+      ? progs.filter((p) => allowedProgIds.has(String(p.id)))
+      : progs;
+
+    return depts
+      .map((dept) => {
+        const deptProgs = batchPrograms.filter(
+          (p) => String(p.department?.id || p.department) === String(dept.id),
+        );
+        return {
+          ...dept,
+          programs: deptProgs,
+        };
+      })
+      .filter((dept) => dept.programs.length > 0);
+  }, [options.data?.departments, options.data?.programs, activeBatchGroup]);
+
+  // Initialize all departments as expanded by default
+  useEffect(() => {
+    if (departmentsWithPrograms.length > 0) {
+      setExpandedDepts((prev) => {
+        const next = { ...prev };
+        for (const dept of departmentsWithPrograms) {
+          if (next[dept.id] === undefined) {
+            next[dept.id] = true;
+          }
+        }
+        return next;
+      });
+    }
+  }, [departmentsWithPrograms]);
+
+  const toggleDept = (deptId) => {
+    setExpandedDepts((prev) => ({
+      ...prev,
+      [deptId]: !prev[deptId],
+    }));
+  };
 
   const offeringParams = useMemo(() => ({
     page,
@@ -99,28 +180,11 @@ export default function RegistrarCourseRegistration() {
     placeholderData: (previous) => previous,
   });
 
-  const materials = useQuery({
-    queryKey: ['registrar', 'course-materials'],
-    queryFn: async () => (await api.get(`${REGISTRAR}/course-registration/resources`)).data,
-    staleTime: 60_000,
-  });
-
-  const removeMaterial = useMutation({
-    mutationFn: async () => (await api.delete(`${REGISTRAR}/course-registration/resources/${removingMaterial.id}`)).data,
-    onSuccess: () => {
-      toast.success('Course material removed.');
-      setRemovingMaterial(null);
-      queryClient.invalidateQueries({ queryKey: ['registrar', 'course-materials'] });
-    },
-    onError: (err) => toast.error(errorMessage(err, 'The course material could not be removed.')),
-  });
-
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['registrar', 'registrations'] });
     queryClient.invalidateQueries({ queryKey: ['registrar', 'offerings'] });
     queryClient.invalidateQueries({ queryKey: ['registrar', 'dashboard'] });
     queryClient.invalidateQueries({ queryKey: ['registrar', 'registration-candidates'] });
-    queryClient.invalidateQueries({ queryKey: ['registrar', 'plan-offerings'] });
   };
 
   const drop = useMutation({
@@ -138,104 +202,6 @@ export default function RegistrarCourseRegistration() {
   const recordRows = records.data?.rows ?? [];
   const recordPagination = records.data?.pagination ?? { page: 1, pages: 1, total: 0, limit };
   const counts = records.data?.counts ?? {};
-  const allMaterials = materials.data?.resources ?? [];
-  const materialCounts = useMemo(() => {
-    const map = new Map();
-    for (const row of allMaterials) {
-      if (row.program?.id) map.set(row.program.id, (map.get(row.program.id) || 0) + 1);
-    }
-    return map;
-  }, [allMaterials]);
-  const programsInDept = useMemo(() => {
-    const list = options.data?.programs || [];
-    if (!materialDepartment) return list;
-    return list.filter((p) => String(p.department?.id || p.department) === String(materialDepartment));
-  }, [options.data?.programs, materialDepartment]);
-
-  const visibleMaterials = useMemo(() => {
-    const term = materialSearch.trim().toLowerCase();
-    return allMaterials.filter((row) => (
-      (!materialDepartment || String(row.department?.id || row.department) === String(materialDepartment))
-      && (!materialProgram || row.program?.id === materialProgram)
-      && (!materialLevel || String(row.level || 1) === String(materialLevel))
-      && (!term || [row.courseName, row.courseCode, row.fileName].some((value) => String(value || '').toLowerCase().includes(term)))
-    ));
-  }, [allMaterials, materialDepartment, materialProgram, materialLevel, materialSearch]);
-
-  const materialColumns = [
-    {
-      key: 'course',
-      label: 'Course',
-      render: (row) => (
-        <div>
-          <p className="text-sm font-semibold text-slate-900">{row.courseCode}</p>
-          <p className="text-xs text-slate-500">{row.courseName}</p>
-        </div>
-      ),
-    },
-    {
-      key: 'credits',
-      label: 'Credits',
-      render: (row) => <span className="text-xs font-semibold text-slate-700">{row.creditHours ?? 3} Cr.</span>,
-    },
-    {
-      key: 'program',
-      label: 'Programme',
-      render: (row) => row.program ? (
-        <div>
-          <Link
-            to={`/registrar/course-registration/programme/${row.program.id}`}
-            className="text-sm font-medium text-brand-700 hover:underline"
-            title="View programme courses"
-          >
-            {row.program.code} · {row.program.name}
-          </Link>
-          {row.department ? <p className="text-xs text-slate-400">{row.department.name || row.department.code}</p> : null}
-        </div>
-      ) : '—',
-    },
-    {
-      key: 'file',
-      label: 'Material',
-      render: (row) => (
-        <div className="flex items-center gap-2">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-50 text-slate-500"><FileText className="h-4 w-4" /></span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-slate-700" title={row.fileName}>
-              {shortenFileName(row.fileName)}
-            </p>
-            <p className="text-xs text-slate-400">{formatBytes(row.bytes)}</p>
-          </div>
-        </div>
-      ),
-    },
-    { key: 'uploaded', label: 'Uploaded', render: (row) => new Date(row.createdAt).toLocaleDateString() },
-    {
-      key: 'actions',
-      label: '',
-      className: 'text-right',
-      mobileFull: true,
-      render: (row) => (
-        <div className="flex justify-end items-center gap-1.5">
-          <a href={row.url} target="_blank" rel="noreferrer" className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-brand-700 hover:bg-brand-50">
-            <Download className="h-3.5 w-3.5" /> Open
-          </a>
-          {row.program?.id && (
-            <Link
-              to={`/registrar/course-registration/programme/${row.program.id}`}
-              className="focus-ring inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
-              title="View all courses in this programme"
-            >
-              <BookOpen className="h-3.5 w-3.5" />
-            </Link>
-          )}
-          <Button size="sm" variant="ghost" onClick={() => setRemovingMaterial(row)} aria-label={`Remove ${row.fileName}`}>
-            <Trash2 className="h-3.5 w-3.5 text-rose-600" />
-          </Button>
-        </div>
-      ),
-    },
-  ];
 
   const terms = useMemo(() => {
     const list = calendar.data?.terms || [];
@@ -334,142 +300,135 @@ export default function RegistrarCourseRegistration() {
     <div className="space-y-6">
       <RegistrarPageHeader
         title="Course registration"
-        subtitle="Manage programme course materials and register students against active offerings."
+        subtitle="Select a batch, browse departments and view programmes to register and manage stage courses."
       />
 
-      <Card>
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-900">Course materials</h2>
-            <p className="mt-0.5 text-xs text-slate-500">Add course materials with automated codes and filenames, and filter across departments and programmes.</p>
-          </div>
-          <Button onClick={() => setMaterialModal(true)} className="gap-1.5"><Plus className="h-4 w-4" /> Add material</Button>
-        </div>
-        <div className="border-b border-slate-100 px-5 py-3 space-y-3">
-          {/* Department tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">Dept:</span>
-            <button
-              type="button"
-              onClick={() => { setMaterialDepartment(''); setMaterialProgram(''); }}
-              className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${!materialDepartment ? 'bg-brand-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-            >
-              All departments
-            </button>
-            {(options.data?.departments || []).map((dept) => (
-              <button
-                key={dept.id}
-                type="button"
-                onClick={() => { setMaterialDepartment(dept.id); setMaterialProgram(''); }}
-                className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${materialDepartment === dept.id ? 'bg-brand-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-              >
-                {dept.code} · {dept.name}
-              </button>
-            ))}
-          </div>
-
-          {/* Programme tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">Prog:</span>
-            <button
-              type="button"
-              onClick={() => setMaterialProgram('')}
-              className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${!materialProgram ? 'border border-brand-300 bg-brand-50 text-brand-800 font-semibold' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
-            >
-              All programmes ({allMaterials.length})
-            </button>
-            {programsInDept.map((row) => (
-              <button
-                key={row.id}
-                type="button"
-                onClick={() => setMaterialProgram(row.id)}
-                className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${materialProgram === row.id ? 'border border-brand-300 bg-brand-50 text-brand-800 font-semibold' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
-              >
-                {row.code} ({materialCounts.get(row.id) || 0})
-              </button>
-            ))}
-          </div>
-
-          {/* Year / Level tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">Year / Level:</span>
-            <button
-              type="button"
-              onClick={() => setMaterialLevel('')}
-              className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${!materialLevel ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-            >
-              All Years & Levels
-            </button>
-            {[1, 2, 3, 4, 5].map((lvl) => (
-              <button
-                key={lvl}
-                type="button"
-                onClick={() => setMaterialLevel(String(lvl))}
-                className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${String(materialLevel) === String(lvl) ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-              >
-                Year {lvl} / Level {lvl}
-              </button>
-            ))}
-          </div>
-
-          {materialProgram && (
-            <div className="flex items-center justify-between pt-1">
-              <span className="text-xs text-slate-500">
-                Viewing courses for <span className="font-semibold text-slate-700">{programsInDept.find((p) => p.id === materialProgram)?.name || 'selected programme'}</span>
-              </span>
-              <Link
-                to={`/registrar/course-registration/programme/${materialProgram}`}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 transition"
-              >
-                <BookOpen className="h-3.5 w-3.5" /> View all programme courses & materials
-              </Link>
-            </div>
+      {/* Batch Tabs (No 'All Batches', only unique batches) */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+            Active Batches:
+          </span>
+          {activeBatchGroup && (
+            <span className="text-xs text-slate-500">
+              Selected stream: <strong className="text-slate-800 capitalize">{activeBatchGroup.category}</strong>
+            </span>
           )}
         </div>
-        <div className="px-5 py-3">
-          <SearchInput value={materialSearch} onChange={(event) => setMaterialSearch(event.target.value)} placeholder="Search course name, code or file" loading={materials.isFetching} />
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          {uniqueBatches.map((b) => {
+            const isActive = selectedBatchKey === b.key;
+            return (
+              <button
+                key={b.key}
+                type="button"
+                onClick={() => setSelectedBatchKey(b.key)}
+                className={`focus-ring shrink-0 rounded-xl px-4 py-2 text-xs font-semibold transition ${
+                  isActive
+                    ? 'bg-brand-600 text-white shadow-sm ring-2 ring-brand-400'
+                    : 'bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                {b.code} <span className="text-[11px] font-normal opacity-90 capitalize">({b.category})</span>
+              </button>
+            );
+          })}
+          {!uniqueBatches.length && (
+            <p className="text-xs text-slate-400">No active batches available.</p>
+          )}
         </div>
-        <RegistrarTable
-          columns={materialColumns}
-          rows={visibleMaterials}
-          loading={materials.isLoading}
-          error={materials.error ? materials.error?.response?.data?.message || 'Course materials could not be loaded.' : null}
-          onRetry={materials.refetch}
-          rowKey={(row) => row.id}
-          noResults={Boolean(materialProgram || materialSearch.trim())}
-          emptyTitle="No course materials yet"
-          emptyMessage="Use Add material to upload the first PDF or Word document."
-          noResultsTitle="No material matches"
-          noResultsMessage="Choose another programme or clear the search."
-        />
-      </Card>
+      </div>
 
-      <Card className="p-4 sm:p-5">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <SelectField label="Academic year" value={academicYear} onChange={(event) => { setAcademicYear(event.target.value); setTerm(''); setPage(1); setRecordPage(1); }}>
-            <option value="">All years</option>
-            {(options.data?.academicYears || []).map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}
-          </SelectField>
-          <SelectField label="Term" value={term} onChange={(event) => { setTerm(event.target.value); setPage(1); setRecordPage(1); }}>
-            <option value="">All terms</option>
-            {terms.map((name) => <option key={name} value={name}>{name}</option>)}
-          </SelectField>
-          <SelectField label="Programme" value={program} onChange={(event) => { setProgram(event.target.value); setPage(1); }}>
-            <option value="">All programmes</option>
-            {(options.data?.programs || []).map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
-          </SelectField>
-          <SelectField label="Level / year" value={level} onChange={(event) => { setLevel(event.target.value); setPage(1); }}>
-            <option value="">All levels</option>
-            {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>Level {value}</option>)}
-          </SelectField>
-          <SelectField label="Offering status" value={offeringStatus} onChange={(event) => { setOfferingStatus(event.target.value); setPage(1); }}>
-            <option value="open">Open for registration</option>
-            <option value="all">All statuses</option>
-            {['draft', 'in_progress', 'completed', 'cancelled'].map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
-          </SelectField>
-        </div>
-      </Card>
+      {/* Departments & Programmes List */}
+      <div className="space-y-4">
+        {departmentsWithPrograms.map((dept) => {
+          const isExpanded = expandedDepts[dept.id] !== false;
+          return (
+            <Card key={dept.id} className="overflow-hidden border border-slate-200">
+              <button
+                type="button"
+                onClick={() => toggleDept(dept.id)}
+                className="w-full flex items-center justify-between px-5 py-4 bg-slate-50 hover:bg-slate-100 transition text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="font-mono text-xs font-bold text-brand-700 bg-brand-100 px-2 py-0.5 rounded">
+                    {dept.code}
+                  </span>
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">{dept.name}</h3>
+                    <p className="text-xs text-slate-500">
+                      {dept.programs.length} programme{dept.programs.length === 1 ? '' : 's'} available in {activeBatchGroup?.code}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge tone="neutral">{dept.programs.length} Programmes</Badge>
+                  <span className="text-slate-400 p-1">
+                    {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                  </span>
+                </div>
+              </button>
 
+              {isExpanded && (
+                <div className="p-5 border-t border-slate-100 bg-white">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {dept.programs.map((prog) => {
+                      const qType = prog.qualificationType || 'degree';
+                      const durationText = qType === 'degree'
+                        ? `${prog.durationYears || 4} Years`
+                        : qType === 'diploma'
+                        ? `${prog.levels?.length || 4} Levels`
+                        : `${prog.shortTerm?.duration || 3} ${prog.shortTerm?.unit || 'Months'}`;
+
+                      return (
+                        <div
+                          key={prog.id}
+                          className="flex flex-col justify-between rounded-xl border border-slate-200 p-4 hover:border-brand-300 hover:shadow-sm transition bg-white"
+                        >
+                          <div>
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="font-mono text-xs font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded">
+                                {prog.code}
+                              </span>
+                              <Badge tone="brand">
+                                {qualificationLabel(qType)}
+                              </Badge>
+                            </div>
+                            <h4 className="mt-2 text-sm font-semibold text-slate-900">
+                              {prog.name}
+                            </h4>
+                            <p className="mt-1 text-xs text-slate-500">
+                              Duration: <strong className="text-slate-700">{durationText}</strong>
+                            </p>
+                          </div>
+                          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-end">
+                            <Link
+                              to={`/registrar/course-registration/programme/${prog.id}`}
+                              className="focus-ring inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 transition"
+                            >
+                              <BookOpen className="h-3.5 w-3.5" /> View programme
+                            </Link>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </Card>
+          );
+        })}
+
+        {!departmentsWithPrograms.length && (
+          <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center bg-white">
+            <GraduationCap className="mx-auto h-8 w-8 text-slate-400" />
+            <p className="mt-2 text-sm font-semibold text-slate-800">No departments found for this batch</p>
+            <p className="text-xs text-slate-500">Select another batch to view programmes.</p>
+          </div>
+        )}
+      </div>
+
+      {/* Course offerings table */}
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
           <div>
@@ -496,15 +455,7 @@ export default function RegistrarCourseRegistration() {
         </div>
       </Card>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        {['registered', 'dropped', 'completed'].map((value) => (
-          <div key={value} className="glass rounded-2xl p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{humanStatus(value)}</p>
-            <p className="mt-1 text-2xl font-bold text-slate-900">{counts[value] ?? (value === 'registered' ? recordPagination.total : 0)}</p>
-          </div>
-        ))}
-      </div>
-
+      {/* Registration records table */}
       <Card>
         <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -552,549 +503,7 @@ export default function RegistrarCourseRegistration() {
         onClose={() => setDropping(null)}
         onConfirm={(reason) => drop.mutate(reason)}
       />
-      <CourseMaterialModal
-        open={materialModal}
-        options={options.data}
-        existingMaterials={allMaterials}
-        initialProgram={materialProgram}
-        onClose={() => setMaterialModal(false)}
-        onSaved={() => queryClient.invalidateQueries({ queryKey: ['registrar', 'course-materials'] })}
-      />
-      <ConfirmDialog
-        open={Boolean(removingMaterial)}
-        title="Remove this course material?"
-        message={removingMaterial ? `${removingMaterial.courseCode} · ${removingMaterial.fileName}. The file is removed from storage.` : ''}
-        confirmLabel="Remove material"
-        tone="danger"
-        loading={removeMaterial.isPending}
-        onClose={() => setRemovingMaterial(null)}
-        onConfirm={() => removeMaterial.mutate()}
-      />
     </div>
-  );
-}
-
-function formatBytes(bytes) {
-  if (!bytes) return '—';
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function CourseMaterialModal({ open, options, existingMaterials = [], initialProgram, onClose, onSaved }) {
-  const [department, setDepartment] = useState('');
-  const [selectedBatches, setSelectedBatches] = useState([]);
-  const [form, setForm] = useState({ program: '', courseName: '', courseCode: '', creditHours: 3 });
-  const [file, setFile] = useState(null);
-  const [error, setError] = useState('');
-
-  const departments = options?.departments || [];
-  const allPrograms = options?.programs || [];
-  const allBatches = (options?.batches || []).filter((b) => b.status === 'active' || !b.status);
-
-  const uniqueBatches = useMemo(() => {
-    const map = new Map();
-    for (const b of allBatches) {
-      const cat = b.category || 'regular';
-      const key = `${b.code}::${cat}`;
-      const progId = b.program?.id || b.program;
-      const bId = b.id || b._id;
-      if (!map.has(key)) {
-        map.set(key, {
-          key,
-          code: b.code,
-          category: cat,
-          rawBatches: [b],
-          ids: bId ? [bId] : [],
-          programs: progId ? [progId] : [],
-        });
-      } else {
-        const item = map.get(key);
-        item.rawBatches.push(b);
-        if (bId && !item.ids.includes(bId)) {
-          item.ids.push(bId);
-        }
-        if (progId && !item.programs.includes(progId)) {
-          item.programs.push(progId);
-        }
-      }
-    }
-    return Array.from(map.values());
-  }, [allBatches]);
-
-  const filteredPrograms = useMemo(() => {
-    if (!department) return allPrograms;
-    return allPrograms.filter((p) => String(p.department?.id || p.department) === String(department));
-  }, [allPrograms, department]);
-
-  const autoGenerateCode = (progId) => {
-    const prog = allPrograms.find((p) => p.id === progId);
-    if (!prog) return '';
-    const progMaterials = (existingMaterials || []).filter(
-      (m) => (m.program?.id || m.program) === progId,
-    );
-    const count = progMaterials.length;
-    const nextNum = String(count + 1).padStart(3, '0');
-    return `${prog.code}-${nextNum}`;
-  };
-
-  useEffect(() => {
-    if (!open) return;
-    setError('');
-    setFile(null);
-    setSelectedBatches([]);
-    const initialProg = allPrograms.find((p) => p.id === initialProgram);
-    const initialDept = initialProg?.department || '';
-    setDepartment(initialDept);
-    const autoCode = initialProg ? autoGenerateCode(initialProg.id) : '';
-    setForm({
-      program: initialProgram || '',
-      courseName: '',
-      courseCode: autoCode,
-      creditHours: 3,
-    });
-  }, [open, initialProgram, allPrograms, existingMaterials]);
-
-  const selectedProgObj = useMemo(() => {
-    return allPrograms.find((p) => p.id === form.program);
-  }, [allPrograms, form.program]);
-
-  const durationInfo = useMemo(() => {
-    if (!selectedProgObj) return null;
-    const qType = selectedProgObj.qualificationType || 'degree';
-    if (qType === 'degree') {
-      const years = selectedProgObj.durationYears || 4;
-      return { type: 'Degree', unit: 'Years', total: `${years} Years`, courseStage: '1st Year Course' };
-    }
-    if (qType === 'diploma') {
-      const levels = selectedProgObj.levels?.length || 4;
-      return { type: 'Diploma', unit: 'Levels', total: `${levels} Levels`, courseStage: 'Level 1 Course' };
-    }
-    const duration = selectedProgObj.shortTerm?.duration || 12;
-    const unit = selectedProgObj.shortTerm?.unit || 'weeks';
-    return { type: 'Short-term', unit: 'Duration', total: `${duration} ${unit}`, courseStage: '1st Week Course' };
-  }, [selectedProgObj]);
-
-  const toggleBatch = (batchGroup) => {
-    const key = batchGroup.key;
-    const isSelected = selectedBatches.includes(key);
-
-    if (isSelected) {
-      setSelectedBatches((prev) => prev.filter((k) => k !== key));
-    } else {
-      if (selectedBatches.length >= 2) {
-        toast.info('You can select up to 2 active batches (e.g. Regular & Extension).');
-        return;
-      }
-      setSelectedBatches((prev) => [...prev, key]);
-
-      // If batch has an associated program, pre-select it and its department
-      const targetProgId = form.program && batchGroup.programs?.includes(form.program)
-        ? form.program
-        : batchGroup.programs?.[0];
-      if (targetProgId) {
-        const prog = allPrograms.find((p) => p.id === targetProgId);
-        if (prog) {
-          setForm((c) => ({
-            ...c,
-            program: c.program || prog.id,
-            courseCode: c.courseCode || autoGenerateCode(prog.id),
-          }));
-          if (prog.department) {
-            setDepartment((d) => d || (prog.department?.id || prog.department));
-          }
-        }
-      }
-    }
-  };
-
-  const handleProgramChange = (progId) => {
-    const prog = allPrograms.find((p) => p.id === progId);
-    const code = prog ? autoGenerateCode(prog.id) : '';
-    setForm((current) => ({
-      ...current,
-      program: progId,
-      courseCode: code || current.courseCode,
-    }));
-  };
-
-  const handleFileChange = (event) => {
-    const selectedFile = event.target.files?.[0] || null;
-    setFile(selectedFile);
-    if (selectedFile) {
-      const cleanName = selectedFile.name
-        .replace(/\.[^/.]+$/, '')
-        .replace(/[_-]/g, ' ')
-        .trim();
-      setForm((current) => ({
-        ...current,
-        courseName: cleanName,
-      }));
-    }
-  };
-
-  const save = useMutation({
-    mutationFn: async () => {
-      if (!form.program || !form.courseName.trim() || !form.courseCode.trim()) {
-        throw new Error('Programme, course name, course code and a file are required.');
-      }
-      if (!file) throw new Error('Choose a PDF or Word document.');
-      if (file.size > 50 * 1024 * 1024) throw new Error('The course material must be smaller than 50 MB.');
-      const extension = file.name.split('.').pop()?.toLowerCase();
-      if (!['pdf', 'doc', 'docx'].includes(extension)) throw new Error('Upload a PDF, DOC or DOCX file.');
-      const contentType = file.type || {
-        pdf: 'application/pdf',
-        doc: 'application/msword',
-        docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      }[extension];
-      const batchIds = [];
-      for (const key of selectedBatches) {
-        const group = uniqueBatches.find((ub) => ub.key === key);
-        if (!group) continue;
-        if (form.program) {
-          const match = group.rawBatches?.find(
-            (b) => String(b.program?.id || b.program) === String(form.program),
-          );
-          if (match) {
-            batchIds.push(match.id || match._id);
-          } else {
-            batchIds.push(...(group.ids || []));
-          }
-        } else {
-          batchIds.push(...(group.ids || []));
-        }
-      }
-      return (await api.post(`${REGISTRAR}/course-registration/resources`, file, {
-        params: {
-          program: form.program,
-          courseName: form.courseName.trim(),
-          courseCode: form.courseCode.trim().toUpperCase(),
-          creditHours: Number(form.creditHours) || 3,
-          filename: file.name,
-          level: 1,
-          batches: Array.from(new Set(batchIds.filter(Boolean))).join(','),
-        },
-        headers: { 'Content-Type': contentType },
-        timeout: 60_000,
-      })).data;
-    },
-    onSuccess: () => {
-      toast.success('Course material uploaded.');
-      onSaved?.();
-      onClose?.();
-    },
-    onError: (err) => {
-      const message = errorMessage(err, 'The course material could not be uploaded.');
-      setError(message);
-      toast.error(message);
-    },
-  });
-
-  const set = (field, value) => setForm((current) => ({ ...current, [field]: value }));
-
-  return (
-    <Modal
-      open={open}
-      title="Add course material"
-      subtitle="Attach course material to active batches and allocate 1st year / level 1 course."
-      size="lg"
-      onClose={save.isPending ? undefined : onClose}
-      dismissible={!save.isPending}
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose} disabled={save.isPending}>
-            Cancel
-          </Button>
-          <Button onClick={() => save.mutate()} loading={save.isPending} className="gap-1.5">
-            <Upload className="h-4 w-4" /> Upload material
-          </Button>
-        </>
-      }
-    >
-      <div className="grid gap-4">
-        {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
-
-        {/* Batch Tick Mode (Only Active Batches, Max 2) */}
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-600">
-              Select Active Batches (Tick up to 2 batches)
-            </span>
-            <span className="text-xs font-semibold text-brand-700">
-              {selectedBatches.length}/2 Selected
-            </span>
-          </div>
-          <p className="text-[11px] text-slate-500">
-            One programme can have both Regular and Extension active batches taking this course.
-          </p>
-          <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pt-1">
-            {uniqueBatches.map((b) => {
-              const isChecked = selectedBatches.includes(b.key);
-              return (
-                <label
-                  key={b.key}
-                  className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-1.5 text-xs transition ${
-                    isChecked
-                      ? 'border-brand-500 bg-brand-50 text-brand-900 font-semibold shadow-sm'
-                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={isChecked}
-                    onChange={() => toggleBatch(b)}
-                    className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600"
-                  />
-                  <span>{b.code}</span>
-                  <span className="text-[10px] text-slate-400 capitalize">({b.category || 'regular'})</span>
-                </label>
-              );
-            })}
-            {!uniqueBatches.length && <p className="text-xs text-slate-500">No active batches found.</p>}
-          </div>
-        </div>
-
-        {/* Duration stage badge */}
-        {durationInfo && (
-          <div className="rounded-xl bg-brand-50/80 border border-brand-200 p-3 text-xs text-brand-900 flex items-center justify-between">
-            <div>
-              <span className="font-bold">{durationInfo.type}:</span> {durationInfo.courseStage}
-              <span className="text-slate-500 ml-2">(Total Duration: {durationInfo.total})</span>
-            </div>
-            <Badge tone="brand">Duration: {durationInfo.unit}</Badge>
-          </div>
-        )}
-
-        <FormGrid>
-          <SelectField
-            label="Department"
-            value={department}
-            onChange={(event) => {
-              const deptId = event.target.value;
-              setDepartment(deptId);
-              setForm((current) => ({ ...current, program: '', courseCode: '' }));
-            }}
-            required
-          >
-            <option value="">Choose a department</option>
-            {departments.map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.code} · {row.name}
-              </option>
-            ))}
-          </SelectField>
-          <SelectField
-            label="Programme"
-            value={form.program}
-            onChange={(event) => handleProgramChange(event.target.value)}
-            disabled={!department && departments.length > 0}
-            required
-          >
-            <option value="">Choose a programme</option>
-            {filteredPrograms.map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.code} · {row.name}
-              </option>
-            ))}
-          </SelectField>
-          <Field
-            label="Course code"
-            value={form.courseCode}
-            onChange={(event) => set('courseCode', event.target.value)}
-            placeholder="e.g. CS-001"
-            hint="Auto-generated based on programme code. Can be customized."
-            required
-          />
-          <Field
-            label="Course name"
-            value={form.courseName}
-            onChange={(event) => set('courseName', event.target.value)}
-            placeholder="e.g. Introduction to Computing"
-            hint="Auto-filled from attached file name."
-            required
-          />
-          <Field
-            label="Credit hours"
-            type="number"
-            min="0.5"
-            max="1000"
-            step="0.5"
-            value={form.creditHours}
-            onChange={(event) => set('creditHours', event.target.value)}
-            required
-          />
-          <Field
-            label="PDF or Word document"
-            type="file"
-            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            onChange={handleFileChange}
-            hint="Maximum 50 MB. PDF, DOC or DOCX."
-            required
-          />
-        </FormGrid>
-      </div>
-    </Modal>
-  );
-}
-
-function CreateOfferingModal({ open, plans, teachers, onClose, onSaved }) {
-  const [planId, setPlanId] = useState('');
-  const [curriculumCourse, setCurriculumCourse] = useState('');
-  const [teacher, setTeacher] = useState('');
-  const [capacity, setCapacity] = useState('60');
-  const [schedule, setSchedule] = useState('');
-  const [status, setStatus] = useState('draft');
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (!open) return;
-    setPlanId('');
-    setCurriculumCourse('');
-    setTeacher('');
-    setCapacity('60');
-    setSchedule('');
-    setStatus('draft');
-    setError('');
-  }, [open]);
-
-  const entries = useQuery({
-    queryKey: ['registrar', 'plan-offerings', planId],
-    queryFn: async () => (await api.get(`${REGISTRAR}/curriculum/${planId}/offerings`)).data,
-    enabled: open && Boolean(planId),
-  });
-
-  const plan = plans.find((row) => row.id === planId);
-  const allEntries = entries.data?.entries || [];
-  const available = allEntries.filter((row) => !row.hasOffering && row.term);
-  const missingTerm = allEntries.filter((row) => !row.hasOffering && !row.term).length;
-  const selected = available.find((row) => row.id === curriculumCourse);
-
-  const save = useMutation({
-    mutationFn: async () => {
-      if (!planId) throw new Error('Choose a published curriculum plan.');
-      if (!curriculumCourse) throw new Error('Choose the curriculum course to offer.');
-      const seats = Number(capacity);
-      if (!Number.isInteger(seats) || seats < 1 || seats > 500) {
-        throw new Error('Capacity must be a whole number between 1 and 500.');
-      }
-      return (
-        await api.post(`${REGISTRAR}/offerings`, {
-          curriculumCourse,
-          ...(teacher ? { teacher } : {}),
-          capacity: seats,
-          ...(schedule.trim() ? { schedule: schedule.trim() } : {}),
-          status,
-        })
-      ).data;
-    },
-    onSuccess: () => {
-      toast.success(
-        `${selected?.course?.code || 'The course'} offering created${
-          status === 'open' ? ' and open for registration.' : ' as a draft.'
-        }`,
-      );
-      onSaved();
-      onClose();
-    },
-    onError: (saveError) => setError(errorMessage(saveError, 'The offering could not be created.')),
-  });
-
-  return (
-    <Modal
-      open={open}
-      title="Create a course offering"
-      subtitle="Offer a course from a published curriculum plan, then assign a teacher and open registration."
-      size="lg"
-      onClose={save.isPending ? undefined : onClose}
-      dismissible={!save.isPending}
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button>
-          <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!planId || !curriculumCourse}>
-            Create offering
-          </Button>
-        </>
-      }
-    >
-      <div className="grid gap-4">
-        {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
-        <SelectField
-          label="Published curriculum plan"
-          value={planId}
-          onChange={(event) => {
-            setPlanId(event.target.value);
-            setCurriculumCourse('');
-            setError('');
-          }}
-          hint={plans.length ? 'Only published plans can produce offerings.' : 'Publish a curriculum plan first.'}
-          required
-        >
-          <option value="">Choose a plan</option>
-          {plans.map((row) => (
-            <option key={row.id} value={row.id}>
-              {row.title} · {row.program?.code || 'Programme'} · {row.academicYear?.label || 'Year'}
-            </option>
-          ))}
-        </SelectField>
-
-        {plan ? (
-          <div className="rounded-2xl bg-slate-50 px-4 py-3 text-xs text-slate-600">
-            <span className="font-semibold text-slate-800">{plan.program?.name || 'Programme'}</span>
-            <span className="mx-1.5">·</span>
-            {plan.academicYear?.label || 'Academic year'}
-            <span className="mx-1.5">·</span>
-            {available.length} course{available.length === 1 ? '' : 's'} still to offer
-          </div>
-        ) : null}
-
-        <SelectField
-          label="Curriculum course"
-          value={curriculumCourse}
-          onChange={(event) => setCurriculumCourse(event.target.value)}
-          disabled={!planId || entries.isLoading}
-          hint={
-            planId && !entries.isLoading && !available.length
-              ? missingTerm
-                ? `${missingTerm} course${missingTerm === 1 ? '' : 's'} need a term before they can be offered.`
-                : 'Every course in this plan already has an offering.'
-              : 'Only active curriculum courses with a term can be offered.'
-          }
-          required
-        >
-          <option value="">{entries.isLoading ? 'Loading courses...' : 'Choose a course'}</option>
-          {available.map((row) => (
-            <option key={row.id} value={row.id}>
-              {row.course?.code || 'Course'} · {row.course?.title || ''} · {row.term} · {levelLabel(row.level, plan?.program?.qualificationType)}
-            </option>
-          ))}
-        </SelectField>
-
-        {entries.isError ? (
-          <p className="rounded-xl bg-amber-50 px-3.5 py-2.5 text-sm text-amber-900">
-            {errorMessage(entries.error, 'The curriculum courses could not be loaded.')}
-          </p>
-        ) : selected ? (
-          <div className="grid gap-2 rounded-2xl border border-slate-100 px-4 py-3 text-xs text-slate-600 sm:grid-cols-3">
-            <span><span className="font-semibold text-slate-800">{selected.course?.code}</span> {selected.course?.title}</span>
-            <span>Term: {selected.term}</span>
-            <span>{selected.creditHours} credit hour{selected.creditHours === 1 ? '' : 's'}</span>
-          </div>
-        ) : null}
-
-        <FormGrid>
-          <SelectField label="Teacher" value={teacher} onChange={(event) => setTeacher(event.target.value)} hint="Optional. An active teacher can be assigned now or later.">
-            <option value="">Assign later</option>
-            {teachers.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
-          </SelectField>
-          <Field label="Capacity" type="number" min="1" max="500" value={capacity} onChange={(event) => setCapacity(event.target.value)} required />
-          <Field label="Schedule" value={schedule} onChange={(event) => setSchedule(event.target.value)} placeholder="e.g. Mon 8:00-10:00, Room 4" />
-          <SelectField label="Status" value={status} onChange={(event) => setStatus(event.target.value)}>
-            {['draft', 'open', 'in_progress', 'completed', 'cancelled'].map((value) => (
-              <option key={value} value={value}>{humanStatus(value)}</option>
-            ))}
-          </SelectField>
-        </FormGrid>
-      </div>
-    </Modal>
   );
 }
 

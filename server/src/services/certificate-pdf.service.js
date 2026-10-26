@@ -23,7 +23,8 @@ const ETHIOPIC = /[\u1200-\u137f]/;
 const TEMPLATE = { width: 1200, height: 896, cropHeight: 836 };
 const TEMPLATE_SCALE = CERT_PAGE.height / TEMPLATE.cropHeight;
 const TEMPLATE_X = (CERT_PAGE.width - TEMPLATE.width * TEMPLATE_SCALE) / 2;
-const TEMPLATE_PATH = path.resolve(HERE, '../assets/certificate-template-clean.png');
+const TEMPLATE_PATH_JPG = path.resolve(HERE, '../assets/Graduation_certificate_template.jpg');
+const TEMPLATE_PATH_PNG = path.resolve(HERE, '../assets/certificate-template-clean.png');
 // A plain patch of the same paper, used to erase the sample fields without
 // introducing flat rectangles that would not match the certificate texture.
 const TEMPLATE_BLANK = { x: 900, y: 300, width: 150, height: 45 };
@@ -37,10 +38,13 @@ let templateCache;
 function templateBackground() {
   if (templateCache !== undefined) return templateCache;
   try {
-    fs.accessSync(TEMPLATE_PATH, fs.constants.R_OK);
-    // Return the path, not the bytes: PDFKit caches images by path, so the
-    // same background is embedded once even when it is clipped into patches.
-    templateCache = TEMPLATE_PATH;
+    if (fs.existsSync(TEMPLATE_PATH_JPG)) {
+      templateCache = TEMPLATE_PATH_JPG;
+    } else if (fs.existsSync(TEMPLATE_PATH_PNG)) {
+      templateCache = TEMPLATE_PATH_PNG;
+    } else {
+      templateCache = null;
+    }
   } catch {
     templateCache = null;
   }

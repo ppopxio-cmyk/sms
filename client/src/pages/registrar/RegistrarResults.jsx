@@ -425,32 +425,52 @@ export default function RegistrarResults() {
                 </div>
 
                 {/* Stage Submission Footer Actions */}
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 p-4">
-                  <div className="text-xs text-slate-500">
-                    Stage completion publishes all course results for {stageLabel} and forwards them to GPA calculation.
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      variant="primary"
-                      onClick={() => setStageSubmitModal(group)}
-                      className="gap-1.5"
-                    >
-                      <ClipboardCheck className="h-4 w-4" />
-                      Submit {stageLabel} is Finished (Sent to GPA)
-                    </Button>
+                {(() => {
+                  const allCoursesReady =
+                    group.courses.length > 0 &&
+                    group.courses.every(
+                      (c) =>
+                        c.status === 'completed' ||
+                        c.status === 'published' ||
+                        ((c.counts?.submitted || 0) + (c.counts?.approved || 0) > 0),
+                    );
 
-                    {isAllYearsDone && (
-                      <Button
-                        variant="secondary"
-                        onClick={() => setProgramFinishModal(group)}
-                        className="gap-1.5 border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
-                      >
-                        <Award className="h-4 w-4 text-emerald-600" />
-                        Submit Programme Batch All Years Finished
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                  return (
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 p-4">
+                      <div className="text-xs text-slate-500">
+                        {allCoursesReady
+                          ? `All course results for ${stageLabel} are submitted and ready to publish to transcripts and GPA calculation.`
+                          : `Cannot publish ${stageLabel}: not all course results have been submitted by teachers yet.`}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {!allCoursesReady && (
+                          <Badge tone="warning">Waiting for remaining course marks</Badge>
+                        )}
+                        <Button
+                          variant="primary"
+                          onClick={() => setStageSubmitModal(group)}
+                          disabled={!allCoursesReady}
+                          className="gap-1.5"
+                        >
+                          <ClipboardCheck className="h-4 w-4" />
+                          Submit {stageLabel} is Finished (Sent to GPA)
+                        </Button>
+
+                        {isAllYearsDone && (
+                          <Button
+                            variant="secondary"
+                            onClick={() => setProgramFinishModal(group)}
+                            disabled={!allCoursesReady}
+                            className="gap-1.5 border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                          >
+                            <Award className="h-4 w-4 text-emerald-600" />
+                            Submit Programme Batch All Years Finished
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </Card>
             );
           })}

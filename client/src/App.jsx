@@ -112,11 +112,23 @@ export default function App() {
       }
     };
 
+    const handleDblClick = (e) => {
+      const tag = e.target?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable) {
+        return;
+      }
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('click', handleFirstInteraction, { once: true });
+    window.addEventListener('dblclick', handleDblClick);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('click', handleFirstInteraction);
+      window.removeEventListener('dblclick', handleDblClick);
     };
   }, []);
 

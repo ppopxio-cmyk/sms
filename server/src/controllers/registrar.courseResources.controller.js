@@ -97,6 +97,7 @@ export const uploadCourseResource = asyncHandler(async (req, res) => {
         $set: {
           title: courseName.trim(),
           department: program.department,
+          program: program._id,
           creditHours: Number(creditHours) || 3,
           active: true,
           updatedBy: req.user.id,

@@ -292,8 +292,31 @@ export const submitStageComplete = asyncHandler(async (req, res) => {
   const { programId, level } = req.body;
   if (!programId || level === undefined) throw new AppError(400, 'STAGE_REQUIRED', 'Program and stage level are required.');
 
-  const offerings = await CourseOffering.find({ program: programId, level: Number(level) }).select('_id').lean();
+  const offerings = await CourseOffering.find({ program: programId, level: Number(level) }).select('_id status').lean();
+  if (!offerings.length) {
+    throw new AppError(400, 'NO_OFFERINGS', 'No course offerings found for this programme and stage.');
+  }
   const offeringIds = offerings.map((o) => o._id);
+
+  // Require that every course offering in this stage has submitted or approved marks
+  const unsubmitted = [];
+  for (const off of offerings) {
+    const hasSubmitted = await Result.exists({
+      offering: off._id,
+      status: { $in: ['submitted', 'under_review', 'approved', 'published'] },
+    });
+    if (!hasSubmitted) {
+      unsubmitted.push(off._id);
+    }
+  }
+
+  if (unsubmitted.length > 0) {
+    throw new AppError(
+      400,
+      'STAGE_INCOMPLETE',
+      `Cannot publish Year/Level ${level}: not all courses in this stage have submitted results. Teachers must submit marks for all courses before this stage can be published to GPA and transcripts.`
+    );
+  }
 
   const policy = await requireGradingPolicy();
   const results = await Result.find({ offering: { $in: offeringIds }, status: { $in: ['submitted', 'under_review', 'approved'] } });
@@ -728,40 +751,40 @@ export const gpaCgpa = asyncHandler(async (req, res) => {
   const rows = [];
   for (const student of students) {
     const studentResults = await publishedResultsForStudent(student._id);
-    if (studentResults.length > 0) {
-      const cumResult = calculateGpa(studentResults, policy);
+    const cumResult = studentResults.length > 0
+      ? calculateGpa(studentResults, policy)
+      : { gpa: null, credits: 0, qualityPoints: 0, courses: 0 };
 
-      let stageGpa = null;
-      let stageCredits = null;
-      let stageCourses = 0;
+    let stageGpa = null;
+    let stageCredits = null;
+    let stageCourses = 0;
 
-      if (query.level) {
-        const stageRows = studentResults.filter((r) => Number(r.offering?.level) === Number(query.level));
-        if (stageRows.length > 0) {
-          const sRes = calculateGpa(stageRows, policy);
-          stageGpa = sRes.gpa;
-          stageCredits = sRes.credits;
-          stageCourses = sRes.courses;
-        }
+    if (query.level) {
+      const stageRows = studentResults.filter((r) => Number(r.offering?.level) === Number(query.level));
+      if (stageRows.length > 0) {
+        const sRes = calculateGpa(stageRows, policy);
+        stageGpa = sRes.gpa;
+        stageCredits = sRes.credits;
+        stageCourses = sRes.courses;
       }
-
-      rows.push({
-        id: String(student._id),
-        studentId: student.studentId,
-        fullName: student.fullName,
-        program: student.program?.name,
-        batch: student.batch?.code,
-        level: student.level,
-        cgpa: cumResult.gpa,
-        credits: cumResult.credits,
-        qualityPoints: cumResult.qualityPoints,
-        courseCount: cumResult.courses,
-        stageGpa,
-        stageCredits,
-        stageCourses,
-        courses: studentResults,
-      });
     }
+
+    rows.push({
+      id: String(student._id),
+      studentId: student.studentId,
+      fullName: student.fullName,
+      program: student.program?.name,
+      batch: student.batch?.code,
+      level: student.level,
+      cgpa: cumResult.gpa,
+      credits: cumResult.credits,
+      qualityPoints: cumResult.qualityPoints,
+      courseCount: cumResult.courses,
+      stageGpa,
+      stageCredits,
+      stageCourses,
+      courses: studentResults,
+    });
   }
 
   res.json({

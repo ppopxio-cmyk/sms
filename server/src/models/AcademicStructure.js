@@ -56,6 +56,7 @@ const programSchema = new Schema(
     teachers: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     academicYears: [{ type: Schema.Types.ObjectId, ref: 'AcademicYear' }],
     graduationPolicy: { type: graduationPolicySchema, default: () => ({}) },
+    finalizedStages: [{ type: Number }],
     description: { type: String, trim: true, maxlength: 1000, default: '' },
     active: { type: Boolean, default: true, index: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },

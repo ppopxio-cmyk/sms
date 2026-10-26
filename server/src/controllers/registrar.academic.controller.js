@@ -502,6 +502,19 @@ export const assignProgramTeacher = asyncHandler(async (req, res) => {
   res.status(201).json({ assignment });
 });
 
+export const finalizeProgramStage = asyncHandler(async (req, res) => {
+  const stage = Number(req.body.stage);
+  if (!stage || stage < 1) throw new AppError(400, 'INVALID_STAGE', 'Valid stage number is required.');
+  const program = await Program.findById(req.valid.params.id);
+  if (!program) throw new AppError(404, 'PROGRAM_NOT_FOUND', 'That programme was not found.');
+  if (!program.finalizedStages) program.finalizedStages = [];
+  if (!program.finalizedStages.includes(stage)) {
+    program.finalizedStages.push(stage);
+    await program.save();
+  }
+  res.json({ success: true, finalizedStages: program.finalizedStages });
+});
+
 export const calendar = asyncHandler(async (_req, res) => {
   const [years, terms, events] = await Promise.all([
     AcademicYear.find().sort({ startDate: -1 }).lean(),
@@ -1963,7 +1976,16 @@ export const offeringOptions = asyncHandler(async (_req, res) => {
   ]);
   res.json({
     departments: departments.map((row) => ({ id: String(row._id), code: row.code, name: row.name })),
-    programs: programs.map((row) => ({ id: String(row._id), code: row.code, name: row.name, department: String(row.department) })),
+    programs: programs.map((row) => ({
+      id: String(row._id),
+      code: row.code,
+      name: row.name,
+      department: String(row.department),
+      qualificationType: row.qualificationType,
+      durationYears: row.durationYears,
+      levels: row.levels,
+      shortTerm: row.shortTerm,
+    })),
     academicYears: years.map((row) => ({ id: String(row._id), label: row.label, isCurrent: row.isCurrent, status: row.status })),
     teachers: teachers.map((row) => ({ id: String(row._id), name: row.name || row.email, email: row.email })),
     plans: plans.map((row) => ({

@@ -349,6 +349,30 @@ export const verifyDocument = asyncHandler(async (req, res) => {
 });
 
 export const certificateMeta = asyncHandler(async (_req, res) => {
-  const template = await CertificateTemplate.findOne({ active: true }).select('name version certificateTitle photoPolicy signatoryName signatoryTitle institutionName institutionNameAmharic verificationBaseUrl').lean();
+  let template = await CertificateTemplate.findOne({ active: true }).select('name version certificateTitle photoPolicy signatoryName signatoryTitle institutionName institutionNameAmharic verificationBaseUrl').lean();
+  if (!template) {
+    template = await CertificateTemplate.findOneAndUpdate(
+      { name: 'Graduation Certificate Template' },
+      {
+        $setOnInsert: {
+          name: 'Graduation Certificate Template',
+          version: 1,
+          active: true,
+          institutionName: 'College of Higher Education',
+          institutionNameAmharic: 'የከፍተኛ ትምህርት ኮሌጅ',
+          certificateTitle: 'Certificate of Graduation',
+          certificatePrefix: 'CERT',
+          signatoryName: 'Dr. Abebe Bekele',
+          signatoryTitle: 'Dean & Academic Registrar',
+          photoPolicy: 'optional',
+          theme: { primary: '#123b2d', accent: '#b38b4d', paper: '#fffdf7' },
+          seal: { url: '/assets/Graduation_certificate_template.jpg', filePath: 'Graduation_certificate_template.jpg' },
+          signature: { url: '/assets/Graduation_certificate_template.jpg', filePath: 'Graduation_certificate_template.jpg' },
+          verificationBaseUrl: 'http://localhost:5173/verify',
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    ).lean();
+  }
   res.json({ template: template ? { ...template, id: String(template._id), _id: undefined } : null });
 });

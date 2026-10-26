@@ -81,7 +81,7 @@ import {
   removePlanCourse, reorderPlanCourses, publishPlan, archivePlan, clonePlan, createCourse,
   listOfferings, offeringOptions, planOfferings, createOffering, updateOffering,
   registrationEligible, createRegistrations, offeringCandidates, registerOfferingStudents,
-  listRegistrations, dropRegistration, programDetail, assignProgramTeacher,
+  listRegistrations, dropRegistration, programDetail, assignProgramTeacher, finalizeProgramStage,
 } from '../controllers/registrar.academic.controller.js';
 import {
   listCourseResources, uploadCourseResource, removeCourseResource,
@@ -156,6 +156,7 @@ r.post('/academic-structure/programs', requirePermission('structure:manage'), va
 r.patch('/academic-structure/programs/:id', requirePermission('structure:manage'), validate(idParamSchema, 'params'), validate(programUpdateSchema), updateProgram);
 r.delete('/academic-structure/programs/:id', requirePermission('structure:manage'), validate(idParamSchema, 'params'), deleteProgram);
 r.post('/academic-structure/programs/:id/assignments', requirePermission('structure:manage'), validate(idParamSchema, 'params'), assignProgramTeacher);
+r.post('/academic-structure/programs/:id/finalize-stage', requirePermission('structure:manage'), validate(idParamSchema, 'params'), finalizeProgramStage);
 r.post('/academic-structure/courses', requirePermission('structure:manage'), validate(courseCreateSchema), createCourse);
 r.post('/courses', requirePermission('curriculum:manage'), validate(courseCreateSchema), createCourse);
 r.get('/academic-calendar', requirePermission('calendar:view'), calendar);
