@@ -1,11 +1,17 @@
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { audit } from '../services/audit.service.js';
+import { AppError } from '../utils/AppError.js';
+import { User } from '../models/User.js';
+import { sendCode } from '../services/codeDelivery.js';
+import { checkCode } from '../services/code.service.js';
 import {
   attendanceOverview,
   attendanceRoster,
   finalizeAttendance,
   saveAttendance,
   attendanceHistory,
+  exportAttendanceHistoryData,
+  finalizeCourseAttendance,
 } from '../services/teacherAttendance.service.js';
 
 export const overview = asyncHandler(async (req, res) => {
@@ -57,4 +63,45 @@ export const finalize = asyncHandler(async (req, res) => {
 
 export const history = asyncHandler(async (req, res) => {
   res.json(await attendanceHistory(req.user.id, req.valid.params.assignmentId, req.valid.query));
+});
+
+export const exportHistory = asyncHandler(async (req, res) => {
+  const format = req.query.format || 'xlsx';
+  const data = await exportAttendanceHistoryData(req.user.id, req.valid.params.assignmentId, format);
+  audit({
+    req,
+    action: 'teacher.attendance_history_exported',
+    targetType: 'attendance',
+    targetId: req.valid.params.assignmentId,
+    meta: { format, rowCount: data.rowCount },
+  });
+  res.setHeader('Content-Type', data.contentType);
+  res.setHeader('Content-Disposition', `attachment; filename="${data.filename}"`);
+  res.send(data.buffer);
+});
+
+export const requestFinalizeCode = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.id).lean();
+  if (!user?.email) throw new AppError(400, 'NO_EMAIL', 'Your account has no email address.');
+  await sendCode(user.email, 'attendance_finalize', { reason: 'Finalize course attendance and sync marks' });
+  res.json({ message: 'A confirmation code has been emailed to you.' });
+});
+
+export const finalizeCourse = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.id).lean();
+  if (!user?.email) throw new AppError(400, 'NO_EMAIL', 'Your account has no email address.');
+  const code = String(req.body.code || '').trim();
+  if (!code) throw new AppError(400, 'CODE_REQUIRED', 'Confirmation code is required.');
+  const valid = await checkCode(user.email, 'attendance_finalize', code);
+  if (!valid) throw new AppError(400, 'CODE_INVALID', 'The code is invalid or has expired.');
+
+  const result = await finalizeCourseAttendance(req.user.id, req.valid.params.assignmentId);
+  audit({
+    req,
+    action: 'teacher.course_attendance_finalized',
+    targetType: 'attendance',
+    targetId: req.valid.params.assignmentId,
+    meta: { policyMark: result.policyMark, syncedCount: result.syncedCount },
+  });
+  res.json({ message: 'Course attendance finalized and synced to marks.', ...result });
 });

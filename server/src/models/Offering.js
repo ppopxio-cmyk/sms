@@ -33,6 +33,8 @@ const offeringSchema = new Schema(
     assessmentMode: { type: String, enum: ['numeric', 'competency'], default: 'numeric' },
     capacity: { type: Number, min: 1, max: 500, default: 60 },
     registeredCount: { type: Number, min: 0, default: 0 },
+    attendanceClosed: { type: Boolean, default: false },
+    attendanceClosedAt: { type: Date, default: null },
     status: { type: String, enum: OFFERING_STATUSES, default: 'draft', index: true },
     schedule: { type: String, trim: true, maxlength: 300, default: '' },
     teacherHistory: { type: [teacherChangeSchema], default: [] },

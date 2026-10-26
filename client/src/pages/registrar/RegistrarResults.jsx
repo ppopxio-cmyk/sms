@@ -1,12 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { AlertTriangle, ClipboardCheck, Eye, PencilLine, ThumbsDown } from 'lucide-react';
+import {
+  AlertTriangle,
+  Award,
+  BookOpen,
+  CheckCircle2,
+  ClipboardCheck,
+  Eye,
+  GraduationCap,
+  Layers,
+  Mail,
+  Send,
+  ThumbsDown,
+} from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import {
   REGISTRAR,
   displayDateTime,
   humanStatus,
+  levelLabel,
   toneForStatus,
 } from '../../lib/registrar';
 import { useDebounced } from '../../lib/useDebounced';
@@ -19,24 +32,29 @@ import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Field from '../../components/ui/Field';
 import Modal from '../../components/ui/Modal';
+import CodeInput from '../../components/ui/CodeInput';
 import Pagination from '../../components/ui/Pagination';
 import SearchInput from '../../components/ui/SearchInput';
+import { EmptyState } from '../../components/ui/StatePanel';
+import { SkeletonCard } from '../../components/ui/Skeleton';
 
 export default function RegistrarResults() {
   const queryClient = useQueryClient();
+  const [selectedDept, setSelectedDept] = useState('');
+  const [selectedProg, setSelectedProg] = useState('');
+  const [selectedLevel, setSelectedLevel] = useState('');
   const [search, setSearch] = useState('');
   const debounced = useDebounced(search, 300);
-  const [academicYear, setAcademicYear] = useState('');
-  const [term, setTerm] = useState('');
-  const [status, setStatus] = useState('all');
-  const [sort, setSort] = useState('createdAt');
-  const [order, setOrder] = useState('desc');
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(20);
-  const [detailId, setDetailId] = useState(null);
-  const [rejecting, setRejecting] = useState(null);
-  const [correcting, setCorrecting] = useState(null);
-  const [publishing, setPublishing] = useState(null);
+
+  // Single offering modal view
+  const [viewOfferingId, setViewOfferingId] = useState(null);
+
+  // Verification modal state for stage completion
+  const [stageSubmitModal, setStageSubmitModal] = useState(null); // { programId, programName, level, durationYears, totalYears }
+  const [programFinishModal, setProgramFinishModal] = useState(null); // { programId, programName, batchId, batchCode }
+  const [verificationCode, setVerificationCode] = useState('');
+
+  // Course level review actions
   const [acceptingSubmission, setAcceptingSubmission] = useState(null);
   const [decliningSubmission, setDecliningSubmission] = useState(null);
   const [publishingSubmission, setPublishingSubmission] = useState(null);
@@ -46,92 +64,61 @@ export default function RegistrarResults() {
     queryFn: async () => (await api.get(`${REGISTRAR}/students/options`)).data,
     staleTime: 5 * 60_000,
   });
-  const calendar = useQuery({
-    queryKey: ['registrar', 'calendar'],
-    queryFn: async () => (await api.get(`${REGISTRAR}/academic-calendar`)).data,
+
+  const structure = useQuery({
+    queryKey: ['registrar', 'structure'],
+    queryFn: async () => (await api.get(`${REGISTRAR}/academic-structure`)).data,
     staleTime: 5 * 60_000,
   });
 
-  const params = useMemo(() => ({
-    page,
-    limit,
-    ...(debounced.trim() ? { search: debounced.trim() } : {}),
-    ...(academicYear ? { academicYear } : {}),
-    ...(term ? { term } : {}),
-    ...(status !== 'all' ? { status } : {}),
-    sort,
-    order,
-  }), [page, limit, debounced, academicYear, term, status, sort, order]);
-
-  const query = useQuery({
-    queryKey: ['registrar', 'results', params],
-    queryFn: async () => (await api.get(`${REGISTRAR}/results`, { params })).data,
-    placeholderData: (previous) => previous,
+  const submissions = useQuery({
+    queryKey: ['registrar', 'result-submissions'],
+    queryFn: async () => (await api.get(`${REGISTRAR}/results/submissions`)).data,
   });
 
-  const submissionParams = useMemo(() => ({
-    ...(academicYear ? { academicYear } : {}),
-    ...(term ? { term } : {}),
-  }), [academicYear, term]);
-
-  const submissions = useQuery({
-    queryKey: ['registrar', 'result-submissions', submissionParams],
-    queryFn: async () => (await api.get(`${REGISTRAR}/results/submissions`, { params: submissionParams })).data,
+  const singleOffering = useQuery({
+    queryKey: ['registrar', 'offering-results', viewOfferingId],
+    queryFn: async () => (await api.get(`${REGISTRAR}/results/offerings/${viewOfferingId}`)).data,
+    enabled: Boolean(viewOfferingId),
   });
 
   const submissionRows = submissions.data?.rows ?? [];
-  const rows = query.data?.rows ?? [];
-  const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0, limit };
-  const counts = query.data?.counts ?? {};
-  const missing = query.data?.missing ?? [];
-  const filtered = Boolean(debounced.trim() || academicYear || term || status !== 'all');
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['registrar', 'results'] });
     queryClient.invalidateQueries({ queryKey: ['registrar', 'result-submissions'] });
+    queryClient.invalidateQueries({ queryKey: ['registrar', 'results'] });
+    queryClient.invalidateQueries({ queryKey: ['registrar', 'offering-results'] });
     queryClient.invalidateQueries({ queryKey: ['registrar', 'dashboard'] });
   };
 
-  const simpleAction = useMutation({
-    mutationFn: async ({ id, action }) => (await api.post(`${REGISTRAR}/results/${id}/${action}`)).data,
-    onSuccess: (_data, variables) => {
-      toast.success(variables.action === 'review' ? 'Result taken under review.' : variables.action === 'approve' ? 'Result approved and graded.' : 'Result published.');
-      invalidate();
-    },
-    onError: (err) => toast.error(errorMessage(err, 'The result action could not be completed.')),
+  const requestCodeMutation = useMutation({
+    mutationFn: async () => (await api.post(`${REGISTRAR}/results/request-submit-code`)).data,
+    onSuccess: () => toast.success('A 6-digit confirmation code has been emailed to you.'),
+    onError: (err) => toast.error(errorMessage(err, 'Could not send verification code.')),
   });
 
-  const publish = useMutation({
-    mutationFn: async () => (await api.post(`${REGISTRAR}/results/${publishing.id}/publish`)).data,
-    onSuccess: () => {
-      toast.success('Result published. It is now available to the student record.');
-      setPublishing(null);
+  const submitStageMutation = useMutation({
+    mutationFn: async ({ programId, level, code }) =>
+      (await api.post(`${REGISTRAR}/results/submit-stage-complete`, { programId, level, code })).data,
+    onSuccess: (data) => {
+      toast.success(data.message || 'Stage results submitted and finalized for GPA calculation!');
+      setStageSubmitModal(null);
+      setVerificationCode('');
       invalidate();
     },
-    onError: (err) => toast.error(errorMessage(err, 'The result could not be published.')),
+    onError: (err) => toast.error(errorMessage(err, 'Could not submit stage.')),
   });
 
-  const reject = useMutation({
-    mutationFn: async (reason) => (await api.post(`${REGISTRAR}/results/${rejecting.id}/reject`, { reason })).data,
-    onSuccess: () => {
-      toast.success('Result returned for correction.');
-      setRejecting(null);
+  const submitProgramMutation = useMutation({
+    mutationFn: async ({ programId, batchId, code }) =>
+      (await api.post(`${REGISTRAR}/results/submit-program-finished`, { programId, batchId, code })).data,
+    onSuccess: (data) => {
+      toast.success(data.message || 'Programme all years finished and verified!');
+      setProgramFinishModal(null);
+      setVerificationCode('');
       invalidate();
     },
-    onError: (err) => toast.error(errorMessage(err, 'The result could not be rejected.')),
-  });
-
-  const correct = useMutation({
-    mutationFn: async ({ totalMark, reason }) => (await api.patch(`${REGISTRAR}/results/${correcting.id}/correct`, {
-      totalMark: Number(totalMark),
-      reason,
-    })).data,
-    onSuccess: () => {
-      toast.success('Correction recorded. The result is under review and is not silently overwritten.');
-      setCorrecting(null);
-      invalidate();
-    },
-    onError: (err) => toast.error(errorMessage(err, 'The correction could not be recorded.')),
+    onError: (err) => toast.error(errorMessage(err, 'Could not complete programme.')),
   });
 
   const approveSubmission = useMutation({
@@ -145,7 +132,8 @@ export default function RegistrarResults() {
   });
 
   const declineSubmission = useMutation({
-    mutationFn: async ({ row, reason }) => (await api.post(`${REGISTRAR}/results/submissions/${row.id}/decline`, { reason })).data,
+    mutationFn: async ({ row, reason }) =>
+      (await api.post(`${REGISTRAR}/results/submissions/${row.id}/decline`, { reason })).data,
     onSuccess: (data) => {
       toast.success(`${data.updated} result${data.updated === 1 ? '' : 's'} returned for correction.`);
       setDecliningSubmission(null);
@@ -164,383 +152,556 @@ export default function RegistrarResults() {
     onError: (err) => toast.error(errorMessage(err, 'The course results could not be published.')),
   });
 
-  const columns = [
-    {
-      key: 'student',
-      label: 'Student',
-      render: (row) => (
-        <div>
-          <p className="text-sm font-semibold text-slate-900">{row.student?.fullName || '—'}</p>
-          <p className="text-xs text-slate-500">{row.student?.studentId || '—'}</p>
-        </div>
-      ),
-    },
-    {
-      key: 'course',
-      label: 'Course',
-      render: (row) => (
-        <div>
-          <p className="text-sm font-semibold text-slate-800">{row.course?.code || '—'}</p>
-          <p className="text-xs text-slate-500">{row.course?.title || '—'}</p>
-        </div>
-      ),
-    },
-    {
-      key: 'mark',
-      label: 'Mark / grade',
-      render: (row) => (
-        <div>
-          <p className="text-sm font-semibold tabular-nums text-slate-800">{row.totalMark ?? '—'}</p>
-          <p className="text-xs text-slate-500">{row.letterGrade || 'Ungraded'}{row.gradePoint !== undefined ? ` · ${row.gradePoint}` : ''}</p>
-        </div>
-      ),
-    },
-    { key: 'year', label: 'Year / term', render: (row) => `${row.academicYear || '—'} · ${row.term || row.offering?.term || '—'}` },
-    { key: 'status', label: 'Status', render: (row) => <Badge tone={toneForStatus(row.status)}>{humanStatus(row.status)}</Badge> },
-    {
-      key: 'actions',
-      label: '',
-      className: 'text-right',
-      mobileFull: true,
-      render: (row) => (
-        <div className="flex flex-wrap justify-end gap-1.5">
-          <Button size="sm" variant="ghost" onClick={() => setDetailId(row.id)} aria-label="Open result"><Eye className="h-3.5 w-3.5" /></Button>
-          {['submitted', 'rejected'].includes(row.status) ? (
-            <Button size="sm" variant="secondary" onClick={() => simpleAction.mutate({ id: row.id, action: 'review' })}>Review</Button>
-          ) : null}
-          {['submitted', 'under_review'].includes(row.status) ? (
-            <Button size="sm" onClick={() => simpleAction.mutate({ id: row.id, action: 'approve' })}>Approve</Button>
-          ) : null}
-          {['approved', 'submitted', 'under_review'].includes(row.status) ? (
-            <Button size="sm" variant="secondary" onClick={() => setPublishing(row)}>Publish</Button>
-          ) : null}
-          {['submitted', 'under_review', 'approved'].includes(row.status) ? (
-            <Button size="sm" variant="ghost" onClick={() => setRejecting(row)} aria-label="Reject result"><ThumbsDown className="h-3.5 w-3.5 text-rose-500" /></Button>
-          ) : null}
-          {['approved', 'published'].includes(row.status) ? (
-            <Button size="sm" variant="ghost" onClick={() => setCorrecting(row)} aria-label="Correct result"><PencilLine className="h-3.5 w-3.5" /></Button>
-          ) : null}
-        </div>
-      ),
-    },
-  ];
+  // Filter departments and programmes
+  const departments = structure.data?.departments || [];
+  const rawPrograms = structure.data?.programs || [];
+
+  const filteredPrograms = useMemo(() => {
+    if (!selectedDept) return rawPrograms;
+    return rawPrograms.filter((p) => p.department?.id === selectedDept || p.department === selectedDept);
+  }, [rawPrograms, selectedDept]);
+
+  // Group submitted rows by Programme + Level
+  const groupedSubmissions = useMemo(() => {
+    const map = new Map();
+    for (const row of submissionRows) {
+      const prog = row.program;
+      const dept = row.department;
+      const progId = prog?.id || 'unknown-prog';
+      const level = row.level || 1;
+      const key = `${progId}-lvl-${level}`;
+
+      if (selectedDept && dept?.id !== selectedDept) continue;
+      if (selectedProg && progId !== selectedProg) continue;
+      if (selectedLevel && String(level) !== String(selectedLevel)) continue;
+
+      if (!map.has(key)) {
+        const fullProg = rawPrograms.find((p) => p.id === progId);
+        const qType = prog?.qualificationType || fullProg?.qualificationType || 'degree';
+        const totalYears = fullProg?.durationYears || prog?.durationYears || (qType === 'degree' ? 4 : 4);
+        const totalLevels = fullProg?.levels?.length || (qType === 'diploma' ? 4 : null);
+        const shortTermDuration = fullProg?.shortTermDuration || prog?.shortTerm?.duration || 12;
+
+        map.set(key, {
+          key,
+          programId: progId,
+          programName: prog?.name || 'Programme',
+          programCode: prog?.code || 'PROG',
+          departmentName: dept?.name || 'Department',
+          qualificationType: qType,
+          level,
+          totalYears,
+          totalLevels,
+          shortTermDuration,
+          batchId: row.batch?.id,
+          batchCode: row.batch?.code,
+          category: row.category || 'regular',
+          courses: [],
+          allPublished: true,
+          allApproved: true,
+          totalStudentsCount: 0,
+        });
+      }
+
+      const group = map.get(key);
+      group.courses.push(row);
+      group.totalStudentsCount += row.counts?.total || 0;
+      if (row.status !== 'approved' && row.status !== 'published') {
+        group.allApproved = false;
+      }
+      if (row.status !== 'published') {
+        group.allPublished = false;
+      }
+    }
+    return Array.from(map.values());
+  }, [submissionRows, selectedDept, selectedProg, selectedLevel, rawPrograms]);
 
   return (
     <div className="space-y-6">
       <RegistrarPageHeader
-        title="Results review"
-        subtitle="Review submitted marks against the configured grading policy. Approval sets the letter grade; corrections are versioned rather than overwritten."
+        title="Submitted Course Results"
+        subtitle="Only course results submitted by teachers are displayed. Grouped by Programme and Year/Level, review courses, open single course mark sheets, and submit finished stages for GPA/CGPA calculation."
       />
 
-      <section className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {['all', 'submitted', 'under_review', 'approved', 'published', 'rejected'].map((value) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => { setStatus(value); setPage(1); }}
-            className={`focus-ring rounded-2xl border p-3 text-left transition ${status === value ? 'border-brand-200 bg-brand-50/70' : 'border-slate-100 bg-white/70 hover:bg-white'}`}
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{humanStatus(value)}</p>
-            <p className="mt-1 text-xl font-bold text-slate-900">{counts[value] ?? 0}</p>
-          </button>
-        ))}
-      </section>
+      {/* Filter Tabs Bar (Dept:, Prog:, Year / Level:) */}
+      <Card>
+        <CardBody className="space-y-3 p-4">
+          {/* Department tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">Dept:</span>
+            <button
+              type="button"
+              onClick={() => { setSelectedDept(''); setSelectedProg(''); }}
+              className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${!selectedDept ? 'bg-brand-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            >
+              All departments
+            </button>
+            {departments.map((d) => (
+              <button
+                key={d.id}
+                type="button"
+                onClick={() => { setSelectedDept(d.id); setSelectedProg(''); }}
+                className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${selectedDept === d.id ? 'bg-brand-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                {d.code} · {d.name}
+              </button>
+            ))}
+          </div>
 
-      <Card className="p-4 sm:p-5">
-        <div className="flex flex-col gap-3">
-          <SearchInput value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search student name or ID" loading={query.isFetching} />
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <SelectField label="Academic year" value={academicYear} onChange={(event) => { setAcademicYear(event.target.value); setTerm(''); setPage(1); }}>
-              <option value="">All years</option>
-              {(options.data?.academicYears || []).map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}
-            </SelectField>
-            <SelectField label="Term" value={term} onChange={(event) => { setTerm(event.target.value); setPage(1); }}>
-              <option value="">All terms</option>
-              {Array.from(new Set((calendar.data?.terms || []).filter((row) => !academicYear || row.academicYear?.id === academicYear).map((row) => row.name))).map((name) => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </SelectField>
-            <SelectField label="Status" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
-              <option value="all">All statuses</option>
-              {['draft', 'submitted', 'under_review', 'approved', 'published', 'rejected'].map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
-            </SelectField>
-            <div>
-              <span className="mb-1.5 block text-sm font-medium text-slate-700">Sort</span>
-              <div className="flex gap-2">
-                <select value={sort} onChange={(event) => setSort(event.target.value)} className="focus-ring h-11 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm">
-                  <option value="createdAt">Newest</option>
-                  <option value="totalMark">Mark</option>
-                  <option value="status">Status</option>
-                </select>
-                <button type="button" onClick={() => setOrder((value) => value === 'asc' ? 'desc' : 'asc')} className="focus-ring h-11 w-11 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-600" aria-label="Toggle sort order">
-                  {order === 'asc' ? '↑' : '↓'}
-                </button>
-              </div>
+          {/* Programme tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">Prog:</span>
+            <button
+              type="button"
+              onClick={() => setSelectedProg('')}
+              className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${!selectedProg ? 'border border-brand-300 bg-brand-50 text-brand-800 font-semibold' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
+            >
+              All programmes ({filteredPrograms.length})
+            </button>
+            {filteredPrograms.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setSelectedProg(p.id)}
+                className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${selectedProg === p.id ? 'border border-brand-300 bg-brand-50 text-brand-800 font-semibold' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
+              >
+                {p.code} ({p.name})
+              </button>
+            ))}
+          </div>
+
+          {/* Year / Level tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">Stage / Level:</span>
+            <button
+              type="button"
+              onClick={() => setSelectedLevel('')}
+              className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${!selectedLevel ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            >
+              All Years & Levels
+            </button>
+            {[1, 2, 3, 4, 5].map((lvl) => (
+              <button
+                key={lvl}
+                type="button"
+                onClick={() => setSelectedLevel(String(lvl))}
+                className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${String(selectedLevel) === String(lvl) ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                Year {lvl} / Level {lvl}
+              </button>
+            ))}
+          </div>
+        </CardBody>
+      </Card>
+
+      {/* Grouped Programme Stages View */}
+      {submissions.isLoading ? (
+        <SkeletonCard lines={8} />
+      ) : groupedSubmissions.length === 0 ? (
+        <Card>
+          <CardBody>
+            <EmptyState
+              icon={ClipboardCheck}
+              title="No submitted results in this view"
+              message="When teachers finalize and submit mark sheets for their assigned courses, they will appear here grouped by Programme and Year/Level."
+            />
+          </CardBody>
+        </Card>
+      ) : (
+        <div className="space-y-6">
+          {groupedSubmissions.map((group) => {
+            const stageLabel =
+              group.qualificationType === 'degree'
+                ? `Year ${group.level}`
+                : group.qualificationType === 'diploma'
+                  ? `Level ${group.level}`
+                  : `Week ${group.level}`;
+
+            const totalDurationLabel =
+              group.qualificationType === 'degree'
+                ? `${group.totalYears} Years`
+                : group.qualificationType === 'diploma'
+                  ? `${group.totalLevels || 4} Levels`
+                  : `${group.shortTermDuration || 12} Weeks`;
+
+            const isAllYearsDone =
+              group.qualificationType === 'degree'
+                ? group.level >= (group.totalYears || 4)
+                : group.qualificationType === 'diploma'
+                  ? group.level >= (group.totalLevels || 4)
+                  : true;
+
+            return (
+              <Card key={group.key} className="overflow-hidden border border-slate-200/90 shadow-sm">
+                <div className="border-b border-slate-100 bg-slate-50/80 px-5 py-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700 shadow-sm">
+                        <GraduationCap className="h-5 w-5" />
+                      </span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-base font-bold text-slate-900">{group.programName}</h2>
+                          <Badge tone="brand">{stageLabel}</Badge>
+                        </div>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          {group.departmentName} · {group.programCode} · Total Duration: {totalDurationLabel} · Batch: {group.batchCode || 'Regular'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge tone={group.category === 'extension' ? 'warning' : 'neutral'}>
+                        {group.category === 'extension' ? 'Extension' : 'Regular'}
+                      </Badge>
+                      <Badge tone="neutral">{group.qualificationType.toUpperCase()}</Badge>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Courses in this Programme Year/Level */}
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-max border-collapse text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50/50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                        <th className="px-5 py-3">Course</th>
+                        <th className="px-4 py-3">Teacher</th>
+                        <th className="px-4 py-3 text-center">Marks Submitted</th>
+                        <th className="px-4 py-3 text-center">Status</th>
+                        <th className="px-5 py-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {group.courses.map((row) => (
+                        <tr key={row.id} className="hover:bg-slate-50/70 transition">
+                          <td className="px-5 py-3">
+                            <span className="font-mono font-bold text-brand-700">{row.course?.code}</span>
+                            <p className="font-medium text-slate-900 mt-0.5">{row.course?.title}</p>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {row.teacher?.name || 'No teacher assigned'}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="font-semibold text-slate-800">{row.counts?.total ?? 0} students</span>
+                            <div className="text-[10px] text-slate-400">
+                              {row.counts?.approved ?? 0} approved · {row.counts?.submitted ?? 0} submitted
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <Badge tone={toneForStatus(row.status)}>{humanStatus(row.status)}</Badge>
+                          </td>
+                          <td className="px-5 py-3 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => setViewOfferingId(row.id)}
+                                className="gap-1"
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                Open Course Marks
+                              </Button>
+                              {row.status === 'submitted' || row.status === 'under_review' ? (
+                                <Button
+                                  size="sm"
+                                  onClick={() => setAcceptingSubmission(row)}
+                                >
+                                  Accept & Grade
+                                </Button>
+                              ) : row.status === 'approved' ? (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => setPublishingSubmission(row)}
+                                >
+                                  Publish
+                                </Button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Stage Submission Footer Actions */}
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 p-4">
+                  <div className="text-xs text-slate-500">
+                    Stage completion publishes all course results for {stageLabel} and forwards them to GPA calculation.
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="primary"
+                      onClick={() => setStageSubmitModal(group)}
+                      className="gap-1.5"
+                    >
+                      <ClipboardCheck className="h-4 w-4" />
+                      Submit {stageLabel} is Finished (Sent to GPA)
+                    </Button>
+
+                    {isAllYearsDone && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => setProgramFinishModal(group)}
+                        className="gap-1.5 border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                      >
+                        <Award className="h-4 w-4 text-emerald-600" />
+                        Submit Programme Batch All Years Finished
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {/* MODAL 1: Single Course Results Detail */}
+      <Modal
+        open={Boolean(viewOfferingId)}
+        onClose={() => setViewOfferingId(null)}
+        title={singleOffering.data?.offering?.course?.code || 'Course Results'}
+        subtitle={`${singleOffering.data?.offering?.course?.title || ''} · ${singleOffering.data?.offering?.teacher?.name || ''}`}
+        size="lg"
+        footer={
+          <Button variant="secondary" onClick={() => setViewOfferingId(null)}>
+            Close
+          </Button>
+        }
+      >
+        <div className="space-y-4">
+          {singleOffering.isLoading ? (
+            <SkeletonCard lines={6} />
+          ) : !singleOffering.data?.results?.length ? (
+            <EmptyState
+              title="No student marks found"
+              message="No student marks recorded for this course offering."
+            />
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full min-w-max border-collapse text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    <th className="px-4 py-2.5">Student</th>
+                    <th className="px-4 py-2.5">Student ID</th>
+                    <th className="px-4 py-2.5 text-center">Total Mark</th>
+                    <th className="px-4 py-2.5 text-center">Letter Grade</th>
+                    <th className="px-4 py-2.5 text-center">Grade Point</th>
+                    <th className="px-4 py-2.5 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {singleOffering.data.results.map((r) => (
+                    <tr key={r._id || r.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-2 font-medium text-slate-900">
+                        {r.student?.fullName || `${r.student?.firstName || ''} ${r.student?.lastName || ''}`}
+                      </td>
+                      <td className="px-4 py-2 font-mono text-slate-500">
+                        {r.student?.studentId || '—'}
+                      </td>
+                      <td className="px-4 py-2 text-center font-bold text-slate-800">
+                        {r.totalMark !== null && r.totalMark !== undefined ? r.totalMark : '—'}
+                      </td>
+                      <td className="px-4 py-2 text-center font-semibold text-brand-700">
+                        {r.letterGrade || '—'}
+                      </td>
+                      <td className="px-4 py-2 text-center font-mono">
+                        {r.gradePoint !== null && r.gradePoint !== undefined ? r.gradePoint : '—'}
+                      </td>
+                      <td className="px-4 py-2 text-center">
+                        <Badge tone={toneForStatus(r.status)}>{humanStatus(r.status)}</Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* MODAL 2: Submit Stage (Year / Level) Finished */}
+      <Modal
+        open={Boolean(stageSubmitModal)}
+        onClose={() => setStageSubmitModal(null)}
+        title={`Submit ${stageSubmitModal?.qualificationType === 'degree' ? `Year ${stageSubmitModal?.level}` : `Level ${stageSubmitModal?.level}`} Finished`}
+        subtitle={`${stageSubmitModal?.programName} · Ready for GPA Calculation`}
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setStageSubmitModal(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() =>
+                submitStageMutation.mutate({
+                  programId: stageSubmitModal.programId,
+                  level: stageSubmitModal.level,
+                  code: verificationCode,
+                })
+              }
+              loading={submitStageMutation.isPending}
+              disabled={verificationCode.length !== 6}
+            >
+              <Send className="h-4 w-4" />
+              Confirm & Send to GPA
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm leading-relaxed text-slate-600">
+            Submitting <strong>{stageSubmitModal?.qualificationType === 'degree' ? `Year ${stageSubmitModal?.level}` : `Level ${stageSubmitModal?.level}`}</strong> as finished will finalize and publish all course results for this stage of <strong>{stageSubmitModal?.programName}</strong>.
+            The results will be sent to the <strong>GPA/CGPA page</strong> ready to compute official GPAs.
+          </p>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                <Mail className="h-4 w-4 text-brand-600" />
+                Email Confirmation Code
+              </span>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => requestCodeMutation.mutate()}
+                loading={requestCodeMutation.isPending}
+              >
+                Send verification code
+              </Button>
+            </div>
+            <div className="mt-3">
+              <CodeInput
+                value={verificationCode}
+                onChange={setVerificationCode}
+                disabled={submitStageMutation.isPending}
+              />
             </div>
           </div>
         </div>
-      </Card>
+      </Modal>
 
-      {submissions.isLoading || submissions.error || submissionRows.length ? (
-        <Card>
-          <CardHeader
-            title="Submission queue"
-            subtitle="Whole course sheets submitted by teachers, filtered by academic year and term. Accept to grade and approve every pending result; decline to return the sheet with a reason."
-            icon={ClipboardCheck}
-          />
-          <CardBody className="space-y-2">
-            {submissions.isLoading ? (
-              <p className="py-4 text-center text-sm text-slate-500">Loading submissions…</p>
-            ) : submissions.error ? (
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-rose-50 px-3.5 py-3 text-sm text-rose-700">
-                <span>{errorMessage(submissions.error, 'Submissions could not be loaded.')}</span>
-                <Button size="sm" variant="secondary" onClick={() => submissions.refetch()}>Retry</Button>
-              </div>
-            ) : submissionRows.map((row) => {
-              const pending = row.counts?.pending ?? 0;
-              const approved = row.counts?.approved ?? 0;
-              return (
-                <div key={row.id} className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-900">
-                      {row.course?.code || 'Course'} <span className="font-normal text-slate-500">· {row.course?.title || 'Unknown course'}</span>
-                    </p>
-                    <p className="mt-0.5 text-xs text-slate-500">
-                      {row.teacher?.name || 'No teacher assigned'} · {row.academicYear || '—'} · {row.term || '—'}
-                    </p>
-                    <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px]">
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">{row.counts?.submitted ?? 0} submitted</span>
-                      <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-700">{row.counts?.underReview ?? 0} under review</span>
-                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700">{approved} approved</span>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {pending ? (
-                      <>
-                        <Button size="sm" variant="ghost" onClick={() => setDecliningSubmission(row)}>Decline</Button>
-                        <Button size="sm" onClick={() => setAcceptingSubmission(row)}>Accept</Button>
-                      </>
-                    ) : approved ? (
-                      <Button size="sm" variant="secondary" onClick={() => setPublishingSubmission(row)}>Publish approved</Button>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
-          </CardBody>
-        </Card>
-      ) : null}
+      {/* MODAL 3: Submit Programme Batch Finished (All Years) */}
+      <Modal
+        open={Boolean(programFinishModal)}
+        onClose={() => setProgramFinishModal(null)}
+        title="Submit Programme Batch All Years Finished"
+        subtitle={`${programFinishModal?.programName} · Batch: ${programFinishModal?.batchCode || 'All'}`}
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setProgramFinishModal(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() =>
+                submitProgramMutation.mutate({
+                  programId: programFinishModal.programId,
+                  batchId: programFinishModal.batchId,
+                  code: verificationCode,
+                })
+              }
+              loading={submitProgramMutation.isPending}
+              disabled={verificationCode.length !== 6}
+            >
+              <Award className="h-4 w-4" />
+              Confirm All Years Finished
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm leading-relaxed text-slate-600">
+            This confirms that <strong>all years</strong> required by the academic structure for <strong>{programFinishModal?.programName}</strong> have been completed and verified.
+            All student course results will be published and made ready for final <strong>CGPA calculation and graduation eligibility</strong>.
+          </p>
 
-      {missing.length ? (
-        <Card>
-          <CardHeader title="Published results missing" subtitle="Offerings with registered students who do not yet have a published result." icon={AlertTriangle} />
-          <CardBody className="space-y-2">
-            {missing.slice(0, 8).map((row) => (
-              <div key={row.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-amber-50 px-3.5 py-2.5 text-xs text-amber-900">
-                <span>{row.course?.code} · {row.course?.title} · {row.term}</span>
-                <span>{row.missing} of {row.registered} missing</span>
-              </div>
-            ))}
-          </CardBody>
-        </Card>
-      ) : null}
-
-      <Card>
-        <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-900">Result records</h2>
-            <p className="mt-0.5 text-xs text-slate-500">{pagination.total ?? 0} result{pagination.total === 1 ? '' : 's'}</p>
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                <Mail className="h-4 w-4 text-brand-600" />
+                Email Confirmation Code
+              </span>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => requestCodeMutation.mutate()}
+                loading={requestCodeMutation.isPending}
+              >
+                Send verification code
+              </Button>
+            </div>
+            <div className="mt-3">
+              <CodeInput
+                value={verificationCode}
+                onChange={setVerificationCode}
+                disabled={submitProgramMutation.isPending}
+              />
+            </div>
           </div>
-          <ClipboardCheck className="h-4 w-4 text-slate-300" />
         </div>
-        <RegistrarTable
-          columns={columns}
-          rows={rows}
-          loading={query.isLoading}
-          error={query.error ? query.error?.response?.data?.message || 'Results could not be loaded.' : null}
-          onRetry={query.refetch}
-          rowKey={(row) => row.id}
-          onRowClick={(row) => setDetailId(row.id)}
-          noResults={filtered}
-          emptyTitle="No results yet"
-          emptyMessage="Submitted results appear here for review."
-        />
-        <div className="px-5 pb-4">
-          <Pagination page={pagination.page} pages={pagination.pages} total={pagination.total} limit={pagination.limit} onPage={setPage} onLimit={(value) => { setLimit(value); setPage(1); }} />
-        </div>
-      </Card>
+      </Modal>
 
-      <ResultDetailModal
-        resultId={detailId}
-        onClose={() => setDetailId(null)}
-        onAction={(kind, row) => {
-          if (kind === 'reject') setRejecting(row);
-          else if (kind === 'correct') setCorrecting(row);
-          else if (kind === 'publish') setPublishing(row);
-          else simpleAction.mutate({ id: row.id, action: kind });
-        }}
-        actionPending={simpleAction.isPending}
-      />
-
+      {/* Course approval & decline confirmations */}
       <ConfirmDialog
         open={Boolean(acceptingSubmission)}
-        title="Accept this course submission?"
-        message={acceptingSubmission ? `${acceptingSubmission.course?.code || 'Course'} · ${acceptingSubmission.course?.title || ''}. ${acceptingSubmission.counts?.pending ?? 0} pending result(s) will be graded with the current policy and approved.` : ''}
-        confirmLabel="Accept and approve"
+        title="Approve and grade course submission?"
+        message={acceptingSubmission ? `${acceptingSubmission.course?.code} · ${acceptingSubmission.course?.title}. All pending results will receive official letter grades per grading policy.` : ''}
+        confirmLabel="Approve course"
         loading={approveSubmission.isPending}
         onClose={() => setAcceptingSubmission(null)}
         onConfirm={() => approveSubmission.mutate(acceptingSubmission)}
       />
-      <ConfirmDialog
+
+      <Modal
         open={Boolean(decliningSubmission)}
-        title="Decline this course submission?"
-        message={decliningSubmission ? `${decliningSubmission.course?.code || 'Course'} · ${decliningSubmission.course?.title || ''}. Every submitted and approved result in this offering will be returned with your reason in its revision history.` : ''}
-        confirmLabel="Decline submission"
-        tone="danger"
-        loading={declineSubmission.isPending}
-        reason={{ label: 'Reason', minLength: 5, placeholder: 'What needs to be corrected?' }}
+        title="Return submission for correction"
+        subtitle={decliningSubmission ? `${decliningSubmission.course?.code} · ${decliningSubmission.course?.title}` : ''}
+        size="sm"
         onClose={() => setDecliningSubmission(null)}
-        onConfirm={(reason) => declineSubmission.mutate({ row: decliningSubmission, reason })}
-      />
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDecliningSubmission(null)}>
+              Cancel
+            </Button>
+            <Button
+              tone="danger"
+              onClick={() => {
+                const reason = document.getElementById('decline-reason')?.value || 'Returned for mark review.';
+                declineSubmission.mutate({ row: decliningSubmission, reason });
+              }}
+              loading={declineSubmission.isPending}
+            >
+              Return to teacher
+            </Button>
+          </>
+        }
+      >
+        <div>
+          <label htmlFor="decline-reason" className="block text-xs font-medium text-slate-700 mb-1.5">
+            Reason for return
+          </label>
+          <textarea
+            id="decline-reason"
+            rows={3}
+            defaultValue="Marks need review or verification."
+            className="w-full rounded-xl border border-slate-200 p-2.5 text-xs text-slate-800"
+          />
+        </div>
+      </Modal>
+
       <ConfirmDialog
         open={Boolean(publishingSubmission)}
         title="Publish approved results?"
-        message={publishingSubmission ? `${publishingSubmission.course?.code || 'Course'} · ${publishingSubmission.course?.title || ''}. ${publishingSubmission.counts?.approved ?? 0} approved result(s) will become part of the academic record.` : ''}
+        message={publishingSubmission ? `${publishingSubmission.course?.code} approved results will be officially published and available to students.` : ''}
         confirmLabel="Publish results"
         loading={publishSubmission.isPending}
         onClose={() => setPublishingSubmission(null)}
         onConfirm={() => publishSubmission.mutate(publishingSubmission)}
       />
-      <ConfirmDialog
-        open={Boolean(publishing)}
-        title="Publish this result?"
-        message={publishing ? `${publishing.student?.fullName} · ${publishing.course?.code}. The grade is fixed by the current grading policy and becomes part of the academic record.` : ''}
-        confirmLabel="Publish result"
-        loading={publish.isPending}
-        onClose={() => setPublishing(null)}
-        onConfirm={() => publish.mutate()}
-      />
-      <ConfirmDialog
-        open={Boolean(rejecting)}
-        title="Return result for correction"
-        message={rejecting ? `${rejecting.student?.fullName} · ${rejecting.course?.code}. The result becomes rejected and the reason is kept in the revision history.` : ''}
-        confirmLabel="Reject result"
-        tone="danger"
-        loading={reject.isPending}
-        reason={{ label: 'Reason', minLength: 5, placeholder: 'What needs to be corrected?' }}
-        onClose={() => setRejecting(null)}
-        onConfirm={(reason) => reject.mutate(reason)}
-      />
-      <CorrectionModal
-        result={correcting}
-        onClose={() => setCorrecting(null)}
-        onSaved={(values) => correct.mutate(values)}
-        loading={correct.isPending}
-      />
     </div>
-  );
-}
-
-function ResultDetailModal({ resultId, onClose, onAction, actionPending }) {
-  const query = useQuery({
-    queryKey: ['registrar', 'result', resultId],
-    queryFn: async () => (await api.get(`${REGISTRAR}/results/${resultId}`)).data,
-    enabled: Boolean(resultId),
-  });
-  const result = query.data?.result;
-
-  return (
-    <Modal
-      open={Boolean(resultId)}
-      title="Result detail"
-      subtitle={result ? `${result.student?.fullName} · ${result.course?.code} · ${result.offering?.academicYear?.label || ''}` : 'Loading the submitted record.'}
-      size="lg"
-      onClose={onClose}
-      footer={result ? (
-        <div className="flex flex-wrap justify-end gap-2">
-          {['submitted', 'rejected'].includes(result.status) ? <Button variant="secondary" onClick={() => onAction('review', result)}>Take under review</Button> : null}
-          {['submitted', 'under_review'].includes(result.status) ? <Button onClick={() => onAction('approve', result)} loading={actionPending}>Approve</Button> : null}
-          {['approved', 'submitted', 'under_review'].includes(result.status) ? <Button variant="secondary" onClick={() => onAction('publish', result)}>Publish</Button> : null}
-          {['submitted', 'under_review', 'approved'].includes(result.status) ? <Button variant="ghost" onClick={() => onAction('reject', result)}>Reject</Button> : null}
-          {['approved', 'published'].includes(result.status) ? <Button variant="secondary" onClick={() => onAction('correct', result)}>Correct</Button> : null}
-        </div>
-      ) : null}
-    >
-      {query.isLoading ? <p className="py-6 text-center text-sm text-slate-500">Loading…</p> : query.error ? (
-        <p className="rounded-xl bg-rose-50 px-3.5 py-3 text-sm text-rose-700">{query.error?.response?.data?.message || 'The result could not be loaded.'}</p>
-      ) : result ? (
-        <div className="grid gap-4">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl bg-slate-50 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-400">Total mark</p><p className="text-xl font-bold text-slate-900">{result.totalMark ?? '—'}</p></div>
-            <div className="rounded-2xl bg-slate-50 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-400">Grade</p><p className="text-xl font-bold text-slate-900">{result.letterGrade || '—'} <span className="text-sm text-slate-500">{result.gradePoint ?? ''}</span></p></div>
-            <div className="rounded-2xl bg-slate-50 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-400">Status</p><Badge tone={toneForStatus(result.status)}>{humanStatus(result.status)}</Badge></div>
-          </div>
-          <dl className="grid gap-3 text-sm sm:grid-cols-2">
-            <div><dt className="text-xs text-slate-400">Course</dt><dd className="text-slate-700">{result.course?.code} · {result.course?.title}</dd></div>
-            <div><dt className="text-xs text-slate-400">Offering</dt><dd className="text-slate-700">{result.offering?.term || result.term} · {result.offering?.teacher?.name || 'No teacher'}</dd></div>
-            <div><dt className="text-xs text-slate-400">Submitted</dt><dd className="text-slate-700">{displayDateTime(result.submittedAt || result.createdAt)}</dd></div>
-            <div><dt className="text-xs text-slate-400">Policy version</dt><dd className="text-slate-700">{result.gradingPolicyVersion ?? '—'}</dd></div>
-          </dl>
-          {result.components?.length ? (
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Components</p>
-              <div className="space-y-1">
-                {result.components.map((row, index) => (
-                  <div key={`${row.name}-${index}`} className="flex justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm"><span>{row.name}</span><span className="tabular-nums">{row.score} / {row.max}</span></div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-          {result.revisionHistory?.length ? (
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Revision history</p>
-              <div className="max-h-40 space-y-1.5 overflow-y-auto">
-                {result.revisionHistory.map((row, index) => (
-                  <div key={row._id || index} className="rounded-xl border border-slate-100 px-3 py-2 text-xs text-slate-600">
-                    <p className="font-medium text-slate-700">{row.reason || 'Revision'}</p>
-                    <p className="text-slate-400">{displayDateTime(row.at || row.createdAt)}{row.from?.totalMark !== undefined ? ` · ${row.from.totalMark} → ${row.to?.totalMark ?? '—'}` : ''}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </Modal>
-  );
-}
-
-function CorrectionModal({ result, onClose, onSaved, loading }) {
-  const [totalMark, setTotalMark] = useState('');
-  const [reason, setReason] = useState('');
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (result) {
-      setTotalMark(String(result.totalMark ?? ''));
-      setReason('');
-      setError('');
-    }
-  }, [result]);
-
-  return (
-    <Modal
-      open={Boolean(result)}
-      title="Correct result"
-      subtitle={result ? `${result.student?.fullName} · ${result.course?.code}. The previous values remain in the revision history.` : ''}
-      onClose={loading ? undefined : onClose}
-      dismissible={!loading}
-      footer={<><Button variant="secondary" onClick={onClose} disabled={loading}>Cancel</Button><Button onClick={() => {
-        if (totalMark === '' || Number.isNaN(Number(totalMark)) || Number(totalMark) < 0 || Number(totalMark) > 100) { setError('Enter a mark between 0 and 100.'); return; }
-        if (reason.trim().length < 3) { setError('Write the reason for the correction.'); return; }
-        onSaved?.({ totalMark: Number(totalMark), reason: reason.trim() });
-      }} loading={loading}>Record correction</Button></>}
-    >
-      <div className="grid gap-4">
-        {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
-        <Field label="Corrected total mark" type="number" min="0" max="100" step="0.01" value={totalMark} onChange={(event) => { setTotalMark(event.target.value); setError(''); }} required />
-        <TextAreaField label="Reason" rows={3} value={reason} onChange={(event) => { setReason(event.target.value); setError(''); }} required hint="This is stored in the revision history and audit log." />
-      </div>
-    </Modal>
   );
 }

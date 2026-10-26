@@ -15,14 +15,15 @@ import { EmptyState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';
 
 const COMPONENTS = [
-  { key: 'assessments', label: 'Assessments' },
+  { key: 'assignment', label: 'Assignment' },
+  { key: 'project', label: 'Project' },
   { key: 'quizzes', label: 'Quizzes' },
-  { key: 'bonus', label: 'Bonus' },
-  { key: 'attendance', label: 'Attendance' },
   { key: 'presentation', label: 'Presentation' },
+  { key: 'attendance', label: 'Attendance' },
+  { key: 'bonus', label: 'Bonus' },
 ];
 
-const emptyWeights = { assessments: '30', quizzes: '40', bonus: '5', attendance: '5', presentation: '20' };
+const emptyWeights = { assignment: '25', project: '25', quizzes: '20', presentation: '15', attendance: '10', bonus: '5' };
 const inputClass =
   'focus-ring h-11 w-full rounded-xl border border-slate-200 bg-white/85 pl-3.5 pr-14 text-right font-mono text-sm text-slate-800';
 
@@ -55,7 +56,9 @@ export default function TeacherCourseMarkPolicy() {
     mutationFn: async () =>
       (
         await api.put(`/teacher/courses/${editing.assignment.id}/mark-policy`, {
-          assessments: Number(weights.assessments || 0),
+          assignment: Number(weights.assignment || 0),
+          project: Number(weights.project || 0),
+          assessments: Number(weights.assignment || 0),
           quizzes: Number(weights.quizzes || 0),
           bonus: Number(weights.bonus || 0),
           attendance: Number(weights.attendance || 0),
@@ -73,9 +76,16 @@ export default function TeacherCourseMarkPolicy() {
 
   function openPolicy(row) {
     setEditing(row);
+    const existing = row.policy?.weights || {};
     setWeights(
       Object.fromEntries(
-        COMPONENTS.map((component) => [component.key, String(row.policy?.weights?.[component.key] ?? 0)]),
+        COMPONENTS.map((component) => {
+          let val = existing[component.key];
+          if ((val === undefined || val === null) && component.key === 'assignment') {
+            val = existing.assessments ?? 0;
+          }
+          return [component.key, String(val ?? 0)];
+        }),
       ),
     );
   }

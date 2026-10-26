@@ -1,9 +1,10 @@
-﻿import { Certificate, Transcript, CertificateTemplate } from '../models/Documents.js';
+import { Certificate, Transcript, CertificateTemplate } from '../models/Documents.js';
 import { Student } from '../models/Student.js';
 import { audit } from '../services/audit.service.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { pageOf, sortOf, searchFilter, mergeFilters, paged, ownFilter } from '../services/registrar.helpers.js';
+import { buildExport } from '../services/export.service.js';
 import {
   certificatePreview,
   certificatePdf,
@@ -164,11 +165,13 @@ export const listTranscripts = asyncHandler(async (req, res) => {
   const query = req.valid.query;
   const { page, limit, skip } = pageOf(query);
   let studentIds = null;
-  if (query.search) {
-    const students = await Student.find(searchFilter(query.search, ['studentId', 'fullName']))
-      .select('_id')
-      .limit(2000)
-      .lean();
+  const studentConditions = [];
+  if (query.search) studentConditions.push(searchFilter(query.search, ['studentId', 'fullName']));
+  if (query.program) studentConditions.push({ program: query.program });
+  if (query.batch) studentConditions.push({ batch: query.batch });
+  if (studentConditions.length) {
+    const studentFilter = studentConditions.length === 1 ? studentConditions[0] : { $and: studentConditions };
+    const students = await Student.find(studentFilter).select('_id').limit(2000).lean();
     studentIds = students.map((row) => row._id);
   }
   const filter = mergeFilters(
@@ -177,7 +180,7 @@ export const listTranscripts = asyncHandler(async (req, res) => {
   );
   const [rows, total] = await Promise.all([
     Transcript.find(filter)
-      .populate('student', 'studentId fullName level')
+      .populate('student', 'studentId fullName level program batch')
       .sort(sortOf(query, ['issuedAt', 'status'], 'issuedAt'))
       .skip(skip)
       .limit(limit)
@@ -190,11 +193,12 @@ export const listTranscripts = asyncHandler(async (req, res) => {
         id: String(row._id),
         verificationId: row.verificationId,
         student: row.student
-          ? { id: String(row.student._id), studentId: row.student.studentId, fullName: row.student.fullName }
+          ? { id: String(row.student._id), studentId: row.student.studentId, fullName: row.student.fullName, level: row.student.level }
           : { studentId: row.studentSnapshot?.studentId, fullName: row.studentSnapshot?.fullName },
         program: row.programSnapshot,
         cgpa: row.cgpa,
         totalCredits: row.totalCredits,
+        academicSnapshot: row.academicSnapshot,
         purpose: row.purpose,
         status: row.status,
         issuedAt: row.issuedAt,
@@ -204,6 +208,69 @@ export const listTranscripts = asyncHandler(async (req, res) => {
       limit,
     ),
   });
+});
+
+export const getTranscript = asyncHandler(async (req, res) => {
+  const transcript = await Transcript.findById(req.valid.params.id)
+    .populate('student', 'studentId fullName level photo program batch')
+    .lean();
+  if (!transcript) throw new AppError(404, 'TRANSCRIPT_NOT_FOUND', 'That transcript was not found.');
+  res.json({
+    transcript: {
+      ...transcript,
+      id: String(transcript._id),
+      _id: undefined,
+    },
+  });
+});
+
+export const exportTranscriptRecord = asyncHandler(async (req, res) => {
+  const transcript = await Transcript.findById(req.params.id).lean();
+  if (!transcript) throw new AppError(404, 'TRANSCRIPT_NOT_FOUND', 'That transcript was not found.');
+  const { format = 'docx' } = req.query;
+  if (format === 'pdf') {
+    const result = await transcriptPdf(transcript._id);
+    return sendPdf(res, result);
+  }
+  const columns = [
+    { key: 'code', label: 'Course Code', width: 14 },
+    { key: 'title', label: 'Course Title', width: 30 },
+    { key: 'level', label: 'Year / Level', width: 12 },
+    { key: 'academicYear', label: 'Academic Year', width: 14 },
+    { key: 'credits', label: 'Credits', width: 10 },
+    { key: 'mark', label: 'Mark', width: 10 },
+    { key: 'letterGrade', label: 'Grade', width: 10 },
+    { key: 'gradePoint', label: 'Points', width: 10 },
+  ];
+  const rows = (transcript.academicSnapshot || []).map((r) => ({
+    code: r.code || '—',
+    title: r.title || '—',
+    level: r.level != null ? `Level/Year ${r.level}` : '—',
+    academicYear: r.academicYear || '—',
+    credits: r.credits ?? '—',
+    mark: r.mark != null ? r.mark : '—',
+    letterGrade: r.letterGrade || '—',
+    gradePoint: r.gradePoint != null ? Number(r.gradePoint).toFixed(2) : '—',
+  }));
+  const summary = [
+    `Student: ${transcript.studentSnapshot?.fullName} (${transcript.studentSnapshot?.studentId})`,
+    `Programme: ${transcript.programSnapshot?.name || '—'}`,
+    `Cumulative CGPA: ${transcript.cgpa ?? '—'} | Total Credits: ${transcript.totalCredits ?? 0}`,
+    `Verification ID: ${transcript.verificationId}`,
+  ].join('\n');
+
+  const file = await buildExport({
+    format,
+    filenamePrefix: `Transcript_${transcript.studentSnapshot?.studentId || 'record'}`,
+    title: 'OFFICIAL ACADEMIC TRANSCRIPT',
+    subtitle: `${transcript.studentSnapshot?.fullName} · ${transcript.studentSnapshot?.studentId}`,
+    summary,
+    columns,
+    rows,
+  });
+  res.setHeader('Content-Type', file.contentType);
+  res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+  res.send(file.buffer);
 });
 
 export const createTranscript = asyncHandler(async (req, res) => {

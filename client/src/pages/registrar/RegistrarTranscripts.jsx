@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Download, FileText, Plus } from 'lucide-react';
+import { Download, Eye, FileText, Plus, ShieldCheck } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import {
   REGISTRAR,
@@ -23,24 +23,44 @@ import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
 import SearchInput from '../../components/ui/SearchInput';
+import ExportMenu from '../../components/ui/ExportMenu';
 
 export default function RegistrarTranscripts() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const debounced = useDebounced(search, 300);
+  const [program, setProgram] = useState('');
+  const [batch, setBatch] = useState('');
   const [status, setStatus] = useState('all');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [issuing, setIssuing] = useState(false);
+  const [viewing, setViewing] = useState(null);
   const [revoking, setRevoking] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
 
-  const params = useMemo(() => ({
-    page,
-    limit,
-    ...(debounced.trim() ? { search: debounced.trim() } : {}),
-    ...(status !== 'all' ? { status } : {}),
-  }), [page, limit, debounced, status]);
+  const options = useQuery({
+    queryKey: ['registrar', 'students', 'options'],
+    queryFn: async () => (await api.get(`${REGISTRAR}/students/options`)).data,
+    staleTime: 5 * 60_000,
+  });
+
+  const availableBatches = useMemo(() => {
+    if (!program) return options.data?.batches || [];
+    return (options.data?.batches || []).filter((b) => b.program === program);
+  }, [options.data?.batches, program]);
+
+  const params = useMemo(
+    () => ({
+      page,
+      limit,
+      ...(debounced.trim() ? { search: debounced.trim() } : {}),
+      ...(program ? { program } : {}),
+      ...(batch ? { batch } : {}),
+      ...(status !== 'all' ? { status } : {}),
+    }),
+    [page, limit, debounced, program, batch, status],
+  );
 
   const query = useQuery({
     queryKey: ['registrar', 'transcripts', params],
@@ -63,7 +83,7 @@ export default function RegistrarTranscripts() {
     onError: (err) => toast.error(errorMessage(err, 'The transcript could not be revoked.')),
   });
 
-  const download = async (row) => {
+  const downloadPdf = async (row) => {
     setDownloadingId(row.id);
     try {
       await downloadFile(`${REGISTRAR}/transcripts/${row.id}/pdf`, `Transcript_${row.student?.studentId || row.id}.pdf`);
@@ -87,8 +107,12 @@ export default function RegistrarTranscripts() {
       ),
     },
     { key: 'program', label: 'Programme', render: (row) => row.program?.name || '—' },
-    { key: 'credits', label: 'Credits', render: (row) => row.totalCredits ?? '—' },
-    { key: 'cgpa', label: 'CGPA', render: (row) => row.cgpa ?? '—' },
+    { key: 'credits', label: 'Total Credits', render: (row) => row.totalCredits ?? '—' },
+    {
+      key: 'cgpa',
+      label: 'CGPA',
+      render: (row) => <span className="font-bold text-slate-900">{row.cgpa ?? '—'}</span>,
+    },
     { key: 'purpose', label: 'Purpose', render: (row) => row.purpose || '—' },
     { key: 'status', label: 'Status', render: (row) => <Badge tone={toneForStatus(row.status)}>{humanStatus(row.status)}</Badge> },
     { key: 'issued', label: 'Issued', render: (row) => displayDateTime(row.issuedAt) },
@@ -98,11 +122,24 @@ export default function RegistrarTranscripts() {
       className: 'text-right',
       mobileFull: true,
       render: (row) => (
-        <div className="flex flex-wrap justify-end gap-1.5">
-          <Button size="sm" variant="secondary" onClick={() => download(row)} loading={downloadingId === row.id}>
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <Button size="sm" variant="secondary" onClick={() => setViewing(row)}>
+            <Eye className="h-3.5 w-3.5" /> View
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => downloadPdf(row)} loading={downloadingId === row.id}>
             <Download className="h-3.5 w-3.5" /> PDF
           </Button>
-          {row.status === 'issued' ? <Button size="sm" variant="ghost" onClick={() => setRevoking(row)}>Revoke</Button> : null}
+          <ExportMenu
+            basePath={`${REGISTRAR}/transcripts/${row.id}/export`}
+            filenamePrefix={`Transcript_${row.student?.studentId || row.id}`}
+            label="Export"
+            formats={['docx', 'xlsx']}
+          />
+          {row.status === 'issued' ? (
+            <Button size="sm" variant="ghost" onClick={() => setRevoking(row)}>
+              Revoke
+            </Button>
+          ) : null}
         </div>
       ),
     },
@@ -112,16 +149,70 @@ export default function RegistrarTranscripts() {
     <div className="space-y-6">
       <RegistrarPageHeader
         title="Transcripts"
-        subtitle="Every transcript is a stored academic snapshot rendered as a print-ready PDF. Revoking preserves the record and its verification history."
-        actions={<Button onClick={() => setIssuing(true)} className="gap-2"><Plus className="h-4 w-4" /> Issue transcript</Button>}
+        subtitle="Official academic transcripts snapshot published results, stage levels, grades, and cumulative CGPA. Rendered as print-ready PDF and exportable to Word & Excel."
+        actions={
+          <Button onClick={() => setIssuing(true)} className="gap-2">
+            <Plus className="h-4 w-4" /> Issue transcript
+          </Button>
+        }
       />
 
       <Card className="p-4 sm:p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <SearchInput className="flex-1" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search student name or ID" loading={query.isFetching} />
-          <SelectField label="Status" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
+        <div className="grid gap-3 sm:grid-cols-[1fr_200px_200px_160px] sm:items-end">
+          <SearchInput
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
+            placeholder="Search student name or ID"
+            loading={query.isFetching}
+          />
+          <SelectField
+            label="Programme"
+            value={program}
+            onChange={(event) => {
+              setProgram(event.target.value);
+              setBatch('');
+              setPage(1);
+            }}
+          >
+            <option value="">All programmes</option>
+            {(options.data?.programs || []).map((row) => (
+              <option key={row.id} value={row.id}>
+                {row.code} · {row.name}
+              </option>
+            ))}
+          </SelectField>
+          <SelectField
+            label="Batch"
+            value={batch}
+            onChange={(event) => {
+              setBatch(event.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">All batches</option>
+            {availableBatches.map((row) => (
+              <option key={row.id} value={row.id}>
+                {row.code} · {row.name}
+              </option>
+            ))}
+          </SelectField>
+          <SelectField
+            label="Status"
+            value={status}
+            onChange={(event) => {
+              setStatus(event.target.value);
+              setPage(1);
+            }}
+          >
             <option value="all">All statuses</option>
-            {['issued', 'revoked'].map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
+            {['issued', 'revoked'].map((value) => (
+              <option key={value} value={value}>
+                {humanStatus(value)}
+              </option>
+            ))}
           </SelectField>
         </div>
       </Card>
@@ -130,7 +221,9 @@ export default function RegistrarTranscripts() {
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Issued transcripts</h2>
-            <p className="mt-0.5 text-xs text-slate-500">{pagination.total ?? 0} document{pagination.total === 1 ? '' : 's'}</p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {pagination.total ?? 0} document{pagination.total === 1 ? '' : 's'}
+            </p>
           </div>
           <FileText className="h-4 w-4 text-slate-300" />
         </div>
@@ -141,20 +234,40 @@ export default function RegistrarTranscripts() {
           error={query.error ? query.error?.response?.data?.message || 'Transcripts could not be loaded.' : null}
           onRetry={query.refetch}
           rowKey={(row) => row.id}
-          noResults={Boolean(debounced.trim() || status !== 'all')}
-          emptyTitle="No transcripts yet"
-          emptyMessage="Issue a transcript for a student with published results."
+          noResults={Boolean(debounced.trim() || status !== 'all' || program || batch)}
+          emptyTitle="No transcripts found"
+          emptyMessage="Issue a transcript for a student with published course results."
         />
         <div className="px-5 pb-4">
-          <Pagination page={pagination.page} pages={pagination.pages} total={pagination.total} limit={pagination.limit} onPage={setPage} onLimit={(value) => { setLimit(value); setPage(1); }} />
+          <Pagination
+            page={pagination.page}
+            pages={pagination.pages}
+            total={pagination.total}
+            limit={pagination.limit}
+            onPage={setPage}
+            onLimit={(value) => {
+              setLimit(value);
+              setPage(1);
+            }}
+          />
         </div>
       </Card>
 
       <IssueTranscriptModal open={issuing} onClose={() => setIssuing(false)} onSaved={invalidate} />
+
+      {/* Transcript Detail / Preview Modal */}
+      {viewing && (
+        <TranscriptDetailModal transcript={viewing} onClose={() => setViewing(null)} onDownload={downloadPdf} />
+      )}
+
       <ConfirmDialog
         open={Boolean(revoking)}
         title="Revoke this transcript?"
-        message={revoking ? `${revoking.student?.fullName} · issued ${displayDateTime(revoking.issuedAt)}. The PDF remains on file as revoked.` : ''}
+        message={
+          revoking
+            ? `${revoking.student?.fullName} · issued ${displayDateTime(revoking.issuedAt)}. The document remains on file as revoked.`
+            : ''
+        }
         confirmLabel="Revoke transcript"
         tone="danger"
         loading={revoke.isPending}
@@ -171,6 +284,12 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
   const [purpose, setPurpose] = useState('');
   const [error, setError] = useState('');
 
+  const gpaQuery = useQuery({
+    queryKey: ['registrar', 'gpa-preview', student?.id],
+    queryFn: async () => (await api.get(`${REGISTRAR}/gpa-cgpa`, { params: { student: student.id } })).data,
+    enabled: Boolean(student?.id && open),
+  });
+
   useEffect(() => {
     if (open) {
       setStudent(null);
@@ -185,7 +304,7 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
       return (await api.post(`${REGISTRAR}/transcripts`, { student: student.id, purpose: purpose.trim() })).data;
     },
     onSuccess: () => {
-      toast.success('Transcript issued.');
+      toast.success('Official transcript issued.');
       onSaved?.();
       onClose?.();
     },
@@ -196,22 +315,190 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
     },
   });
 
+  const studentHasResults = Boolean(gpaQuery.data?.courses?.length);
+
   return (
     <Modal
       open={open}
-      title="Issue transcript"
-      subtitle="The server snapshots the student's published results and the configured grading legend."
+      title="Issue official transcript"
+      subtitle="The server snapshots the student's published results, stages, and official grading policy."
       onClose={issue.isPending ? undefined : onClose}
       dismissible={!issue.isPending}
-      footer={<><Button variant="secondary" onClick={onClose} disabled={issue.isPending}>Cancel</Button><Button onClick={() => issue.mutate()} loading={issue.isPending} disabled={!student}>Issue transcript</Button></>}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={issue.isPending}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => issue.mutate()}
+            loading={issue.isPending}
+            disabled={!student || (gpaQuery.isSuccess && !studentHasResults)}
+          >
+            Issue transcript
+          </Button>
+        </>
+      }
     >
       <div className="grid gap-4">
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
+
         <StudentPicker value={student} onChange={setStudent} />
-        <TextAreaField label="Purpose" rows={3} value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="e.g. Further study application" hint="Optional; printed on the document and stored with the snapshot." />
+
+        {student && (
+          <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
+            {gpaQuery.isLoading ? (
+              <p className="text-xs text-slate-500">Checking student's academic records...</p>
+            ) : studentHasResults ? (
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-700">Programme:</span>
+                  <span className="text-slate-900">{gpaQuery.data?.student?.program || '—'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-700">Cumulative CGPA:</span>
+                  <span className="text-sm font-bold text-brand-700">{gpaQuery.data?.cgpa ?? '—'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-700">Credits / Courses:</span>
+                  <span className="text-slate-900">{gpaQuery.data?.credits ?? 0} credits ({gpaQuery.data?.courseCount ?? 0} courses)</span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs font-medium text-amber-700">
+                ⚠️ This student has 0 published results. Publish course results from the Results page first.
+              </p>
+            )}
+          </div>
+        )}
+
+        <TextAreaField
+          label="Purpose"
+          rows={3}
+          value={purpose}
+          onChange={(event) => setPurpose(event.target.value)}
+          placeholder="e.g. Further study application, Scholarship verification"
+          hint="Optional; printed on the document and stored with the official record."
+        />
+
         <p className="rounded-xl bg-sky-50 px-3.5 py-3 text-xs leading-relaxed text-sky-800">
-          If the grading policy is missing, issuance is blocked. No grades or credits are invented on the client.
+          The transcript seals all verified stage GPAs, cumulative CGPA, and course grades into a tamper-evident record with an official verification hash.
         </p>
+      </div>
+    </Modal>
+  );
+}
+
+function TranscriptDetailModal({ transcript, onClose, onDownload }) {
+  const [downloading, setDownloading] = useState(false);
+
+  const handlePdf = async () => {
+    setDownloading(true);
+    try {
+      await onDownload(transcript);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const courses = transcript.academicSnapshot || [];
+
+  return (
+    <Modal
+      open={Boolean(transcript)}
+      title="Official academic transcript details"
+      subtitle={`${transcript.student?.fullName || transcript.studentSnapshot?.fullName} · ${transcript.student?.studentId || transcript.studentSnapshot?.studentId}`}
+      onClose={onClose}
+      className="max-w-3xl"
+      footer={
+        <div className="flex w-full items-center justify-between">
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            <ShieldCheck className="h-4 w-4 text-emerald-600" />
+            <span>ID: <code className="font-mono text-slate-700">{transcript.verificationId}</code></span>
+          </div>
+          <div className="flex items-center gap-2">
+            <ExportMenu
+              basePath={`${REGISTRAR}/transcripts/${transcript.id}/export`}
+              filenamePrefix={`Transcript_${transcript.student?.studentId || transcript.id}`}
+              label="Export Record"
+              formats={['docx', 'xlsx']}
+            />
+            <Button size="sm" variant="primary" onClick={handlePdf} loading={downloading}>
+              <Download className="h-3.5 w-3.5" /> Download PDF
+            </Button>
+            <Button size="sm" variant="secondary" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <div className="grid gap-3 rounded-2xl border border-slate-100 bg-slate-50/80 p-4 sm:grid-cols-3">
+          <div>
+            <p className="text-xs text-slate-500">Programme</p>
+            <p className="text-sm font-semibold text-slate-900">{transcript.program?.name || '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-500">Cumulative CGPA</p>
+            <p className="text-lg font-bold text-brand-700">{transcript.cgpa ?? '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-500">Total Credits</p>
+            <p className="text-sm font-semibold text-slate-900">{transcript.totalCredits ?? '—'}</p>
+          </div>
+        </div>
+
+        {transcript.purpose && (
+          <p className="text-xs text-slate-600">
+            <span className="font-semibold text-slate-800">Purpose: </span>
+            {transcript.purpose}
+          </p>
+        )}
+
+        <div>
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Academic Courses Snapshot ({courses.length})
+          </h4>
+          <div className="max-h-72 overflow-y-auto rounded-xl border border-slate-200">
+            <table className="w-full text-left text-xs">
+              <thead className="sticky top-0 bg-slate-100 text-slate-700">
+                <tr>
+                  <th className="p-2.5 font-semibold">Course</th>
+                  <th className="p-2.5 font-semibold">Stage</th>
+                  <th className="p-2.5 font-semibold">Academic Year</th>
+                  <th className="p-2.5 text-right font-semibold">Credits</th>
+                  <th className="p-2.5 text-right font-semibold">Mark</th>
+                  <th className="p-2.5 text-center font-semibold">Grade</th>
+                  <th className="p-2.5 text-right font-semibold">Points</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {courses.length ? (
+                  courses.map((c, i) => (
+                    <tr key={i} className="hover:bg-slate-50">
+                      <td className="p-2.5">
+                        <span className="font-semibold text-slate-900">{c.code}</span>
+                        <p className="text-[11px] text-slate-500">{c.title}</p>
+                      </td>
+                      <td className="p-2.5 text-slate-600">{c.level != null ? `Stage ${c.level}` : '—'}</td>
+                      <td className="p-2.5 text-slate-600">{c.academicYear || '—'}</td>
+                      <td className="p-2.5 text-right font-medium text-slate-800">{c.credits ?? '—'}</td>
+                      <td className="p-2.5 text-right text-slate-800">{c.mark != null ? c.mark : '—'}</td>
+                      <td className="p-2.5 text-center font-bold text-slate-900">{c.letterGrade || '—'}</td>
+                      <td className="p-2.5 text-right font-mono text-slate-700">{c.gradePoint != null ? Number(c.gradePoint).toFixed(2) : '—'}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={7} className="p-4 text-center text-slate-500">
+                      No course records found in this transcript snapshot.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </Modal>
   );

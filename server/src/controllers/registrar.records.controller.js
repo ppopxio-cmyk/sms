@@ -2,15 +2,19 @@ import mongoose from 'mongoose';
 import { AttendanceRecord, Result, GradingPolicy } from '../models/Records.js';
 import { Student, Enrollment } from '../models/Student.js';
 import { CourseOffering } from '../models/Offering.js';
-import { AcademicYear } from '../models/AcademicStructure.js';
+import { AcademicYear, Program, Batch } from '../models/AcademicStructure.js';
 import { GraduationEvaluation } from '../models/GraduationEvaluation.js';
 import { Certificate } from '../models/Documents.js';
+import { User } from '../models/User.js';
 import { audit } from '../services/audit.service.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { pageOf, sortOf, searchFilter, mergeFilters, paged, ownFilter } from '../services/registrar.helpers.js';
-import { requireGradingPolicy, gradeFor, calculateGpa, getGradingPolicy, cgpaForStudent } from '../services/grading.service.js';
+import { requireGradingPolicy, gradeFor, calculateGpa, getGradingPolicy, cgpaForStudent, publishedResultsForStudent } from '../services/grading.service.js';
+import { buildExport } from '../services/export.service.js';
 import { evaluateStudent } from '../services/eligibility.service.js';
+import { sendCode } from '../services/codeDelivery.js';
+import { checkCode } from '../services/code.service.js';
 
 export const listAttendance = asyncHandler(async (req, res) => {
   const query = req.valid.query;
@@ -210,6 +214,9 @@ export const listResultSubmissions = asyncHandler(async (req, res) => {
     .populate('course', 'code title')
     .populate('teacher', 'name email')
     .populate('academicYear', 'label')
+    .populate('program', 'code name qualificationType durationYears levels shortTerm')
+    .populate('department', 'code name')
+    .populate('batch', 'code name category currentLevel')
     .lean();
   const byId = new Map(offerings.map((row) => [String(row._id), row]));
   res.json({
@@ -220,8 +227,20 @@ export const listResultSubmissions = asyncHandler(async (req, res) => {
         id: String(group._id),
         course: offering?.course ? { id: String(offering.course._id), code: offering.course.code, title: offering.course.title } : null,
         teacher: offering?.teacher ? { id: String(offering.teacher._id), name: offering.teacher.name, email: offering.teacher.email } : null,
+        department: offering?.department ? { id: String(offering.department._id), code: offering.department.code, name: offering.department.name } : null,
+        program: offering?.program ? {
+          id: String(offering.program._id),
+          code: offering.program.code,
+          name: offering.program.name,
+          qualificationType: offering.program.qualificationType || 'degree',
+          durationYears: offering.program.durationYears,
+          levels: offering.program.levels,
+          shortTerm: offering.program.shortTerm,
+        } : null,
+        batch: offering?.batch ? { id: String(offering.batch._id), code: offering.batch.code, name: offering.batch.name, category: offering.batch.category } : null,
+        category: offering?.category || offering?.batch?.category || 'regular',
         term: offering?.term ?? '',
-        level: offering?.level ?? null,
+        level: offering?.level ?? 1,
         academicYear: offering?.academicYear?.label ?? '',
         counts: {
           total: group.total,
@@ -236,6 +255,131 @@ export const listResultSubmissions = asyncHandler(async (req, res) => {
       };
     }),
   });
+});
+
+export const singleOfferingResults = asyncHandler(async (req, res) => {
+  const offeringId = req.valid.params.offering;
+  const offering = await CourseOffering.findById(offeringId)
+    .populate('course', 'code title creditHours')
+    .populate('program', 'code name qualificationType durationYears')
+    .populate('department', 'code name')
+    .populate('teacher', 'name email')
+    .populate('batch', 'code name')
+    .lean();
+  if (!offering) throw new AppError(404, 'OFFERING_NOT_FOUND', 'Course offering not found.');
+  const results = await Result.find({ offering: offeringId })
+    .populate('student', 'studentId firstName lastName fullName')
+    .sort({ 'student.studentId': 1 })
+    .lean();
+  res.json({ offering, results });
+});
+
+export const requestResultSubmitCode = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.id).lean();
+  if (!user?.email) throw new AppError(400, 'NO_EMAIL', 'Your account has no email address.');
+  await sendCode(user.email, 'result_submission', { reason: 'Verify and submit finalized results' });
+  res.json({ message: 'A 6-digit confirmation code has been sent to your email.' });
+});
+
+export const submitStageComplete = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.id).lean();
+  if (!user?.email) throw new AppError(400, 'NO_EMAIL', 'Your account has no email address.');
+  const code = String(req.body.code || '').trim();
+  if (!code) throw new AppError(400, 'CODE_REQUIRED', 'Confirmation code is required.');
+  const valid = await checkCode(user.email, 'result_submission', code);
+  if (!valid) throw new AppError(400, 'CODE_INVALID', 'The confirmation code is invalid or has expired.');
+
+  const { programId, level } = req.body;
+  if (!programId || level === undefined) throw new AppError(400, 'STAGE_REQUIRED', 'Program and stage level are required.');
+
+  const offerings = await CourseOffering.find({ program: programId, level: Number(level) }).select('_id').lean();
+  const offeringIds = offerings.map((o) => o._id);
+
+  const policy = await requireGradingPolicy();
+  const results = await Result.find({ offering: { $in: offeringIds }, status: { $in: ['submitted', 'under_review', 'approved'] } });
+
+  for (const r of results) {
+    if (r.totalMark !== null && r.totalMark !== undefined) {
+      const band = gradeFor(policy, r.totalMark);
+      r.letterGrade = band.letter;
+      r.gradePoint = band.points;
+      r.passed = band.pass;
+      r.gradingPolicyVersion = policy.version;
+    }
+    r.status = 'published';
+    r.publishedAt = new Date();
+    r.publishedBy = req.user.id;
+    await r.save();
+  }
+
+  await CourseOffering.updateMany(
+    { _id: { $in: offeringIds } },
+    { $set: { status: 'completed' } },
+  );
+
+  audit({
+    req,
+    action: 'registrar.results.stage_submitted',
+    targetType: 'Program',
+    targetId: programId,
+    meta: { level, publishedCount: results.length },
+  });
+
+  res.json({ message: `Level/Year ${level} results finalized and published. Ready for GPA calculation!`, publishedCount: results.length });
+});
+
+export const submitProgramFinished = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.id).lean();
+  if (!user?.email) throw new AppError(400, 'NO_EMAIL', 'Your account has no email address.');
+  const code = String(req.body.code || '').trim();
+  if (!code) throw new AppError(400, 'CODE_REQUIRED', 'Confirmation code is required.');
+  const valid = await checkCode(user.email, 'result_submission', code);
+  if (!valid) throw new AppError(400, 'CODE_INVALID', 'The confirmation code is invalid or has expired.');
+
+  const { programId, batchId } = req.body;
+  if (!programId) throw new AppError(400, 'PROGRAM_REQUIRED', 'Program ID is required.');
+
+  const program = await Program.findById(programId).lean();
+  if (!program) throw new AppError(404, 'PROGRAM_NOT_FOUND', 'Program not found.');
+
+  const offerings = await CourseOffering.find({ program: programId, ...(batchId ? { batch: batchId } : {}) }).select('_id').lean();
+  const offeringIds = offerings.map((o) => o._id);
+
+  const policy = await requireGradingPolicy();
+  const results = await Result.find({ offering: { $in: offeringIds }, status: { $ne: 'published' } });
+
+  for (const r of results) {
+    if (r.totalMark !== null && r.totalMark !== undefined) {
+      const band = gradeFor(policy, r.totalMark);
+      r.letterGrade = band.letter;
+      r.gradePoint = band.points;
+      r.passed = band.pass;
+      r.gradingPolicyVersion = policy.version;
+    }
+    r.status = 'published';
+    r.publishedAt = new Date();
+    r.publishedBy = req.user.id;
+    await r.save();
+  }
+
+  if (batchId) {
+    await Batch.updateOne({ _id: batchId }, { $set: { status: 'completed' } });
+  }
+
+  await CourseOffering.updateMany(
+    { _id: { $in: offeringIds } },
+    { $set: { status: 'completed' } },
+  );
+
+  audit({
+    req,
+    action: 'registrar.results.program_finished',
+    targetType: 'Program',
+    targetId: programId,
+    meta: { batchId, programCode: program.code },
+  });
+
+  res.json({ message: `Programme all years finished and verified. All results published and ready for CGPA!`, programCode: program.code });
 });
 
 export const approveResultSubmission = asyncHandler(async (req, res) => {
@@ -477,18 +621,97 @@ export const gpaCgpa = asyncHandler(async (req, res) => {
     });
   }
   if (query.student) {
-    const student = await Student.findById(query.student).populate('program', 'code name').lean();
+    const student = await Student.findById(query.student)
+      .populate('program', 'code name qualificationType')
+      .populate('batch', 'code name')
+      .lean();
     if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student record was not found.');
-    const result = await cgpaForStudent(query.student, policy);
+    const rows = await publishedResultsForStudent(query.student);
+    const cumResult = calculateGpa(rows, policy);
+
+    const stageMap = new Map();
+    for (const r of rows) {
+      const lvl = r.offering?.level || 1;
+      if (!stageMap.has(lvl)) stageMap.set(lvl, []);
+      stageMap.get(lvl).push(r);
+    }
+    const stageBreakdown = Array.from(stageMap.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([lvl, lvlRows]) => {
+        const stats = calculateGpa(lvlRows, policy);
+        return {
+          level: lvl,
+          gpa: stats.gpa,
+          credits: stats.credits,
+          qualityPoints: stats.qualityPoints,
+          courseCount: stats.courses,
+        };
+      });
+
     return res.json({
       configured: true,
-      student: { id: String(student._id), studentId: student.studentId, fullName: student.fullName, program: student.program?.name },
-      cgpa: result.gpa,
-      credits: result.credits,
-      qualityPoints: result.qualityPoints,
-      courseCount: result.courses,
-      courses: result.rows,
+      student: {
+        id: String(student._id),
+        studentId: student.studentId,
+        fullName: student.fullName,
+        program: student.program?.name,
+        batch: student.batch?.code,
+        level: student.level,
+      },
+      cgpa: cumResult.gpa,
+      credits: cumResult.credits,
+      qualityPoints: cumResult.qualityPoints,
+      courseCount: cumResult.courses,
+      courses: rows,
+      stageBreakdown,
     });
+  }
+
+  let programInfo = null;
+  let stageCompleted = false;
+  let allStagesFinished = false;
+
+  if (query.program) {
+    const prog = await Program.findById(query.program).lean();
+    if (prog) {
+      const isDegree = prog.qualificationType === 'degree';
+      const isDiploma = prog.qualificationType === 'diploma';
+      const durationUnit = isDegree ? 'Year' : isDiploma ? 'Level' : 'Duration';
+      let totalStages = 4;
+      if (isDegree) totalStages = prog.durationYears || 4;
+      else if (isDiploma) totalStages = prog.levels?.length ? Math.max(...prog.levels) : 4;
+      else if (prog.shortTerm?.duration) totalStages = prog.shortTerm.duration;
+
+      const offFilter = {
+        program: query.program,
+        ...(query.batch ? { batch: query.batch } : {}),
+      };
+      const offerings = await CourseOffering.find(offFilter).select('level status').lean();
+
+      const finishedStages = [];
+      for (let s = 1; s <= totalStages; s++) {
+        const lvlOffs = offerings.filter((o) => o.level === s);
+        if (lvlOffs.length > 0 && lvlOffs.every((o) => o.status === 'completed')) {
+          finishedStages.push(s);
+        }
+      }
+
+      if (query.level) {
+        stageCompleted = finishedStages.includes(Number(query.level));
+      }
+
+      allStagesFinished = totalStages > 0 && finishedStages.length >= totalStages;
+
+      programInfo = {
+        id: String(prog._id),
+        code: prog.code,
+        name: prog.name,
+        qualificationType: prog.qualificationType,
+        durationUnit,
+        totalStages,
+        finishedStages,
+      };
+    }
   }
 
   const studentFilter = mergeFilters(
@@ -496,28 +719,128 @@ export const gpaCgpa = asyncHandler(async (req, res) => {
     query.batch ? { batch: query.batch } : null,
   );
   const students = await Student.find(studentFilter)
-    .populate('program', 'code name')
+    .populate('program', 'code name qualificationType')
+    .populate('batch', 'code name')
     .sort({ fullName: 1 })
     .limit(500)
     .lean();
+
   const rows = [];
   for (const student of students) {
-    const result = await cgpaForStudent(student._id, policy);
-    if (result.courses) {
+    const studentResults = await publishedResultsForStudent(student._id);
+    if (studentResults.length > 0) {
+      const cumResult = calculateGpa(studentResults, policy);
+
+      let stageGpa = null;
+      let stageCredits = null;
+      let stageCourses = 0;
+
+      if (query.level) {
+        const stageRows = studentResults.filter((r) => Number(r.offering?.level) === Number(query.level));
+        if (stageRows.length > 0) {
+          const sRes = calculateGpa(stageRows, policy);
+          stageGpa = sRes.gpa;
+          stageCredits = sRes.credits;
+          stageCourses = sRes.courses;
+        }
+      }
+
       rows.push({
         id: String(student._id),
         studentId: student.studentId,
         fullName: student.fullName,
         program: student.program?.name,
-        cgpa: result.gpa,
-        credits: result.credits,
-        qualityPoints: result.qualityPoints,
-        courseCount: result.courses,
-        courses: result.rows,
+        batch: student.batch?.code,
+        level: student.level,
+        cgpa: cumResult.gpa,
+        credits: cumResult.credits,
+        qualityPoints: cumResult.qualityPoints,
+        courseCount: cumResult.courses,
+        stageGpa,
+        stageCredits,
+        stageCourses,
+        courses: studentResults,
       });
     }
   }
-  res.json({ configured: true, rows, policyVersion: policy.version });
+
+  res.json({
+    configured: true,
+    rows,
+    programInfo,
+    stageCompleted,
+    allStagesFinished,
+    policyVersion: policy.version,
+  });
+});
+
+export const exportStudentGpaRecord = asyncHandler(async (req, res) => {
+  const studentId = req.params.studentId;
+  const { format = 'pdf', level } = req.query;
+  const policy = await getGradingPolicy();
+  if (!policy) throw new AppError(409, 'POLICY_NOT_CONFIGURED', 'Grading policy is not configured.');
+
+  const student = await Student.findOne(
+    mongoose.Types.ObjectId.isValid(studentId)
+      ? { $or: [{ _id: studentId }, { studentId }] }
+      : { studentId },
+  )
+    .populate('program', 'code name qualificationType')
+    .populate('batch', 'code name')
+    .lean();
+
+  if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student record was not found.');
+
+  const allRows = await publishedResultsForStudent(student._id);
+  const rowsToUse = level
+    ? allRows.filter((r) => Number(r.offering?.level) === Number(level))
+    : allRows;
+
+  const cumResult = calculateGpa(allRows, policy);
+  const stageResult = level ? calculateGpa(rowsToUse, policy) : null;
+
+  const columns = [
+    { key: 'code', label: 'Course Code', width: 14 },
+    { key: 'title', label: 'Course Title', width: 30 },
+    { key: 'level', label: 'Year / Level', width: 12 },
+    { key: 'term', label: 'Term', width: 12 },
+    { key: 'credits', label: 'Credits', width: 10 },
+    { key: 'mark', label: 'Total Mark', width: 12 },
+    { key: 'grade', label: 'Grade', width: 10 },
+    { key: 'points', label: 'Points', width: 10 },
+  ];
+
+  const exportRows = rowsToUse.map((r) => ({
+    code: r.course?.code || '—',
+    title: r.course?.title || '—',
+    level: r.offering?.level != null ? `Level/Year ${r.offering.level}` : '—',
+    term: r.term || '—',
+    credits: r.creditHours ?? r.course?.creditHours ?? '—',
+    mark: r.totalMark != null ? r.totalMark : '—',
+    grade: r.letterGrade || '—',
+    points: r.gradePoint != null ? Number(r.gradePoint).toFixed(2) : '—',
+  }));
+
+  const summary = [
+    `Student ID: ${student.studentId} | Name: ${student.fullName}`,
+    `Programme: ${student.program?.name || '—'} (${student.program?.code || ''}) | Batch: ${student.batch?.code || '—'}`,
+    `Cumulative CGPA: ${cumResult.gpa ?? '—'} | Total Credits Earned: ${cumResult.credits ?? 0}`,
+    level ? `Stage Level ${level} GPA: ${stageResult?.gpa ?? '—'} (Credits: ${stageResult?.credits ?? 0})` : null,
+  ].filter(Boolean).join('\n');
+
+  const file = await buildExport({
+    format,
+    filenamePrefix: `GPA_${student.studentId}`,
+    title: 'OFFICIAL ACADEMIC & GPA RECORD',
+    subtitle: `${student.fullName} · ${student.studentId}`,
+    summary,
+    columns,
+    rows: exportRows,
+  });
+
+  res.setHeader('Content-Type', file.contentType);
+  res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+  res.send(file.buffer);
 });
 
 export const listGraduation = asyncHandler(async (req, res) => {

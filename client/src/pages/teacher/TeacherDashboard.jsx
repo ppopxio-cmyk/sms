@@ -39,22 +39,7 @@ export default function TeacherDashboard() {
     queryFn: async () => (await api.get('/teacher/dashboard')).data,
   });
 
-  if (query.isLoading) {
-    return <SkeletonPage cards={4} />;
-  }
-
-  if (query.isError) {
-    return (
-      <>
-        <TeacherPageHeader eyebrow="Teacher workspace" title="Dashboard" />
-        <Card className="mt-6">
-          <ErrorState message="We could not load your workspace." onRetry={query.refetch} />
-        </Card>
-      </>
-    );
-  }
-
-  const data = query.data;
+  const data = query.data ?? {};
   const summary = data.summary ?? {};
   const courses = data.courses ?? [];
 
@@ -73,6 +58,21 @@ export default function TeacherDashboard() {
       };
     });
   }, [courses]);
+
+  if (query.isLoading) {
+    return <SkeletonPage cards={4} />;
+  }
+
+  if (query.isError) {
+    return (
+      <>
+        <TeacherPageHeader eyebrow="Teacher workspace" title="Dashboard" />
+        <Card className="mt-6">
+          <ErrorState message="We could not load your workspace." onRetry={query.refetch} />
+        </Card>
+      </>
+    );
+  }
 
   return (
     <div className="space-y-6">

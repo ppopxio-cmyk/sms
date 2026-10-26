@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Calculator, CheckCircle2, Save, Send, TriangleAlert } from 'lucide-react';
@@ -18,7 +18,9 @@ import { SkeletonRows } from '../../components/ui/Skeleton';
 import StatCard from '../../components/ui/StatCard';
 
 const COMPONENT_LABELS = {
-  assessments: 'Assessments',
+  assignment: 'Assignment',
+  project: 'Project',
+  assessments: 'Assignment',
   quizzes: 'Quizzes',
   bonus: 'Bonus',
   attendance: 'Attendance',

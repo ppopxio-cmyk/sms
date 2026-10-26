@@ -26,7 +26,13 @@ const MARK_TOTAL = 100;
 
 function policyDto(policy) {
   if (!policy) return null;
-  const weights = Object.fromEntries(MARK_COMPONENTS.map(({ key }) => [key, Number(policy.weights?.[key] || 0)]));
+  const rawWeights = { ...policy.weights };
+  if ((rawWeights.assignment === undefined || rawWeights.assignment === 0) && rawWeights.assessments > 0) {
+    rawWeights.assignment = rawWeights.assessments;
+  }
+  const weights = Object.fromEntries(
+    MARK_COMPONENTS.map(({ key }) => [key, Number(rawWeights[key] || 0)])
+  );
   return {
     id: String(policy._id),
     weights,
@@ -225,8 +231,24 @@ export async function listCourseMarkSummary(teacherId, query) {
 
 export async function getCourseMarkPolicy(teacherId, assignmentId) {
   const assignment = await assignmentForTeacher(teacherId, assignmentId);
-  const policy = await CourseMarkPolicy.findOne({ offering: assignmentId }).lean();
-  return { assignment: assignmentDto(assignment), policy: policyDto(policy), components: MARK_COMPONENTS };
+  const [policy, assessments] = await Promise.all([
+    CourseMarkPolicy.findOne({ offering: assignmentId }).lean(),
+    Assessment.find({ offering: assignmentId }).select('title type maxScore weight status').lean(),
+  ]);
+
+  const usedByType = {};
+  for (const a of assessments) {
+    const key = a.type;
+    usedByType[key] = (usedByType[key] || 0) + Number(a.maxScore || a.weight || 0);
+  }
+
+  return {
+    assignment: assignmentDto(assignment),
+    policy: policyDto(policy),
+    components: MARK_COMPONENTS,
+    usedByType,
+    assessments,
+  };
 }
 
 export async function saveCourseMarkPolicy(teacherId, assignmentId, payload) {
@@ -440,6 +462,10 @@ export async function submitCourseMarks(teacherId, offeringIds) {
           gradingPolicyVersion: grading.version,
         },
       },
+    );
+    await CourseOffering.updateOne(
+      { _id: assignment._id },
+      { $set: { status: 'completed', completedAt: submittedAt, updatedBy: teacherId } },
     );
     const course = [assignment.course?.code, assignment.course?.title].filter(Boolean).join(' · ');
     await notifyRole('REGISTRAR', {

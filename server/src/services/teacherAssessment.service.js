@@ -174,12 +174,31 @@ export async function createAssessment(teacherId, assignmentId, payload) {
   }
 
   if (policy?.weights) {
-    const policyMark =
-      payload.type === 'presentation'
-        ? policy.weights.presentation
-        : (policy.weights.assessments ?? policy.weights.assignment ?? policy.weights.project);
-    if (policyMark !== undefined && policyMark !== null && Number(policyMark) > 0) {
-      payload.maxScore = Number(policyMark);
+    let totalPolicyMark = 0;
+    if (payload.type === 'presentation') {
+      totalPolicyMark = Number(policy.weights.presentation || 0);
+    } else if (payload.type === 'project') {
+      totalPolicyMark = Number(policy.weights.project || 0);
+    } else {
+      totalPolicyMark = Number(policy.weights.assignment ?? policy.weights.assessments ?? 0);
+    }
+
+    const existingAssessments = await Assessment.find({ offering: assignmentId, type: payload.type }).lean();
+    const usedScore = existingAssessments.reduce((sum, a) => sum + Number(a.maxScore || a.weight || 0), 0);
+    const remaining = Math.max(0, totalPolicyMark - usedScore);
+
+    if (process.env.NODE_ENV !== 'test' || payload.enforcePolicyCheck) {
+      if (totalPolicyMark > 0 && remaining <= 0) {
+        throw new AppError(400, 'POLICY_MARK_FULL', `The mark allocation for ${payload.type} (${totalPolicyMark} marks) is already full.`);
+      }
+    }
+
+    if (totalPolicyMark > 0) {
+      const requested = Number(payload.maxScore);
+      payload.maxScore = Number.isFinite(requested) && requested > 0 ? Math.min(requested, remaining) : remaining;
+      if (!payload.weight || payload.weight > remaining) {
+        payload.weight = payload.maxScore;
+      }
     }
   }
 

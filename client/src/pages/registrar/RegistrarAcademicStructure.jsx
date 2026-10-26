@@ -93,6 +93,9 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
   const queryClient = useQueryClient();
   const [tab, setTab] = useState(defaultTab);
   const [search, setSearch] = useState('');
+  const [selectedBatch, setSelectedBatch] = useState('');
+  const [selectedDept, setSelectedDept] = useState('');
+  const [selectedProg, setSelectedProg] = useState('');
   const [departmentModal, setDepartmentModal] = useState(null);
   const [programModal, setProgramModal] = useState(null);
   const [assignModal, setAssignModal] = useState(null);
@@ -154,12 +157,46 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
   const term = search.trim().toLowerCase();
   const matches = (values) => !term || values.some((value) => String(value || '').toLowerCase().includes(term));
 
-  const departments = (query.data?.departments || []).filter((row) => matches([row.code, row.name]));
-  const programs = (query.data?.programs || []).filter((row) =>
-    matches([row.code, row.name, row.department?.name, row.qualificationType, ...(row.categories || [])]),
-  );
-  const courses = (query.data?.courses || []).filter((row) => matches([row.code, row.title, row.department?.name]));
-  const plans = (query.data?.plans || []).filter((row) => matches([row.program?.name, row.academicYear?.label, row.title]));
+  const allBatches = query.data?.batches || [];
+  const rawDepartments = query.data?.departments || [];
+  const rawPrograms = query.data?.programs || [];
+  const rawCourses = query.data?.courses || [];
+  const rawPlans = query.data?.plans || [];
+
+  const selectedBatchObj = allBatches.find((b) => b.id === selectedBatch);
+  const batchProgId = selectedBatchObj?.program;
+
+  const programsInSelectedDept = useMemo(() => {
+    if (!selectedDept) return rawPrograms;
+    return rawPrograms.filter((p) => p.department?.id === selectedDept || p.department === selectedDept);
+  }, [rawPrograms, selectedDept]);
+
+  const departments = rawDepartments.filter((row) => {
+    if (selectedDept && row.id !== selectedDept) return false;
+    if (batchProgId) {
+      const batchProg = rawPrograms.find((p) => p.id === batchProgId);
+      if (batchProg && batchProg.department?.id !== row.id && batchProg.department !== row.id) return false;
+    }
+    return matches([row.code, row.name]);
+  });
+
+  const programs = rawPrograms.filter((row) => {
+    if (selectedDept && row.department?.id !== selectedDept && row.department !== selectedDept) return false;
+    if (selectedProg && row.id !== selectedProg) return false;
+    if (batchProgId && row.id !== batchProgId) return false;
+    return matches([row.code, row.name, row.department?.name, row.qualificationType, ...(row.categories || [])]);
+  });
+
+  const courses = rawCourses.filter((row) => {
+    if (selectedDept && row.department?.id !== selectedDept && row.department !== selectedDept) return false;
+    if (selectedProg && row.program?.id !== selectedProg && row.program !== selectedProg) return false;
+    return matches([row.code, row.title, row.department?.name]);
+  });
+
+  const plans = rawPlans.filter((row) => {
+    if (selectedProg && row.program?.id !== selectedProg && row.program !== selectedProg) return false;
+    return matches([row.program?.name, row.academicYear?.label, row.title]);
+  });
 
   const counts = useMemo(() => ({
     departments: query.data?.departments?.length ?? 0,
@@ -220,12 +257,81 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
       <Card>
         <CardHeader
           title={TABS.find((item) => item.key === tab)?.label}
-          subtitle={tab === 'departments' ? 'Edit a department, or remove one that has no programmes, courses, batches or students.' : tab === 'programs' ? 'Programmes belong to a department and can be inactivated without deleting their history.' : tab === 'courses' ? 'Catalogue of courses offered across programmes.' : 'Master records supplied by the college owner.'}
+          subtitle={tab === 'departments' ? 'Edit a department, or add a programme directly from its card.' : tab === 'programs' ? 'Programmes belong to a department, track durations & levels, and assign teachers with workload checks.' : tab === 'courses' ? 'Catalogue of courses offered across programmes.' : 'Master records supplied by the college owner.'}
           icon={TABS.find((item) => item.key === tab)?.icon}
           action={tab === 'courses' ? <Button size="sm" onClick={() => setCourseModal(true)} className="gap-1.5"><Plus className="h-4 w-4" /> Add course</Button> : null}
         />
         <CardBody className="space-y-4">
-          <SearchInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search this section" />
+          {/* Batches, Dept and Prog Filter Tabs */}
+          <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3 space-y-2.5">
+            {/* Batches filter */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">Batch:</span>
+              <button
+                type="button"
+                onClick={() => setSelectedBatch('')}
+                className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${!selectedBatch ? 'bg-slate-900 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+              >
+                All batches
+              </button>
+              {allBatches.map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => setSelectedBatch(b.id)}
+                  className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${selectedBatch === b.id ? 'bg-slate-900 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+                >
+                  {b.code} ({b.category || 'regular'})
+                </button>
+              ))}
+            </div>
+
+            {/* Department tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">Dept:</span>
+              <button
+                type="button"
+                onClick={() => { setSelectedDept(''); setSelectedProg(''); }}
+                className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${!selectedDept ? 'bg-brand-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+              >
+                All departments
+              </button>
+              {rawDepartments.map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => { setSelectedDept(d.id); setSelectedProg(''); }}
+                  className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${selectedDept === d.id ? 'bg-brand-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+                >
+                  {d.code} · {d.name}
+                </button>
+              ))}
+            </div>
+
+            {/* Programme tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">Prog:</span>
+              <button
+                type="button"
+                onClick={() => setSelectedProg('')}
+                className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${!selectedProg ? 'border border-brand-300 bg-brand-50 text-brand-800 font-semibold' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
+              >
+                All programmes ({programsInSelectedDept.length})
+              </button>
+              {programsInSelectedDept.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setSelectedProg(p.id)}
+                  className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${selectedProg === p.id ? 'border border-brand-300 bg-brand-50 text-brand-800 font-semibold' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
+                >
+                  {p.code}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <SearchInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by code, title or department..." />
           {query.isLoading ? (
             <SkeletonCard lines={8} />
           ) : query.error ? (
@@ -233,7 +339,7 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
           ) : tab === 'departments' ? (
             <div className="grid gap-3 sm:grid-cols-2">
               {departments.map((row) => (
-                <div key={row.id} className="rounded-2xl border border-slate-100 p-4">
+                <div key={row.id} className="rounded-2xl border border-slate-100 p-4 bg-white shadow-sm">
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <p className="text-sm font-semibold text-slate-900">{row.name}</p>
@@ -241,8 +347,15 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Badge tone={row.active ? 'success' : 'neutral'}>{row.active ? 'Active' : 'Inactive'}</Badge>
-                      <button type="button" aria-label={`Add programme to ${row.name}`} title="Add programme" className="focus-ring rounded-lg p-1.5 text-slate-400 hover:bg-brand-50 hover:text-brand-700" onClick={() => setProgramModal({ row: null, departmentId: row.id })}>
+                      <button
+                        type="button"
+                        aria-label={`Add programme to ${row.name}`}
+                        title="Add programme to this department"
+                        className="focus-ring inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-100"
+                        onClick={() => setProgramModal({ row: null, departmentId: row.id })}
+                      >
                         <Plus className="h-3.5 w-3.5" />
+                        Add programme
                       </button>
                       <button type="button" aria-label={`Edit ${row.name}`} className="focus-ring rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" onClick={() => setDepartmentModal({ row })}>
                         <Pencil className="h-3.5 w-3.5" />
@@ -267,11 +380,15 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
           ) : tab === 'programs' ? (
             <div className="grid gap-3 sm:grid-cols-2">
               {programs.map((row) => (
-                <div key={row.id} className="rounded-2xl border border-slate-100 p-4">
+                <div key={row.id} className="rounded-2xl border border-slate-100 p-4 bg-white shadow-sm">
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <p className="text-sm font-semibold text-slate-900">{row.name}</p>
-                      <p className="text-xs text-slate-500">{row.code} · {row.department?.name || 'No department'}</p>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold text-brand-700">{row.code}</span>
+                        <Badge tone={row.active ? 'success' : 'neutral'}>{row.active ? 'Active' : 'Inactive'}</Badge>
+                      </div>
+                      <p className="text-sm font-semibold text-slate-900 mt-0.5">{row.name}</p>
+                      <p className="text-xs text-slate-500">{row.department?.name || 'No department'}</p>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Badge tone="brand">{qualificationLabel(row.qualificationType)}</Badge>
@@ -283,23 +400,29 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
                       </button>
                     </div>
                   </div>
-                  <p className="mt-3 text-xs text-slate-500">
-                    {row.qualificationType === 'degree'
-                      ? `${row.durationYears || '—'} study year${row.durationYears === 1 ? '' : 's'}`
-                      : row.qualificationType === 'diploma'
-                        ? `Levels ${(row.levels || []).join(', ') || 'not set'}`
-                        : `${row.shortTerm?.duration || '—'} ${row.shortTerm?.unit || ''}`}
-                    {' · '}{row.capacity ? `capacity ${row.capacity}` : 'capacity not set'}
-                  </p>
+
+                  <div className="mt-3 rounded-xl bg-slate-50 p-2.5 text-xs text-slate-700 space-y-1">
+                    <p className="font-semibold text-slate-800">
+                      Duration: <span className="text-brand-700">{row.durationSummary || `${row.durationYears || '—'} study years`}</span>
+                    </p>
+                    <p className="text-slate-500">
+                      Capacity: {row.capacity ? `${row.capacity} students` : 'No limit set'}
+                      {(row.batches || []).length ? ` · Batches: ${(row.batches || []).map((b) => b.code).join(', ')}` : ''}
+                    </p>
+                  </div>
+
                   <div className="mt-3 flex flex-wrap gap-1.5">
                     {(row.categories || ['regular', 'extension']).map((category) => (
                       <Badge key={category} tone={category === 'extension' ? 'warning' : 'neutral'}>{humanStatus(category)}</Badge>
                     ))}
                   </div>
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                    <p className="flex items-center gap-1.5 text-xs text-slate-500">
-                      <UserRoundCheck className="h-3.5 w-3.5" />
-                      {(row.teachers || []).length ? (row.teachers || []).map((teacher) => teacher.name).join(', ') : 'No teachers assigned'}
+
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                    <p className="flex items-center gap-1.5 text-xs text-slate-500 min-w-0 truncate max-w-[240px]">
+                      <UserRoundCheck className="h-3.5 w-3.5 shrink-0" />
+                      {(row.teachers || []).length
+                        ? (row.teachers || []).map((t) => `${t.name} (${t.workload?.regular ?? 0}/2R·${t.workload?.extension ?? 0}/1E)`).join(', ')
+                        : 'No teachers assigned'}
                     </p>
                     <div className="flex items-center gap-1.5">
                       <Link
@@ -485,18 +608,34 @@ function AssignTeachersModal({ open, row, teachers, onClose, onSaved }) {
     }
   }, [open, row]);
 
-  const toggle = (teacherId) =>
+  const rowCategories = row?.categories || ['regular'];
+
+  const toggle = (teacher) => {
+    const isCurrentlySelected = selected.includes(teacher.id);
+    if (!isCurrentlySelected) {
+      const reg = teacher.workload?.regular ?? 0;
+      const ext = teacher.workload?.extension ?? 0;
+      if (rowCategories.includes('regular') && reg >= 2) {
+        toast.error(`Teacher ${teacher.name} has already reached the maximum of 2 regular classes/programmes.`);
+        return;
+      }
+      if (rowCategories.includes('extension') && ext >= 1) {
+        toast.error(`Teacher ${teacher.name} has already reached the maximum of 1 extension class/programme.`);
+        return;
+      }
+    }
     setSelected((current) =>
-      current.includes(teacherId)
-        ? current.filter((id) => id !== teacherId)
-        : [...current, teacherId],
+      current.includes(teacher.id)
+        ? current.filter((id) => id !== teacher.id)
+        : [...current, teacher.id],
     );
+  };
 
   return (
     <Modal
       open={open}
       title={row ? `Assign teachers to ${row.name}` : 'Assign teachers'}
-      subtitle="Every teacher on this list can see the programme, its classes and its students."
+      subtitle={`Workload limit: max 2 regular classes, 1 extension class. Programme streams: ${rowCategories.join(', ')}`}
       size="md"
       onClose={onClose}
       dismissible
@@ -511,22 +650,43 @@ function AssignTeachersModal({ open, row, teachers, onClose, onSaved }) {
     >
       <div className="space-y-3">
         <p className="text-sm text-slate-500">
-          Ticking a teacher makes the programme appear in their workspace. Unticking keeps their historical records but removes the programme from their active view.
+          A teacher can only be assigned to a maximum of <strong>2 regular</strong> programmes/classes and <strong>1 extension</strong> programme/class.
         </p>
         <div className="max-h-72 space-y-1 overflow-y-auto rounded-xl border border-slate-100 p-2">
-          {teachers.map((teacher) => (
-            <label key={teacher.id} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 text-sm text-slate-700 hover:bg-slate-50">
-              <input
-                type="checkbox"
-                checked={selected.includes(teacher.id)}
-                onChange={() => toggle(teacher.id)}
-                className="h-4 w-4 rounded border-slate-300 text-brand-600"
-              />
-              <span className="min-w-0 flex-1 truncate">
-                {teacher.name} <span className="text-xs text-slate-400">{teacher.email}</span>
-              </span>
-            </label>
-          ))}
+          {teachers.map((teacher) => {
+            const isAssigned = selected.includes(teacher.id);
+            const reg = teacher.workload?.regular ?? 0;
+            const ext = teacher.workload?.extension ?? 0;
+            const isRegFull = rowCategories.includes('regular') && reg >= 2;
+            const isExtFull = rowCategories.includes('extension') && ext >= 1;
+            const isFull = (isRegFull || isExtFull) && !isAssigned;
+
+            return (
+              <label
+                key={teacher.id}
+                className={`flex cursor-pointer items-center justify-between gap-2.5 rounded-lg px-2 py-2 text-sm ${
+                  isFull ? 'opacity-50 cursor-not-allowed bg-slate-50' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <input
+                    type="checkbox"
+                    checked={isAssigned}
+                    disabled={isFull}
+                    onChange={() => toggle(teacher)}
+                    className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                  />
+                  <span className="min-w-0 flex-1 truncate">
+                    {teacher.name} <span className="text-xs text-slate-400">{teacher.email}</span>
+                  </span>
+                </div>
+                <span className="shrink-0 font-mono text-xs text-slate-500">
+                  {reg}/2 Reg · {ext}/1 Ext
+                  {isFull && <span className="ml-1 text-rose-600 font-bold">(Full)</span>}
+                </span>
+              </label>
+            );
+          })}
           {!teachers.length ? <p className="px-2 py-3 text-sm text-slate-500">No active teacher accounts exist yet.</p> : null}
         </div>
         <p className="text-xs text-slate-500">{selected.length} teacher{selected.length === 1 ? '' : 's'} selected.</p>
@@ -610,6 +770,22 @@ function ProgramModal({ open, row, departmentId, departments, teachers, academic
         throw new Error('Code, name and department are required.');
       }
       if (!form.categories.length) throw new Error('Choose at least one regular/extension stream.');
+
+      // Check teacher workloads
+      for (const tid of form.teachers) {
+        const t = teachers.find((x) => x.id === tid);
+        if (t && !(row?.teachers || []).some((x) => (x.id || x) === tid)) {
+          const reg = t.workload?.regular ?? 0;
+          const ext = t.workload?.extension ?? 0;
+          if (form.categories.includes('regular') && reg >= 2) {
+            throw new Error(`Teacher ${t.name} has already reached the maximum of 2 regular classes/programmes.`);
+          }
+          if (form.categories.includes('extension') && ext >= 1) {
+            throw new Error(`Teacher ${t.name} has already reached the maximum of 1 extension class/programme.`);
+          }
+        }
+      }
+
       return (await api.request({
         url: `${REGISTRAR}/academic-structure/programs${row ? `/${row.id}` : ''}`,
         method: row ? 'patch' : 'post',
@@ -641,12 +817,27 @@ function ProgramModal({ open, row, departmentId, departments, teachers, academic
       ? current.levels.filter((value) => value !== level)
       : [...current.levels, level].sort((a, b) => a - b),
   }));
-  const toggleTeacher = (teacherId) => setForm((current) => ({
-    ...current,
-    teachers: current.teachers.includes(teacherId)
-      ? current.teachers.filter((value) => value !== teacherId)
-      : [...current.teachers, teacherId],
-  }));
+  const toggleTeacher = (teacher) => {
+    const isCurrentlySelected = form.teachers.includes(teacher.id);
+    if (!isCurrentlySelected) {
+      const reg = teacher.workload?.regular ?? 0;
+      const ext = teacher.workload?.extension ?? 0;
+      if (form.categories.includes('regular') && reg >= 2) {
+        toast.error(`Teacher ${teacher.name} cannot be assigned: maximum limit of 2 regular programmes reached.`);
+        return;
+      }
+      if (form.categories.includes('extension') && ext >= 1) {
+        toast.error(`Teacher ${teacher.name} cannot be assigned: maximum limit of 1 extension programme reached.`);
+        return;
+      }
+    }
+    setForm((current) => ({
+      ...current,
+      teachers: isCurrentlySelected
+        ? current.teachers.filter((value) => value !== teacher.id)
+        : [...current.teachers, teacher.id],
+    }));
+  };
   const toggleAcademicYear = (yearId) => setForm((current) => ({
     ...current,
     academicYears: current.academicYears.includes(yearId)
@@ -745,14 +936,44 @@ function ProgramModal({ open, row, departmentId, departments, teachers, academic
         </div>
 
         <div className="rounded-2xl bg-slate-50/80 p-4">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Teachers assigned to this programme</p>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Teachers assigned to this programme (Max 2 Regular · 1 Extension)
+          </p>
           <div className="max-h-44 space-y-1 overflow-y-auto rounded-xl border border-slate-100 bg-white p-2">
-            {teachers.map((teacher) => (
-              <label key={teacher.id} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
-                <input type="checkbox" checked={form.teachers.includes(teacher.id)} onChange={() => toggleTeacher(teacher.id)} className="h-4 w-4 rounded border-slate-300 text-brand-600" />
-                <span className="truncate">{teacher.name} <span className="text-xs text-slate-400">{teacher.email}</span></span>
-              </label>
-            ))}
+            {teachers.map((teacher) => {
+              const isSelected = form.teachers.includes(teacher.id);
+              const reg = teacher.workload?.regular ?? 0;
+              const ext = teacher.workload?.extension ?? 0;
+              const isRegFull = form.categories.includes('regular') && reg >= 2;
+              const isExtFull = form.categories.includes('extension') && ext >= 1;
+              const isLimit = (isRegFull || isExtFull) && !isSelected;
+
+              return (
+                <label
+                  key={teacher.id}
+                  className={`flex cursor-pointer items-center justify-between gap-2.5 rounded-lg px-2 py-1.5 text-sm ${
+                    isLimit ? 'opacity-50 cursor-not-allowed bg-slate-50' : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      disabled={isLimit}
+                      onChange={() => toggleTeacher(teacher)}
+                      className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                    />
+                    <span className="truncate">
+                      {teacher.name} <span className="text-xs text-slate-400">{teacher.email}</span>
+                    </span>
+                  </div>
+                  <span className="shrink-0 font-mono text-xs text-slate-500">
+                    {reg}/2 Reg · {ext}/1 Ext
+                    {isLimit && <span className="ml-1 text-rose-600 font-bold">(Full)</span>}
+                  </span>
+                </label>
+              );
+            })}
             {!teachers.length ? <p className="px-2 py-3 text-sm text-slate-500">No active teacher accounts exist yet.</p> : null}
           </div>
         </div>

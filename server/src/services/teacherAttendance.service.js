@@ -1,6 +1,8 @@
 import { AttendanceSheet } from '../models/AttendanceSheet.js';
-import { AttendanceRecord } from '../models/Records.js';
+import { AttendanceRecord, Result } from '../models/Records.js';
 import { CourseOffering, CourseRegistration } from '../models/Offering.js';
+import { CourseMarkPolicy } from '../models/CourseMarkPolicy.js';
+import { buildExport } from './export.service.js';
 import {
   ASSIGNMENT_POPULATE,
   activeEnrollments,
@@ -17,9 +19,9 @@ import { ownFilter } from './registrar.helpers.js';
 import { notifyRole } from './notification.service.js';
 
 // Load attendance history for a given assignment (for the grid/history view)
-export async function attendanceHistory(teacherId, assignmentId, query) {
+export async function attendanceHistory(teacherId, assignmentId, query = {}) {
   const assignment = await assignmentForTeacher(teacherId, assignmentId);
-  const period = query.period || 'month';
+  const period = query.period || 'all';
   const month = query.month || '';
 
   let dateFilter = {};
@@ -29,33 +31,94 @@ export async function attendanceHistory(teacherId, assignmentId, query) {
     const end = new Date(start);
     end.setMonth(end.getMonth() + 1);
     dateFilter = { $gte: start, $lt: end };
-  } else {
-    const year = query.year || new Date().getFullYear();
-    const start = new Date(`${year}-01-01T00:00:00+03:00`);
-    const end = new Date(`${year}-12-31T00:00:00+03:00`);
+  } else if (query.year) {
+    const start = new Date(`${query.year}-01-01T00:00:00+03:00`);
+    const end = new Date(`${query.year}-12-31T00:00:00+03:00`);
     dateFilter = { $gte: start, $lte: end };
   }
 
-  const sheets = await AttendanceSheet.find(
-    ownFilter({
-      offering: assignmentId,
-      status: 'finalized',
-      date: dateFilter,
-    }),
-  )
+  const sheetFilter = { offering: assignmentId, status: 'finalized' };
+  if (Object.keys(dateFilter).length) sheetFilter.date = dateFilter;
+
+  const sheets = await AttendanceSheet.find(ownFilter(sheetFilter))
     .select('dateKey date period finalizedAt')
     .sort({ dateKey: 1 })
     .lean();
 
-  if (!sheets.length) return { sessions: [], deliveryStream: assignment.batch?.category || 'regular' };
-
+  const dates = sheets.map((s) => s.dateKey);
+  const enrollments = await activeEnrollments(assignmentId);
   const records = await AttendanceRecord.find(
     ownFilter({
       offering: assignmentId,
       date: { $in: sheets.map((s) => s.date) },
     }),
-  )
-    .lean();
+  ).lean();
+
+  const policy = await CourseMarkPolicy.findOne({ offering: assignmentId }).lean();
+  const attendancePolicyMark = Number(policy?.weights?.attendance || 0);
+
+  const recordMap = new Map();
+  for (const r of records) {
+    const sId = String(r.student?._id ?? r.student);
+    const dKey = r.dateKey || (r.date ? dayKey(r.date) : '');
+    recordMap.set(`${sId}:${dKey}`, r);
+  }
+
+  const studentRows = enrollments
+    .filter((e) => e.student)
+    .map((e) => {
+      const student = e.student;
+      const sId = String(student._id);
+      const statuses = {};
+      let present = 0;
+      let absent = 0;
+      let late = 0;
+      let excused = 0;
+
+      for (const d of dates) {
+        const rec = recordMap.get(`${sId}:${d}`);
+        const st = rec?.status || 'absent';
+        statuses[d] = st;
+        if (st === 'present') present++;
+        else if (st === 'absent') absent++;
+        else if (st === 'late') late++;
+        else if (st === 'excused') excused++;
+      }
+
+      const totalDays = dates.length;
+      const effectivePresent = present + excused;
+      const rate = totalDays > 0 ? Math.round((effectivePresent / totalDays) * 100) : 100;
+
+      let mark = null;
+      if (attendancePolicyMark > 0) {
+        if (absent === 0) {
+          mark = attendancePolicyMark;
+        } else if (absent === 1) {
+          mark = Math.max(0, attendancePolicyMark - 1);
+        } else if (absent >= 2 && absent <= 3) {
+          mark = Math.max(0, attendancePolicyMark - 3);
+        } else if (absent === 4) {
+          mark = Math.max(0, attendancePolicyMark - 5);
+        } else {
+          mark = 0;
+        }
+      }
+
+      return {
+        id: sId,
+        studentId: student.studentId || '',
+        name: `${student.firstName || ''} ${student.lastName || ''}`.trim() || student.studentId || 'Student',
+        statuses,
+        present,
+        absent,
+        late,
+        excused,
+        effectivePresent,
+        totalDays,
+        rate,
+        mark,
+      };
+    });
 
   const sessions = sheets.map((sheet) => {
     const sheetRecords = records.filter(
@@ -78,9 +141,115 @@ export async function attendanceHistory(teacherId, assignmentId, query) {
   });
 
   return {
+    assignment: assignmentDto(assignment),
+    dates,
     sessions,
+    students: studentRows,
+    policyMark: attendancePolicyMark,
+    isAttendanceClosed: Boolean(assignment.attendanceClosed),
     deliveryStream: assignment.batch?.category || 'regular',
   };
+}
+
+export async function exportAttendanceHistoryData(teacherId, assignmentId, format) {
+  const history = await attendanceHistory(teacherId, assignmentId);
+  const courseCode = history.assignment?.courseCode || 'Course';
+  const columns = [
+    { key: 'studentId', label: 'Student ID', width: 16 },
+    { key: 'name', label: 'Student Name', width: 28 },
+    ...history.dates.map((date) => ({
+      key: `d_${date}`,
+      label: date.slice(5),
+      width: 10,
+    })),
+    { key: 'present', label: 'Present', width: 10, numeric: true },
+    { key: 'absent', label: 'Absent', width: 10, numeric: true },
+    { key: 'excused', label: 'Leave', width: 10, numeric: true },
+    { key: 'rate', label: 'Rate (%)', width: 10, numeric: true },
+    ...(history.policyMark > 0
+      ? [{ key: 'mark', label: `Mark (/${history.policyMark})`, width: 12, numeric: true }]
+      : []),
+  ];
+
+  const rows = history.students.map((st) => {
+    const dateValues = {};
+    for (const d of history.dates) {
+      const s = st.statuses[d];
+      dateValues[`d_${d}`] = s === 'present' ? '✓' : s === 'absent' ? '✗' : s === 'excused' ? 'Leave' : s || '—';
+    }
+    return {
+      studentId: st.studentId,
+      name: st.name,
+      ...dateValues,
+      present: st.present,
+      absent: st.absent,
+      excused: st.excused,
+      rate: `${st.rate}%`,
+      ...(history.policyMark > 0 ? { mark: st.mark } : {}),
+    };
+  });
+
+  return buildExport({
+    format,
+    filenamePrefix: `attendance-history-${courseCode}`,
+    title: `Attendance History: ${courseCode} - ${history.assignment?.courseTitle || ''}`,
+    subtitle: `${history.dates.length} sessions · ${history.students.length} students · Delivery: ${history.deliveryStream}`,
+    summary: [
+      { label: 'Total Sessions', value: history.dates.length },
+      { label: 'Students', value: history.students.length },
+      { label: 'Attendance Policy Mark', value: history.policyMark > 0 ? `${history.policyMark} marks` : 'Not configured' },
+    ],
+    note: 'Leave is counted as excused presence. Marks are calculated per attendance grading policy.',
+    columns,
+    rows,
+  });
+}
+
+export async function finalizeCourseAttendance(teacherId, assignmentId) {
+  const history = await attendanceHistory(teacherId, assignmentId);
+  const attendancePolicyMark = history.policyMark;
+
+  await AttendanceSheet.updateMany(
+    { offering: assignmentId, status: 'draft' },
+    { $set: { status: 'finalized', finalizedAt: new Date(), finalizedBy: teacherId } },
+  );
+
+  if (attendancePolicyMark > 0) {
+    for (const student of history.students) {
+      if (student.mark !== null && student.mark !== undefined) {
+        const existing = await Result.findOne({ offering: assignmentId, student: student.id });
+        if (existing) {
+          const comps = existing.components || [];
+          const idx = comps.findIndex((c) => c.name === 'Attendance');
+          if (idx >= 0) {
+            comps[idx].score = student.mark;
+            comps[idx].max = attendancePolicyMark;
+          } else {
+            comps.push({ name: 'Attendance', max: attendancePolicyMark, score: student.mark });
+          }
+          await Result.updateOne(
+            { _id: existing._id },
+            { $set: { components: comps, updatedBy: teacherId } },
+          );
+        } else {
+          await Result.create({
+            offering: assignmentId,
+            student: student.id,
+            components: [{ name: 'Attendance', max: attendancePolicyMark, score: student.mark }],
+            status: 'draft',
+            enteredBy: teacherId,
+          });
+        }
+      }
+    }
+  }
+
+  await CourseOffering.updateOne(
+    { _id: assignmentId },
+    { $set: { attendanceClosed: true, attendanceClosedAt: new Date(), updatedBy: teacherId } },
+  );
+
+  return { success: true, policyMark: attendancePolicyMark, syncedCount: history.students.length };
 }
 
 function assertNotFuture(dateKey) {
@@ -322,12 +491,6 @@ export async function saveAttendance(teacherId, assignmentId, payload) {
 
   const records = await AttendanceRecord.find({ offering: assignmentId, date, period }).lean();
   const populated = await assignmentForTeacher(teacherId, assignmentId);
-  void notifyRole('REGISTRAR', {
-    type: 'attendance_saved',
-    title: 'Attendance draft saved',
-    body: `${populated?.course?.code || ''} · ${date} · ${period} · ${records.length} marked`,
-    actorId: teacherId,
-  });
   return sheetSummary(sheet, records, populated);
 }
 
@@ -376,11 +539,5 @@ export async function finalizeAttendance(teacherId, assignmentId, attendanceId, 
   }
 
   const populated = await assignmentForTeacher(teacherId, assignmentId);
-  void notifyRole('REGISTRAR', {
-    type: 'attendance_finalized',
-    title: 'Attendance finalized',
-    body: `${populated?.course?.code || ''} · ${updated.dateKey} · ${updated.period} · ${records.filter((r) => r.status === 'present').length} present`,
-    actorId: teacherId,
-  });
   return sheetSummary(updated, records, populated);
 }

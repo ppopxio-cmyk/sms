@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import {
   ArrowRight,
   BookOpen,
+  CheckCircle2,
   ClipboardList,
   Clock3,
   GraduationCap,
+  Layers,
+  LockKeyhole,
   Users,
 } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -43,6 +46,57 @@ export default function TeacherClasses() {
   const rows = query.data?.assignments ?? [];
   const programs = query.data?.programs ?? [];
   const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0 };
+
+  const groupedPrograms = useMemo(() => {
+    const groups = new Map();
+    for (const course of rows) {
+      const progId = course.program?.id || course.program?._id || course.programCode || 'default';
+      const batchId = course.batch?.id || course.batch?._id || course.batch?.code || 'default';
+      const level = course.level || 1;
+      const key = `${progId}-${batchId}-${level}`;
+
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          programId: progId,
+          programCode: course.program?.code || course.programCode || '',
+          programName: course.program?.name || course.programName || course.program || 'Programme',
+          qualificationType: course.program?.qualificationType || course.qualificationType || 'degree',
+          level,
+          batchCode: course.batch?.code || '',
+          stream: course.batch?.category || 'regular',
+          courses: [],
+        });
+      }
+      groups.get(key).courses.push(course);
+    }
+
+    return [...groups.values()].map((group) => {
+      group.courses.sort((a, b) => (a.courseCode || a.course?.code || '').localeCompare(b.courseCode || b.course?.code || ''));
+
+      let previousCompleted = true;
+      const coursesWithLock = group.courses.map((course, idx) => {
+        const isCompleted = course.status === 'completed';
+        const isUnlocked = idx === 0 || previousCompleted;
+        const lockedBy = !isUnlocked ? group.courses[idx - 1] : null;
+
+        if (!isCompleted) {
+          previousCompleted = false;
+        }
+
+        return {
+          ...course,
+          isUnlocked,
+          lockedBy,
+        };
+      });
+
+      return {
+        ...group,
+        courses: coursesWithLock,
+      };
+    });
+  }, [rows]);
 
   return (
     <div className="space-y-6">
@@ -143,79 +197,156 @@ export default function TeacherClasses() {
               </div>
             </div>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-              {rows.map((course) => {
-                const assessments =
-                  course.assessmentCount ?? Object.values(course.assessments || {}).reduce((sum, value) => sum + value, 0);
+            <div className="space-y-6">
+              {groupedPrograms.map((group) => {
+                const durationLabel =
+                  group.qualificationType === 'degree'
+                    ? `Year ${group.level}`
+                    : group.qualificationType === 'diploma'
+                      ? `Level ${group.level}`
+                      : `Duration ${group.level}`;
+
                 return (
-                  <Link
-                    key={course.id}
-                    to={`/teacher/classes/${course.id}`}
-                    className="focus-ring group flex flex-col rounded-2xl border border-slate-100 bg-white/70 p-5 transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-lg hover:shadow-brand-900/5"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
-                        <BookOpen className="h-5 w-5" />
-                      </span>
-                      <div className="flex flex-wrap justify-end gap-1.5">
-                        {course.assessmentMode === 'competency' ? <Badge tone="warning">Competency</Badge> : null}
-                        <Badge tone={course.canManage ? 'brand' : 'neutral'}>
-                          {course.canManage ? 'My class' : 'Read-only'}
-                        </Badge>
-                        <Badge tone={statusTone(course.status)}>{statusLabel(course.status)}</Badge>
-                      </div>
-                    </div>
-                    <h2 className="mt-3 line-clamp-2 text-base font-semibold leading-snug text-slate-900">{classTitle(course)}</h2>
-                    <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500">{classMeta(course)}</p>
-
-                    <div className="mt-4 grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 text-center">
-                      <div>
-                        <p className="text-sm font-bold text-slate-800">{course.studentCount ?? 0}</p>
-                        <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-slate-500">
-                          <Users className="h-3 w-3" /> students
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold text-slate-800">{assessments}</p>
-                        <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-slate-500">
-                          <ClipboardList className="h-3 w-3" /> assessments
-                        </p>
-                      </div>
-                      <div>
-                        <p className={`text-sm font-bold ${course.attendanceDrafts ? 'text-amber-600' : 'text-slate-800'}`}>
-                          {course.attendanceDrafts ?? 0}
-                        </p>
-                        <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-slate-500">
-                          <Clock3 className="h-3 w-3" /> drafts
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
-                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-600">
-                        Open class
-                        <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
-                      </span>
-                      {course.canManage ? (
-                        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                          <Link
-                            to={`/teacher/attendance/${course.id}`}
-                            className="rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100 transition"
-                            title="Take attendance"
-                          >
-                            Attendance
-                          </Link>
-                          <Link
-                            to={`/teacher/materials?assignmentId=${course.id}`}
-                            className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200 transition"
-                            title="Course materials"
-                          >
-                            Materials
-                          </Link>
+                  <Card key={group.key} className="overflow-hidden border border-slate-200/90 shadow-sm">
+                    <div className="border-b border-slate-100 bg-slate-50/70 px-5 py-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700 shadow-sm">
+                            <GraduationCap className="h-5 w-5" />
+                          </span>
+                          <div>
+                            <h2 className="text-base font-bold text-slate-900">
+                              {group.programCode} · {group.programName}
+                            </h2>
+                            <p className="mt-0.5 text-xs text-slate-500">
+                              {durationLabel} · Batch: {group.batchCode || 'Regular'} · {group.courses.length} course{group.courses.length === 1 ? '' : 's'}
+                            </p>
+                          </div>
                         </div>
-                      ) : null}
+                        <div className="flex items-center gap-2">
+                          <Badge tone={group.stream === 'extension' ? 'warning' : 'brand'}>
+                            {group.stream === 'extension' ? 'Extension' : 'Regular'}
+                          </Badge>
+                          <Badge tone="neutral">{group.qualificationType ? group.qualificationType.toUpperCase() : 'DEGREE'}</Badge>
+                        </div>
+                      </div>
                     </div>
-                  </Link>
+
+                    <div className="p-5">
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        {group.courses.map((course) => {
+                          const assessments =
+                            course.assessmentCount ??
+                            Object.values(course.assessments || {}).reduce((sum, value) => sum + value, 0);
+
+                          return (
+                            <div
+                              key={course.id}
+                              className={`flex flex-col justify-between rounded-2xl border p-4.5 transition ${
+                                !course.isUnlocked
+                                  ? 'border-slate-200/60 bg-slate-50/80 opacity-80'
+                                  : 'border-slate-200 bg-white shadow-sm hover:border-brand-300'
+                              }`}
+                            >
+                              <div>
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <span className="font-mono text-xs font-bold text-brand-700">
+                                      {course.courseCode || course.course?.code || 'Course'}
+                                    </span>
+                                    <h3 className="line-clamp-2 text-sm font-semibold text-slate-900 mt-0.5">
+                                      {course.courseTitle || course.course?.title || classTitle(course)}
+                                    </h3>
+                                  </div>
+                                  <div className="flex shrink-0 items-center gap-1">
+                                    {!course.isUnlocked ? (
+                                      <Badge tone="neutral">
+                                        <LockKeyhole className="h-3 w-3 mr-1 inline" />
+                                        Locked
+                                      </Badge>
+                                    ) : (
+                                      <Badge tone={statusTone(course.status)}>{statusLabel(course.status)}</Badge>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {!course.isUnlocked ? (
+                                  <div className="mt-3 flex items-start gap-2 rounded-xl bg-amber-50 p-2.5 text-xs text-amber-800 border border-amber-200/60">
+                                    <LockKeyhole className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+                                    <span>
+                                      Complete <strong>{course.lockedBy?.courseCode || 'the previous course'}</strong> first to start this class and attendance.
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 text-center">
+                                    <div>
+                                      <p className="text-sm font-bold text-slate-800">{course.studentCount ?? 0}</p>
+                                      <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-slate-500">
+                                        <Users className="h-3 w-3" /> students
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <p className="text-sm font-bold text-slate-800">{assessments}</p>
+                                      <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-slate-500">
+                                        <ClipboardList className="h-3 w-3" /> assessments
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <p
+                                        className={`text-sm font-bold ${
+                                          course.attendanceDrafts ? 'text-amber-600' : 'text-slate-800'
+                                        }`}
+                                      >
+                                        {course.attendanceDrafts ?? 0}
+                                      </p>
+                                      <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-slate-500">
+                                        <Clock3 className="h-3 w-3" /> drafts
+                                      </p>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                                {course.isUnlocked ? (
+                                  <>
+                                    <Link
+                                      to={`/teacher/classes/${course.id}`}
+                                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-700 hover:text-brand-900"
+                                    >
+                                      Open class
+                                      <ArrowRight className="h-3.5 w-3.5" />
+                                    </Link>
+                                    {course.canManage ? (
+                                      <div className="flex items-center gap-1.5">
+                                        <Link
+                                          to={`/teacher/attendance/${course.id}`}
+                                          className="rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100 transition"
+                                        >
+                                          Attendance
+                                        </Link>
+                                        <Link
+                                          to={`/teacher/materials?assignmentId=${course.id}`}
+                                          className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200 transition"
+                                        >
+                                          Materials
+                                        </Link>
+                                      </div>
+                                    ) : null}
+                                  </>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 text-xs text-slate-400 font-medium">
+                                    <LockKeyhole className="h-3.5 w-3.5" />
+                                    Course locked
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </Card>
                 );
               })}
             </div>

@@ -61,23 +61,43 @@ export default function TeacherAssessments() {
   const hasMarkPolicy = Boolean(markPolicyQuery.data?.policy);
 
   const policyWeights = markPolicyQuery.data?.policy?.weights;
-  const policyMaxScore = useMemo(() => {
-    if (!policyWeights) return null;
+  const usedByType = markPolicyQuery.data?.usedByType || {};
+
+  const { totalPolicyMark, usedMark, remainingMark, isFull } = useMemo(() => {
+    if (!policyWeights) return { totalPolicyMark: 0, usedMark: 0, remainingMark: 0, isFull: false };
+    let total = 0;
     if (form.type === 'presentation') {
-      return policyWeights.presentation ?? 20;
+      total = Number(policyWeights.presentation || 0);
+    } else if (form.type === 'project') {
+      total = Number(policyWeights.project || 0);
+    } else {
+      total = Number(policyWeights.assignment ?? policyWeights.assessments ?? 0);
     }
-    return policyWeights.assessments ?? policyWeights.assignment ?? policyWeights.project ?? 30;
-  }, [policyWeights, form.type]);
+    const used = Number(usedByType[form.type] || 0);
+    const rem = Math.max(0, total - used);
+    return {
+      totalPolicyMark: total,
+      usedMark: used,
+      remainingMark: rem,
+      isFull: total > 0 && rem <= 0,
+    };
+  }, [policyWeights, usedByType, form.type]);
 
   useEffect(() => {
-    if (policyMaxScore !== null && policyMaxScore !== undefined) {
+    if (remainingMark > 0) {
       setForm((current) => ({
         ...current,
-        maxScore: String(policyMaxScore),
-        weight: current.weight === '0' || !current.weight ? String(policyMaxScore) : current.weight,
+        maxScore: String(remainingMark),
+        weight: current.weight === '0' || !current.weight ? String(remainingMark) : current.weight,
+      }));
+    } else if (isFull) {
+      setForm((current) => ({
+        ...current,
+        maxScore: '0',
+        weight: '0',
       }));
     }
-  }, [policyMaxScore]);
+  }, [remainingMark, isFull]);
 
   const query = useQuery({
     queryKey: ['teacher', 'assessments', { assignmentId, status, type, page, limit }],
@@ -412,7 +432,7 @@ export default function TeacherAssessments() {
             <Button
               onClick={submit}
               loading={createMutation.isPending}
-              disabled={competencyBlocked || !form.assignmentId || (markPolicyQuery.isSuccess && !hasMarkPolicy)}
+              disabled={competencyBlocked || !form.assignmentId || (markPolicyQuery.isSuccess && !hasMarkPolicy) || isFull}
             >
               Create assessment
             </Button>
@@ -438,6 +458,11 @@ export default function TeacherAssessments() {
                   Configure Course Mark Policy &rarr;
                 </Link>
               </div>
+            </Alert>
+          ) : null}
+          {isFull ? (
+            <Alert tone="warning" title={`${assessmentTypeLabel(form.type)} marks fully allocated`}>
+              The course mark policy allocated {totalPolicyMark} marks for {assessmentTypeLabel(form.type).toLowerCase()}s and all {usedMark} marks have already been assigned to existing assessments. You cannot create another {assessmentTypeLabel(form.type).toLowerCase()}.
             </Alert>
           ) : null}
           {selectedClass?.assessmentMode === 'competency' ? (
@@ -499,7 +524,9 @@ export default function TeacherAssessments() {
                 className={`${inputClass} cursor-not-allowed bg-slate-100/90 text-slate-600 select-none`}
               />
               <p className="mt-1 text-xs text-slate-500">
-                Auto-assigned from Course Mark Policy ({form.maxScore || '—'} marks) and locked.
+                {isFull
+                  ? `Fully allocated (${usedMark}/${totalPolicyMark} marks used).`
+                  : `Remaining mark: ${remainingMark} of ${totalPolicyMark} policy marks available (${usedMark} used).`}
               </p>
             </div>
             <div>

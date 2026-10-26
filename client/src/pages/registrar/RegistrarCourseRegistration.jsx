@@ -51,6 +51,7 @@ export default function RegistrarCourseRegistration() {
   const [dropping, setDropping] = useState(null);
   const [materialDepartment, setMaterialDepartment] = useState('');
   const [materialProgram, setMaterialProgram] = useState('');
+  const [materialLevel, setMaterialLevel] = useState('');
   const [materialSearch, setMaterialSearch] = useState('');
   const [materialModal, setMaterialModal] = useState(false);
   const [removingMaterial, setRemovingMaterial] = useState(null);
@@ -156,9 +157,10 @@ export default function RegistrarCourseRegistration() {
     return allMaterials.filter((row) => (
       (!materialDepartment || String(row.department?.id || row.department) === String(materialDepartment))
       && (!materialProgram || row.program?.id === materialProgram)
+      && (!materialLevel || String(row.level || 1) === String(materialLevel))
       && (!term || [row.courseName, row.courseCode, row.fileName].some((value) => String(value || '').toLowerCase().includes(term)))
     ));
-  }, [allMaterials, materialDepartment, materialProgram, materialSearch]);
+  }, [allMaterials, materialDepartment, materialProgram, materialLevel, materialSearch]);
 
   const materialColumns = [
     {
@@ -388,6 +390,28 @@ export default function RegistrarCourseRegistration() {
             ))}
           </div>
 
+          {/* Year / Level tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">Year / Level:</span>
+            <button
+              type="button"
+              onClick={() => setMaterialLevel('')}
+              className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${!materialLevel ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            >
+              All Years & Levels
+            </button>
+            {[1, 2, 3, 4, 5].map((lvl) => (
+              <button
+                key={lvl}
+                type="button"
+                onClick={() => setMaterialLevel(String(lvl))}
+                className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${String(materialLevel) === String(lvl) ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                Year {lvl} / Level {lvl}
+              </button>
+            ))}
+          </div>
+
           {materialProgram && (
             <div className="flex items-center justify-between pt-1">
               <span className="text-xs text-slate-500">
@@ -558,12 +582,14 @@ function formatBytes(bytes) {
 
 function CourseMaterialModal({ open, options, existingMaterials = [], initialProgram, onClose, onSaved }) {
   const [department, setDepartment] = useState('');
+  const [selectedBatches, setSelectedBatches] = useState([]);
   const [form, setForm] = useState({ program: '', courseName: '', courseCode: '', creditHours: 3 });
   const [file, setFile] = useState(null);
   const [error, setError] = useState('');
 
   const departments = options?.departments || [];
   const allPrograms = options?.programs || [];
+  const allBatches = (options?.batches || []).filter((b) => b.status === 'active' || !b.status);
 
   const filteredPrograms = useMemo(() => {
     if (!department) return allPrograms;
@@ -585,6 +611,7 @@ function CourseMaterialModal({ open, options, existingMaterials = [], initialPro
     if (!open) return;
     setError('');
     setFile(null);
+    setSelectedBatches([]);
     const initialProg = allPrograms.find((p) => p.id === initialProgram);
     const initialDept = initialProg?.department || '';
     setDepartment(initialDept);
@@ -596,6 +623,56 @@ function CourseMaterialModal({ open, options, existingMaterials = [], initialPro
       creditHours: 3,
     });
   }, [open, initialProgram, allPrograms, existingMaterials]);
+
+  const selectedProgObj = useMemo(() => {
+    return allPrograms.find((p) => p.id === form.program);
+  }, [allPrograms, form.program]);
+
+  const durationInfo = useMemo(() => {
+    if (!selectedProgObj) return null;
+    const qType = selectedProgObj.qualificationType || 'degree';
+    if (qType === 'degree') {
+      const years = selectedProgObj.durationYears || 4;
+      return { type: 'Degree', unit: 'Years', total: `${years} Years`, courseStage: '1st Year Course' };
+    }
+    if (qType === 'diploma') {
+      const levels = selectedProgObj.levels?.length || 4;
+      return { type: 'Diploma', unit: 'Levels', total: `${levels} Levels`, courseStage: 'Level 1 Course' };
+    }
+    const duration = selectedProgObj.shortTerm?.duration || 12;
+    const unit = selectedProgObj.shortTerm?.unit || 'weeks';
+    return { type: 'Short-term', unit: 'Duration', total: `${duration} ${unit}`, courseStage: '1st Week Course' };
+  }, [selectedProgObj]);
+
+  const toggleBatch = (batch) => {
+    const bId = batch.id;
+    const isSelected = selectedBatches.includes(bId);
+
+    if (isSelected) {
+      setSelectedBatches((prev) => prev.filter((id) => id !== bId));
+    } else {
+      if (selectedBatches.length >= 2) {
+        toast.info('You can select up to 2 active batches (e.g. Regular & Extension).');
+        return;
+      }
+      setSelectedBatches((prev) => [...prev, bId]);
+
+      // If batch has an associated program, pre-select it and its department
+      if (batch.program) {
+        const prog = allPrograms.find((p) => p.id === batch.program);
+        if (prog) {
+          setForm((c) => ({
+            ...c,
+            program: prog.id,
+            courseCode: c.courseCode || autoGenerateCode(prog.id),
+          }));
+          if (prog.department) {
+            setDepartment(prog.department?.id || prog.department);
+          }
+        }
+      }
+    }
+  };
 
   const handleProgramChange = (progId) => {
     const prog = allPrograms.find((p) => p.id === progId);
@@ -643,6 +720,8 @@ function CourseMaterialModal({ open, options, existingMaterials = [], initialPro
           courseCode: form.courseCode.trim().toUpperCase(),
           creditHours: Number(form.creditHours) || 3,
           filename: file.name,
+          level: 1,
+          batches: selectedBatches.join(','),
         },
         headers: { 'Content-Type': contentType },
         timeout: 60_000,
@@ -666,13 +745,75 @@ function CourseMaterialModal({ open, options, existingMaterials = [], initialPro
     <Modal
       open={open}
       title="Add course material"
-      subtitle="Attach a PDF or Word document to a programme course."
+      subtitle="Attach course material to active batches and allocate 1st year / level 1 course."
+      size="lg"
       onClose={save.isPending ? undefined : onClose}
       dismissible={!save.isPending}
-      footer={<><Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending} className="gap-1.5"><Upload className="h-4 w-4" /> Upload</Button></>}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={save.isPending}>
+            Cancel
+          </Button>
+          <Button onClick={() => save.mutate()} loading={save.isPending} className="gap-1.5">
+            <Upload className="h-4 w-4" /> Upload material
+          </Button>
+        </>
+      }
     >
       <div className="grid gap-4">
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
+
+        {/* Batch Tick Mode (Only Active Batches, Max 2) */}
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-600">
+              Select Active Batches (Tick up to 2 batches)
+            </span>
+            <span className="text-xs font-semibold text-brand-700">
+              {selectedBatches.length}/2 Selected
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            One programme can have both Regular and Extension active batches taking this course.
+          </p>
+          <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pt-1">
+            {allBatches.map((b) => {
+              const isChecked = selectedBatches.includes(b.id);
+              return (
+                <label
+                  key={b.id}
+                  className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-1.5 text-xs transition ${
+                    isChecked
+                      ? 'border-brand-500 bg-brand-50 text-brand-900 font-semibold shadow-sm'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => toggleBatch(b)}
+                    className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600"
+                  />
+                  <span>{b.code}</span>
+                  <span className="text-[10px] text-slate-400 capitalize">({b.category || 'regular'})</span>
+                </label>
+              );
+            })}
+            {!allBatches.length && <p className="text-xs text-slate-500">No active batches found.</p>}
+          </div>
+        </div>
+
+        {/* Duration stage badge */}
+        {durationInfo && (
+          <div className="rounded-xl bg-brand-50/80 border border-brand-200 p-3 text-xs text-brand-900 flex items-center justify-between">
+            <div>
+              <span className="font-bold">{durationInfo.type}:</span> {durationInfo.courseStage}
+              <span className="text-slate-500 ml-2">(Total Duration: {durationInfo.total})</span>
+            </div>
+            <Badge tone="brand">Duration: {durationInfo.unit}</Badge>
+          </div>
+        )}
+
         <FormGrid>
           <SelectField
             label="Department"

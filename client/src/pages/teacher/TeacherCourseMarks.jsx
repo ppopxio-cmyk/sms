@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Calculator, ClipboardList, Send, SlidersHorizontal } from 'lucide-react';
+import { ArrowRight, Calculator, ClipboardList, GraduationCap, LockKeyhole, Send, SlidersHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../../lib/api';
 import { classMeta, classTitle } from '../../lib/teacher';
@@ -44,6 +44,61 @@ export default function TeacherCourseMarks() {
   const visible = courses.filter((row) => program === 'all' || row.assignment.programId === program);
   const ready = visible.filter(isReady);
   const submitted = visible.filter((row) => row.submittedStudents > 0);
+
+  const groupedCourseMarks = useMemo(() => {
+    const groups = new Map();
+    for (const row of visible) {
+      const a = row.assignment;
+      const progId = a.programId || a.program || 'default';
+      const batchId = a.batchId || a.batch || 'default';
+      const level = a.level || 1;
+      const key = `${progId}-${batchId}-${level}`;
+
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          programId: progId,
+          programName: a.programName || a.program || 'Programme',
+          qualificationType: a.qualificationType || 'degree',
+          level,
+          batchCode: a.batchCode || a.batch || '',
+          stream: a.batch?.category || a.category || 'regular',
+          rows: [],
+        });
+      }
+      groups.get(key).rows.push(row);
+    }
+
+    return [...groups.values()].map((group) => {
+      group.rows.sort((a, b) =>
+        (a.assignment?.courseCode || a.assignment?.course?.code || '').localeCompare(
+          b.assignment?.courseCode || b.assignment?.course?.code || '',
+        ),
+      );
+
+      let previousCompleted = true;
+      const rowsWithLock = group.rows.map((row, idx) => {
+        const isCompleted = row.submittedStudents > 0 || row.assignment.status === 'completed';
+        const isUnlocked = idx === 0 || previousCompleted;
+        const lockedBy = !isUnlocked ? group.rows[idx - 1] : null;
+
+        if (!isCompleted) {
+          previousCompleted = false;
+        }
+
+        return {
+          ...row,
+          isUnlocked,
+          lockedBy,
+        };
+      });
+
+      return {
+        ...group,
+        rows: rowsWithLock,
+      };
+    });
+  }, [visible]);
 
   const requestCodeMutation = useMutation({
     mutationFn: async () => (await api.post('/teacher/course-marks/submit-code')).data,
@@ -151,47 +206,128 @@ export default function TeacherCourseMarks() {
           ) : !visible.length ? (
             <EmptyState icon={ClipboardList} title="No courses to mark" message="The registrar has not assigned you a course yet." />
           ) : (
-            <div className="grid gap-3 md:grid-cols-2">
-              {visible.map((row) => {
-                const rowReady = isReady(row);
-                const sent = row.submittedStudents > 0;
+            <div className="space-y-6">
+              {groupedCourseMarks.map((group) => {
+                const durationLabel =
+                  group.qualificationType === 'degree'
+                    ? `Year ${group.level}`
+                    : group.qualificationType === 'diploma'
+                      ? `Level ${group.level}`
+                      : `Duration ${group.level}`;
+
                 return (
-                <div key={row.assignment.id} className="rounded-2xl border border-slate-200 bg-white/70 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-800">{classTitle(row.assignment)}</p>
-                      <p className="mt-0.5 truncate text-xs text-slate-500">{classMeta(row.assignment)}</p>
+                  <Card key={group.key} className="overflow-hidden border border-slate-200/90 shadow-sm">
+                    <div className="border-b border-slate-100 bg-slate-50/70 px-5 py-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700 shadow-sm">
+                            <GraduationCap className="h-5 w-5" />
+                          </span>
+                          <div>
+                            <h2 className="text-base font-bold text-slate-900">{group.programName}</h2>
+                            <p className="mt-0.5 text-xs text-slate-500">
+                              {durationLabel} · Batch: {group.batchCode || 'Regular'} · {group.rows.length} course{group.rows.length === 1 ? '' : 's'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge tone={group.stream === 'extension' ? 'warning' : 'brand'}>
+                            {group.stream === 'extension' ? 'Extension' : 'Regular'}
+                          </Badge>
+                          <Badge tone="neutral">{group.qualificationType ? group.qualificationType.toUpperCase() : 'DEGREE'}</Badge>
+                        </div>
+                      </div>
                     </div>
-                    <Badge tone={sent ? 'success' : rowReady ? 'brand' : row.policy ? 'neutral' : 'warning'}>
-                      {sent ? 'Sent' : rowReady ? 'Ready' : row.policy ? 'Calculating' : 'No policy'}
-                    </Badge>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500">
-                    <span>
-                      {row.calculatedStudents ?? 0} / {row.studentCount} calculated
-                    </span>
-                    <span className="text-right">{row.policy ? `Policy ${row.policy.total}` : 'Policy required'}</span>
-                  </div>
-                  <div className="mt-4">
-                    {row.policy ? (
-                      <Link
-                        to={`/teacher/course-marks/${row.assignment.id}`}
-                        className="focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white transition hover:bg-slate-800"
-                      >
-                        Open mark sheet
-                        <ArrowRight className="h-3.5 w-3.5" />
-                      </Link>
-                    ) : (
-                      <Link
-                        to="/teacher/course-mark-policy"
-                        className="focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                      >
-                        Set the policy first
-                        <ArrowRight className="h-3.5 w-3.5" />
-                      </Link>
-                    )}
-                  </div>
-                </div>
+
+                    <div className="p-5">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        {group.rows.map((row) => {
+                          const rowReady = isReady(row);
+                          const sent = row.submittedStudents > 0 || row.assignment.status === 'completed';
+
+                          return (
+                            <div
+                              key={row.assignment.id}
+                              className={`flex flex-col justify-between rounded-2xl border p-4.5 transition ${
+                                !row.isUnlocked
+                                  ? 'border-slate-200/60 bg-slate-50/80 opacity-80'
+                                  : 'border-slate-200 bg-white shadow-sm hover:border-brand-300'
+                              }`}
+                            >
+                              <div>
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <span className="font-mono text-xs font-bold text-brand-700">
+                                      {row.assignment.courseCode || 'Course'}
+                                    </span>
+                                    <h3 className="line-clamp-2 text-sm font-semibold text-slate-800 mt-0.5">
+                                      {classTitle(row.assignment)}
+                                    </h3>
+                                    <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">{classMeta(row.assignment)}</p>
+                                  </div>
+                                  <div className="flex shrink-0 items-center gap-1">
+                                    {!row.isUnlocked ? (
+                                      <Badge tone="neutral">
+                                        <LockKeyhole className="h-3 w-3 mr-1 inline" />
+                                        Locked
+                                      </Badge>
+                                    ) : (
+                                      <Badge tone={sent ? 'success' : rowReady ? 'brand' : row.policy ? 'neutral' : 'warning'}>
+                                        {sent ? 'Completed' : rowReady ? 'Ready' : row.policy ? 'Calculating' : 'No policy'}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {!row.isUnlocked ? (
+                                  <div className="mt-3 flex items-start gap-2 rounded-xl bg-amber-50 p-2.5 text-xs text-amber-800 border border-amber-200/60">
+                                    <LockKeyhole className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+                                    <span>
+                                      Complete <strong>{row.lockedBy?.assignment?.courseCode || 'the previous course'}</strong> first to start and fill marks.
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500 border-t border-slate-100 pt-3">
+                                    <span>
+                                      {row.calculatedStudents ?? 0} / {row.studentCount} calculated
+                                    </span>
+                                    <span className="text-right">{row.policy ? `Policy ${row.policy.total}` : 'Policy required'}</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                                {row.isUnlocked ? (
+                                  row.policy ? (
+                                    <Link
+                                      to={`/teacher/course-marks/${row.assignment.id}`}
+                                      className="focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white transition hover:bg-slate-800"
+                                    >
+                                      Open mark sheet
+                                      <ArrowRight className="h-3.5 w-3.5" />
+                                    </Link>
+                                  ) : (
+                                    <Link
+                                      to="/teacher/course-mark-policy"
+                                      className="focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                                    >
+                                      Set policy first
+                                      <ArrowRight className="h-3.5 w-3.5" />
+                                    </Link>
+                                  )
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 text-xs text-slate-400 font-medium">
+                                    <LockKeyhole className="h-3.5 w-3.5" />
+                                    Mark sheet locked
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </Card>
                 );
               })}
             </div>
@@ -216,11 +352,14 @@ export default function TeacherCourseMarks() {
               disabled={sendCode.length !== 6}
             >
               <Send className="h-4 w-4" />
-              Send marks
+              Confirm & Close Course
             </Button>
           </>
         }
       >
+        <p className="text-sm leading-6 text-slate-600">
+          Sending marks will close this course as <strong>completed</strong> and notify the registrar. Marks remain viewable to you, and the next course in this programme will be unlocked for teaching.
+        </p>
         <p className="text-sm leading-6 text-slate-600">
           The registrar receives a notification and each mark sheet becomes read-only. Courses with missing or
           uncalculated students are left out.

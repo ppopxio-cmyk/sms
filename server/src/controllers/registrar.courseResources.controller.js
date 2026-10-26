@@ -21,6 +21,8 @@ function resourceDto(row) {
     courseName: row.courseName,
     courseCode: row.courseCode,
     creditHours: row.creditHours ?? 3,
+    level: row.level ?? 1,
+    batches: (row.batches || []).map((b) => (b?._id ? { id: String(b._id), code: b.code, name: b.name } : String(b))),
     fileName: row.fileName,
     contentType: row.contentType,
     bytes: row.bytes,
@@ -63,6 +65,10 @@ export const uploadCourseResource = asyncHandler(async (req, res) => {
   });
 
   let resource;
+  const level = Number(req.valid.query.level || 1);
+  const batchesInput = req.valid.query.batches
+    ? (Array.isArray(req.valid.query.batches) ? req.valid.query.batches : String(req.valid.query.batches).split(','))
+    : [];
   try {
     resource = await CourseResource.create({
       program: program._id,
@@ -70,6 +76,8 @@ export const uploadCourseResource = asyncHandler(async (req, res) => {
       courseName: courseName.trim(),
       courseCode: courseCode.trim().toUpperCase(),
       creditHours: Number(creditHours) || 3,
+      level,
+      batches: batchesInput.filter(Boolean),
       fileName: safeName,
       filePath: uploaded.filePath,
       fileId: uploaded.fileId,

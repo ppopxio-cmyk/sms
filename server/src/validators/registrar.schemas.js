@@ -326,6 +326,8 @@ export const courseResourceUploadSchema = z.object({
   courseCode: text(40).min(1),
   filename: text(255).min(1),
   creditHours: z.coerce.number().min(0.5).max(1000).optional().default(3),
+  level: z.coerce.number().min(1).max(20).optional().default(1),
+  batches: z.union([z.string(), z.array(z.string())]).optional(),
 });
 
 export const listResultsQuerySchema = paginationSchema.extend({
@@ -411,6 +413,12 @@ export const gpaQuerySchema = z.object({
   batch: objectId.optional(),
   academicYear: objectId.optional(),
   term: text(60).optional(),
+  level: z.coerce.number().int().min(1).max(20).optional(),
+});
+
+export const gpaExportQuerySchema = z.object({
+  format: z.enum(['xlsx', 'docx', 'pdf']).optional().default('pdf'),
+  level: z.coerce.number().int().min(1).max(20).optional(),
 });
 
 export const graduationQuerySchema = paginationSchema.extend({
@@ -540,6 +548,8 @@ export const listCertificatesQuerySchema = paginationSchema.extend({
 
 export const listTranscriptsQuerySchema = paginationSchema.extend({
   status: z.enum(['all', 'issued', 'revoked']).optional().default('all'),
+  program: objectId.optional(),
+  batch: objectId.optional(),
 });
 
 export const noticeListSchema = paginationSchema.extend({

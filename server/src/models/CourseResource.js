@@ -7,6 +7,8 @@ const courseResourceSchema = new mongoose.Schema(
     courseName: { type: String, required: true, trim: true, maxlength: 160 },
     courseCode: { type: String, required: true, trim: true, maxlength: 40 },
     creditHours: { type: Number, min: 0.5, max: 1000, default: 3 },
+    level: { type: Number, default: 1, min: 1, max: 20 },
+    batches: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Batch' }],
     fileName: { type: String, required: true, trim: true, maxlength: 255 },
     filePath: { type: String, required: true, trim: true, maxlength: 1000 },
     fileId: { type: String, required: true, trim: true, maxlength: 120 },

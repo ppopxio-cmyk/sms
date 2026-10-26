@@ -37,8 +37,77 @@ async function requirePlan(planId, { status } = {}) {
   return plan;
 }
 
+export async function getTeacherWorkloads(teacherIds = []) {
+  if (!teacherIds.length) return {};
+  const [programs, offerings] = await Promise.all([
+    Program.find({ active: true, teachers: { $in: teacherIds } }).select('_id teachers categories').lean(),
+    CourseOffering.find({
+      teacher: { $in: teacherIds },
+      status: { $in: ['open', 'in_progress', 'draft'] },
+    }).select('teacher category program').lean(),
+  ]);
+
+  const workloads = {};
+  for (const tid of teacherIds) {
+    const sId = String(tid);
+    const regKeys = new Set();
+    const extKeys = new Set();
+
+    for (const p of programs) {
+      if ((p.teachers || []).some((t) => String(t) === sId)) {
+        const cats = p.categories?.length ? p.categories : ['regular'];
+        if (cats.includes('regular')) regKeys.add(`prog:${p._id}:regular`);
+        if (cats.includes('extension')) extKeys.add(`prog:${p._id}:extension`);
+      }
+    }
+
+    for (const o of offerings) {
+      if (String(o.teacher) === sId) {
+        if (o.category === 'extension') extKeys.add(`offering:${o._id}`);
+        else regKeys.add(`offering:${o._id}`);
+      }
+    }
+
+    workloads[sId] = {
+      regular: regKeys.size,
+      extension: extKeys.size,
+      canTakeRegular: regKeys.size < 2,
+      canTakeExtension: extKeys.size < 1,
+    };
+  }
+  return workloads;
+}
+
+export async function validateTeacherWorkloads(teacherIds = [], categories = ['regular'], excludeProgramId = null) {
+  if (!teacherIds.length) return;
+  const workloads = await getTeacherWorkloads(teacherIds);
+  const teachers = await User.find({ _id: { $in: teacherIds } }).select('name email').lean();
+  const teacherMap = new Map(teachers.map((t) => [String(t._id), t.name || t.email]));
+
+  for (const tid of teacherIds) {
+    const sId = String(tid);
+    const wl = workloads[sId] || { regular: 0, extension: 0 };
+    const tName = teacherMap.get(sId) || 'Teacher';
+
+    if (categories.includes('regular') && wl.regular >= 2) {
+      throw new AppError(
+        400,
+        'TEACHER_WORKLOAD_LIMIT',
+        `Teacher ${tName} has reached the maximum workload limit of 2 regular classes/programmes (${wl.regular}/2 assigned). Cannot take 3 regular programmes.`,
+      );
+    }
+    if (categories.includes('extension') && wl.extension >= 1) {
+      throw new AppError(
+        400,
+        'TEACHER_WORKLOAD_LIMIT',
+        `Teacher ${tName} has reached the maximum workload limit of 1 extension class/programme (${wl.extension}/1 assigned). Cannot take 2 extension programmes.`,
+      );
+    }
+  }
+}
+
 export const structure = asyncHandler(async (_req, res) => {
-  const [departments, programs, courses, plans, teachers, academicYears] = await Promise.all([
+  const [departments, programs, courses, plans, teachers, academicYears, batches] = await Promise.all([
     Department.find().sort({ name: 1 }).lean(),
     Program.find()
       .populate('department', 'code name')
@@ -53,6 +122,7 @@ export const structure = asyncHandler(async (_req, res) => {
       .lean(),
     User.find({ role: 'TEACHER', status: 'active', deletedAt: null }).select('name email').sort({ name: 1 }).lean(),
     AcademicYear.find().sort({ startDate: -1 }).lean(),
+    Batch.find().sort({ code: 1 }).lean(),
   ]);
   const [programCounts, courseCounts] = await Promise.all([
     Program.aggregate([{ $group: { _id: '$department', count: { $sum: 1 } } }]),
@@ -60,6 +130,18 @@ export const structure = asyncHandler(async (_req, res) => {
   ]);
   const programMap = new Map(programCounts.map((row) => [String(row._id), row.count]));
   const courseMap = new Map(courseCounts.map((row) => [String(row._id), row.count]));
+  const teacherWorkloads = await getTeacherWorkloads(teachers.map((t) => t._id));
+
+  const batchMapByProgram = new Map();
+  for (const b of batches) {
+    if (b.program) {
+      const pKey = String(b.program);
+      const list = batchMapByProgram.get(pKey) || [];
+      list.push(b);
+      batchMapByProgram.set(pKey, list);
+    }
+  }
+
   res.json({
     departments: departments.map((row) => ({
       ...row,
@@ -68,21 +150,43 @@ export const structure = asyncHandler(async (_req, res) => {
       courseCount: courseMap.get(String(row._id)) || 0,
       _id: undefined,
     })),
-    programs: programs.map((row) => ({
-      ...row,
-      id: String(row._id),
-      categories: row.categories?.length ? row.categories : ['regular', 'extension'],
-      department: row.department
-        ? { id: String(row.department._id), code: row.department.code, name: row.department.name }
-        : null,
-      teachers: (row.teachers || []).filter(Boolean).map((teacher) => ({
-        id: String(teacher._id),
-        name: teacher.name || teacher.email,
-        email: teacher.email,
-      })),
-      academicYears: (row.academicYears || []).map(String),
-      _id: undefined,
-    })),
+    programs: programs.map((row) => {
+      const progBatches = batchMapByProgram.get(String(row._id)) || [];
+      const activeBatch = progBatches.find((b) => b.status === 'active') || progBatches[0];
+      const currentLevel = activeBatch?.currentLevel || 1;
+      const totalYears = row.qualificationType === 'degree' ? (row.durationYears || 4) : null;
+      const totalLevels = row.qualificationType === 'diploma' ? (row.levels?.length || 4) : null;
+      const shortTermDuration = row.qualificationType === 'short-term' ? `${row.shortTerm?.duration || 12} ${row.shortTerm?.unit || 'weeks'}` : null;
+
+      return {
+        ...row,
+        id: String(row._id),
+        categories: row.categories?.length ? row.categories : ['regular', 'extension'],
+        department: row.department
+          ? { id: String(row.department._id), code: row.department.code, name: row.department.name }
+          : null,
+        teachers: (row.teachers || []).filter(Boolean).map((teacher) => ({
+          id: String(teacher._id),
+          name: teacher.name || teacher.email,
+          email: teacher.email,
+          workload: teacherWorkloads[String(teacher._id)] || { regular: 0, extension: 0 },
+        })),
+        academicYears: (row.academicYears || []).map(String),
+        batches: progBatches.map((b) => ({ id: String(b._id), code: b.code, name: b.name, category: b.category, status: b.status })),
+        currentLevel,
+        currentYear: currentLevel,
+        totalYears,
+        totalLevels,
+        shortTermDuration,
+        durationSummary:
+          row.qualificationType === 'degree'
+            ? `Year ${currentLevel} of ${totalYears} years`
+            : row.qualificationType === 'diploma'
+              ? `Level ${currentLevel} of ${totalLevels} levels`
+              : `Current: Week ${currentLevel} · Total: ${shortTermDuration}`,
+        _id: undefined,
+      };
+    }),
     courses: courses.map((row) => ({
       ...row,
       id: String(row._id),
@@ -100,10 +204,19 @@ export const structure = asyncHandler(async (_req, res) => {
       academicYear: row.academicYear ? { id: String(row.academicYear._id), label: row.academicYear.label } : null,
       _id: undefined,
     })),
+    batches: batches.map((row) => ({
+      id: String(row._id),
+      code: row.code,
+      name: row.name,
+      category: row.category,
+      program: row.program ? String(row.program) : null,
+      status: row.status,
+    })),
     teachers: teachers.map((row) => ({
       id: String(row._id),
       name: row.name || row.email,
       email: row.email,
+      workload: teacherWorkloads[String(row._id)] || { regular: 0, extension: 0, canTakeRegular: true, canTakeExtension: true },
     })),
     academicYears: academicYears.map((row) => ({
       id: String(row._id),
@@ -190,6 +303,9 @@ export const createProgram = asyncHandler(async (req, res) => {
   const existing = await Program.findOne({ code }).lean();
   if (existing) throw new AppError(409, 'PROGRAM_CODE_EXISTS', 'That programme code is already in use.');
   const teachers = await requireTeachers(input.teachers);
+  if (teachers.length) {
+    await validateTeacherWorkloads(teachers, input.categories || ['regular']);
+  }
   const program = await Program.create({
     ...input,
     code,
@@ -224,7 +340,10 @@ export const updateProgram = asyncHandler(async (req, res) => {
     if (duplicate) throw new AppError(409, 'PROGRAM_CODE_EXISTS', 'That programme code is already in use.');
     input.code = code;
   }
-  if (input.teachers) input.teachers = await requireTeachers(input.teachers);
+  if (input.teachers) {
+    input.teachers = await requireTeachers(input.teachers);
+    await validateTeacherWorkloads(input.teachers, input.categories || program.categories || ['regular'], program._id);
+  }
   if (input.capacity !== undefined && input.capacity !== null) {
     const current = await Student.countDocuments({ program: program._id, studentStatus: 'active' });
     if (input.capacity < current) {
@@ -278,37 +397,106 @@ export const programDetail = asyncHandler(async (req, res) => {
     .populate('teachers', 'name email role')
     .lean();
   if (!program) throw new AppError(404, 'PROGRAM_NOT_FOUND', 'That programme was not found.');
-  const [batches, courses, plans, assignments, studentCount] = await Promise.all([
+
+  const deptId = program.department?._id || program.department;
+  const [batches, deptCourses, plans, assignments, studentCount, allTeachers] = await Promise.all([
     Batch.find({ program: program._id }).sort({ code: 1, category: 1 }).lean(),
-    Course.find({ department: program.department }).sort({ code: 1 }).lean(),
+    Course.find({ $or: [{ program: program._id }, { department: deptId }] }).sort({ code: 1 }).lean(),
     CurriculumPlan.find({ program: program._id }).sort({ version: -1 }).lean(),
     TeacherProgramAssignment.find(ownFilter({ program: program._id, status: 'active' }))
       .populate('teacher', 'name email')
       .sort({ assignedAt: -1 })
       .lean(),
     Student.countDocuments({ program: program._id, studentStatus: 'active' }),
+    User.find({ role: 'TEACHER', status: 'active', deletedAt: null }).select('name email').lean(),
   ]);
+
+  const planIds = plans.map((p) => p._id);
+  const planCourses = await CurriculumCourse.find({ curriculumPlan: { $in: planIds } })
+    .populate('course')
+    .lean();
+
+  const courseMap = new Map();
+  for (const c of deptCourses) {
+    courseMap.set(String(c._id), { ...c, id: String(c._id), _id: undefined });
+  }
+  for (const pc of planCourses) {
+    if (pc.course?._id) {
+      courseMap.set(String(pc.course._id), { ...pc.course, id: String(pc.course._id), _id: undefined });
+    }
+  }
+  const allCourses = Array.from(courseMap.values());
+  const teacherWorkloads = await getTeacherWorkloads(allTeachers.map((t) => t._id));
+
   res.json({
     program: {
       ...program,
       id: String(program._id),
       department: program.department ? { id: String(program.department._id), code: program.department.code, name: program.department.name } : null,
       teachers: (program.teachers || []).map((teacher) => ({ id: String(teacher._id), name: teacher.name || teacher.email, email: teacher.email })),
+      courses: allCourses,
+      batches: batches.map((row) => ({ ...row, id: String(row._id), _id: undefined })),
+      plans: plans.map((row) => ({ ...row, id: String(row._id), _id: undefined })),
+      studentCount,
       _id: undefined,
     },
+    courses: allCourses,
+    batches: batches.map((row) => ({ ...row, id: String(row._id), _id: undefined })),
+    plans: plans.map((row) => ({ ...row, id: String(row._id), _id: undefined })),
+    studentCount,
     assignments: assignments.map((row) => ({
       id: String(row._id),
       teacher: row.teacher ? { id: String(row.teacher._id), name: row.teacher.name || row.teacher.email, email: row.teacher.email } : null,
+      courseCode: row.course?.code || row.courseCode || '',
       status: row.status,
       source: row.source,
       assignedAt: row.assignedAt,
       assignedBy: row.assignedBy,
     })),
-    batches: batches.map((row) => ({ ...row, id: String(row._id), _id: undefined })),
-    courses: courses.map((row) => ({ ...row, id: String(row._id), _id: undefined })),
-    plans: plans.map((row) => ({ ...row, id: String(row._id), _id: undefined })),
-    studentCount,
+    allTeachers: allTeachers.map((t) => ({
+      id: String(t._id),
+      name: t.name || t.email,
+      email: t.email,
+      workload: teacherWorkloads[String(t._id)] || { regular: 0, extension: 0, canTakeRegular: true, canTakeExtension: true },
+    })),
   });
+});
+
+export const assignProgramTeacher = asyncHandler(async (req, res) => {
+  const program = await Program.findById(req.valid.params.id);
+  if (!program) throw new AppError(404, 'PROGRAM_NOT_FOUND', 'That programme was not found.');
+  const { teacher: teacherId, course: courseId } = req.body;
+  if (!teacherId) throw new AppError(400, 'TEACHER_REQUIRED', 'Teacher is required.');
+
+  await validateTeacherWorkloads([teacherId], program.categories || ['regular'], program._id);
+
+  if (!program.teachers.some((t) => String(t) === String(teacherId))) {
+    program.teachers.push(teacherId);
+    await program.save();
+  }
+
+  const assignment = await TeacherProgramAssignment.findOneAndUpdate(
+    { teacher: teacherId, program: program._id },
+    { $set: { status: 'active', source: 'program', assignedBy: req.user.id, assignedAt: new Date(), ...(courseId ? { course: courseId } : {}) } },
+    { upsert: true, new: true },
+  );
+
+  await syncProgramTeachers({
+    program,
+    teacherIds: program.teachers,
+    actorId: req.user.id,
+    source: 'program',
+  });
+
+  audit({
+    req,
+    action: 'registrar.program.assign_teacher',
+    targetType: 'Program',
+    targetId: program._id,
+    meta: { teacher: teacherId, course: courseId },
+  });
+
+  res.status(201).json({ assignment });
 });
 
 export const calendar = asyncHandler(async (_req, res) => {

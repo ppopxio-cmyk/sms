@@ -54,6 +54,9 @@ import {
   overview as attendanceOverviewController,
   roster as attendanceRosterController,
   save as saveAttendanceController,
+  exportHistory as exportAttendanceHistoryController,
+  requestFinalizeCode as requestAttendanceFinalizeCodeController,
+  finalizeCourse as finalizeCourseAttendanceController,
 } from '../controllers/teacherAttendance.controller.js';
 import {
   close,
@@ -151,7 +154,10 @@ r.get(
 );
 
 r.get('/attendance', requirePermission('teacher:attendance:manage'), validate(attendanceOverviewQuerySchema, 'query'), attendanceOverviewController);
-r.get('/attendance/:assignmentId/history', requirePermission('teacher:attendance:manage'), validate(attendanceOverviewQuerySchema, 'query'), attendanceHistoryController);
+r.get('/attendance/:assignmentId/history', requirePermission('teacher:attendance:manage'), validate(assignmentParamSchema, 'params'), attendanceHistoryController);
+r.get('/attendance/:assignmentId/history/export', exportLimiter, requirePermission('teacher:attendance:manage'), validate(assignmentParamSchema, 'params'), exportAttendanceHistoryController);
+r.post('/attendance/:assignmentId/finalize-code', requirePermission('teacher:attendance:manage'), validate(assignmentParamSchema, 'params'), requestAttendanceFinalizeCodeController);
+r.post('/attendance/:assignmentId/finalize-course', requirePermission('teacher:attendance:manage'), validate(assignmentParamSchema, 'params'), finalizeCourseAttendanceController);
 
 r.get('/assessments', requirePermission('teacher:assessments:manage'), validate(listAssessmentsQuerySchema, 'query'), listAssessments);
 r.post(

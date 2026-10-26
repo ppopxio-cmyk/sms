@@ -48,6 +48,7 @@ import {
   resultSubmissionDecisionSchema,
   listAttendanceQuerySchema,
   gpaQuerySchema,
+  gpaExportQuerySchema,
   graduationQuerySchema,
   transcriptCreateSchema,
   certificatePreviewSchema,
@@ -80,7 +81,7 @@ import {
   removePlanCourse, reorderPlanCourses, publishPlan, archivePlan, clonePlan, createCourse,
   listOfferings, offeringOptions, planOfferings, createOffering, updateOffering,
   registrationEligible, createRegistrations, offeringCandidates, registerOfferingStudents,
-  listRegistrations, dropRegistration, programDetail,
+  listRegistrations, dropRegistration, programDetail, assignProgramTeacher,
 } from '../controllers/registrar.academic.controller.js';
 import {
   listCourseResources, uploadCourseResource, removeCourseResource,
@@ -89,14 +90,15 @@ import {
   listAttendance, attendanceSummary, listResults, listResultSubmissions, getResult,
   reviewResult, approveResult, publishResult, rejectResult, correctResult,
   approveResultSubmission, declineResultSubmission, publishResultSubmission,
-  gpaCgpa, listGraduation, evaluateGraduation, graduationStudent, resultOptions,
+  singleOfferingResults, requestResultSubmitCode, submitStageComplete, submitProgramFinished,
+  gpaCgpa, exportStudentGpaRecord, listGraduation, evaluateGraduation, graduationStudent, resultOptions,
 } from '../controllers/registrar.records.controller.js';
 import {
   viewPolicy, updatePolicy as updateGradingPolicy, previewPolicy, policyHistory,
 } from '../controllers/registrar.grading-policy.controller.js';
 import {
   listCertificates, getCertificate, preview, issue, downloadCertificate, revokeCertificate,
-  reissueCertificate, listTranscripts, createTranscript, downloadTranscript, revokeTranscript, certificateMeta,
+  reissueCertificate, listTranscripts, getTranscript, createTranscript, downloadTranscript, exportTranscriptRecord, revokeTranscript, certificateMeta,
 } from '../controllers/registrar.documents.controller.js';
 import { dashboard, analytics, search } from '../controllers/registrar.dashboard.controller.js';
 import { reportOverview, exportReport } from '../controllers/registrar.reports.controller.js';
@@ -153,6 +155,7 @@ r.delete('/academic-structure/departments/:id', requirePermission('structure:man
 r.post('/academic-structure/programs', requirePermission('structure:manage'), validate(programSchema), createProgram);
 r.patch('/academic-structure/programs/:id', requirePermission('structure:manage'), validate(idParamSchema, 'params'), validate(programUpdateSchema), updateProgram);
 r.delete('/academic-structure/programs/:id', requirePermission('structure:manage'), validate(idParamSchema, 'params'), deleteProgram);
+r.post('/academic-structure/programs/:id/assignments', requirePermission('structure:manage'), validate(idParamSchema, 'params'), assignProgramTeacher);
 r.post('/academic-structure/courses', requirePermission('structure:manage'), validate(courseCreateSchema), createCourse);
 r.post('/courses', requirePermission('curriculum:manage'), validate(courseCreateSchema), createCourse);
 r.get('/academic-calendar', requirePermission('calendar:view'), calendar);
@@ -260,6 +263,10 @@ r.get('/attendance', requirePermission('attendance:view'), validate(listAttendan
 // ---- Results review ---------------------------------------------------------
 r.get('/results/options', requirePermission('results:view'), resultOptions);
 r.get('/results/submissions', requirePermission('results:view'), validate(listResultsQuerySchema, 'query'), listResultSubmissions);
+r.get('/results/offerings/:offering', requirePermission('results:view'), validate(offeringIdParamSchema, 'params'), singleOfferingResults);
+r.post('/results/request-submit-code', requirePermission('results:publish'), requestResultSubmitCode);
+r.post('/results/submit-stage-complete', requirePermission('results:publish'), submitStageComplete);
+r.post('/results/submit-program-finished', requirePermission('results:publish'), submitProgramFinished);
 r.post('/results/submissions/:offering/approve', requirePermission('results:review'), validate(offeringIdParamSchema, 'params'), approveResultSubmission);
 r.post('/results/submissions/:offering/decline', requirePermission('results:review'), validate(offeringIdParamSchema, 'params'), validate(resultSubmissionDecisionSchema), declineResultSubmission);
 r.post('/results/submissions/:offering/publish', requirePermission('results:publish'), validate(offeringIdParamSchema, 'params'), publishResultSubmission);
@@ -272,6 +279,14 @@ r.post('/results/:id/publish', requirePermission('results:publish'), validate(id
 r.patch('/results/:id/correct', requirePermission('results:review'), validate(idParamSchema, 'params'), validate(resultCorrectionSchema), correctResult);
 
 // ---- GPA / CGPA -------------------------------------------------------------
+r.get(
+  '/gpa-cgpa/:studentId/export',
+  exportLimiter,
+  requirePermission('gpa:view'),
+  validate(studentIdParamSchema, 'params'),
+  validate(gpaExportQuerySchema, 'query'),
+  exportStudentGpaRecord,
+);
 r.get('/gpa-cgpa', requirePermission('gpa:view'), validate(gpaQuerySchema, 'query'), gpaCgpa);
 
 // ---- Grading Policy ---------------------------------------------------------
@@ -288,7 +303,9 @@ r.post('/graduation-eligibility/:studentId/evaluate', requirePermission('graduat
 // ---- Transcripts ------------------------------------------------------------
 r.get('/transcripts', requirePermission('transcripts:view'), validate(listTranscriptsQuerySchema, 'query'), listTranscripts);
 r.post('/transcripts', requirePermission('transcripts:issue'), validate(transcriptCreateSchema), createTranscript);
+r.get('/transcripts/:id', requirePermission('transcripts:view'), validate(idParamSchema, 'params'), getTranscript);
 r.get('/transcripts/:id/pdf', requirePermission('transcripts:view'), validate(idParamSchema, 'params'), downloadTranscript);
+r.get('/transcripts/:id/export', exportLimiter, requirePermission('transcripts:view'), validate(idParamSchema, 'params'), exportTranscriptRecord);
 r.post('/transcripts/:id/revoke', requirePermission('transcripts:revoke'), validate(idParamSchema, 'params'), validate(revokeSchema), revokeTranscript);
 
 // ---- Certificates -----------------------------------------------------------
