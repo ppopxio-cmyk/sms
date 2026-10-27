@@ -10,7 +10,7 @@ import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { signedImageUrl, uploadImage, deleteImage, validateImage } from '../services/imagekit.service.js';
 import { sendCode } from '../services/codeDelivery.js';
-import { checkCode } from '../services/code.service.js';
+import { checkCode, resendWaitMessage } from '../services/code.service.js';
 import { notifyAdmins, notifyUsers } from '../services/notification.service.js';
 import { resolveTeacherIdsForPlacement } from '../services/teacherAccess.service.js';
 import { sendStudentAdmissionEmail } from '../services/mail.service.js';
@@ -515,7 +515,7 @@ export const requestStudentDeleteCode = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user.id).lean();
   if (!user) throw new AppError(401, 'SESSION_ENDED', 'Please sign in again.');
   const sent = await sendCode(user, 'student_delete');
-  if (!sent) throw new AppError(429, 'WAIT_BEFORE_RESEND', 'Please wait before asking for another code.');
+  if (!sent) throw new AppError(429, 'WAIT_BEFORE_RESEND', resendWaitMessage);
   audit({
     req,
     action: 'registrar.student.delete_code_sent',

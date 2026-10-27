@@ -6,7 +6,8 @@ import { AppError } from '../utils/AppError.js';
 const MAX_TRIES = 5;
 const RESEND_WAIT_MS = env.CODE_RESEND_WAIT_SECONDS * 1000;
 
-const waits = `${Math.round(env.CODE_RESEND_WAIT_SECONDS / 60)} minutes`;
+const waitSecs = Number(env.CODE_RESEND_WAIT_SECONDS) || 60;
+const waits = waitSecs >= 60 ? `${Math.ceil(waitSecs / 60)} minute${Math.ceil(waitSecs / 60) > 1 ? 's' : ''}` : `${waitSecs} seconds`;
 export const resendWaitMessage = `Please wait ${waits} before asking for another code.`;
 
 const keyed = (userId, purpose, code) =>

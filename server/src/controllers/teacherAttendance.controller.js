@@ -3,7 +3,7 @@ import { audit } from '../services/audit.service.js';
 import { AppError } from '../utils/AppError.js';
 import { User } from '../models/User.js';
 import { sendCode } from '../services/codeDelivery.js';
-import { checkCode } from '../services/code.service.js';
+import { checkCode, resendWaitMessage } from '../services/code.service.js';
 import {
   attendanceOverview,
   attendanceRoster,
@@ -85,7 +85,7 @@ export const requestFinalizeCode = asyncHandler(async (req, res) => {
   if (!user?.email) throw new AppError(400, 'NO_EMAIL', 'Your account has no email address.');
   const sent = await sendCode(user, 'attendance_finalize');
   if (!sent) {
-    throw new AppError(429, 'WAIT_BEFORE_RESEND', 'Please wait 2 minutes before asking for another verification code.');
+    throw new AppError(429, 'WAIT_BEFORE_RESEND', resendWaitMessage);
   }
   res.json({ message: `A confirmation code has been sent to ${user.email}.` });
 });

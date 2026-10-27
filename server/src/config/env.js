@@ -25,7 +25,7 @@ const schema = z.object({
   REFRESH_ABSOLUTE_DAYS: z.coerce.number().default(30),
   CODE_TTL_MINUTES: z.coerce.number().default(5),
   // How long somebody must wait between two codes for the same purpose.
-  CODE_RESEND_WAIT_SECONDS: z.coerce.number().default(120),
+  CODE_RESEND_WAIT_SECONDS: z.coerce.number().default(30),
   // The confirmation email carries a link, not a code. The link is single use.
   VERIFY_LINK_TTL_HOURS: z.coerce.number().default(3),
   // How long a password-reset link sent by an administrator stays usable.

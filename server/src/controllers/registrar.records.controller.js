@@ -14,7 +14,7 @@ import { requireGradingPolicy, gradeFor, calculateGpa, getGradingPolicy, cgpaFor
 import { buildExport } from '../services/export.service.js';
 import { evaluateStudent } from '../services/eligibility.service.js';
 import { sendCode } from '../services/codeDelivery.js';
-import { checkCode } from '../services/code.service.js';
+import { checkCode, resendWaitMessage } from '../services/code.service.js';
 
 export const listAttendance = asyncHandler(async (req, res) => {
   const query = req.valid.query;
@@ -283,7 +283,7 @@ export const requestResultSubmitCode = asyncHandler(async (req, res) => {
   if (!user?.email) throw new AppError(400, 'NO_EMAIL', 'Your account has no email address.');
   const sent = await sendCode(user, 'result_submission');
   if (!sent) {
-    throw new AppError(429, 'WAIT_BEFORE_RESEND', 'Please wait 2 minutes before asking for another verification code.');
+    throw new AppError(429, 'WAIT_BEFORE_RESEND', resendWaitMessage);
   }
   res.json({ message: `A 6-digit confirmation code has been sent to ${user.email}.` });
 });

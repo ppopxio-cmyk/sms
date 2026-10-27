@@ -16,7 +16,7 @@ import { TeacherProgramAssignment } from '../models/Teaching.js';
 import { CourseResource } from '../models/CourseResource.js';
 import { Material } from '../models/Material.js';
 import { sendCode } from '../services/codeDelivery.js';
-import { checkCode } from '../services/code.service.js';
+import { checkCode, resendWaitMessage } from '../services/code.service.js';
 import { sendCurriculumOfferingEmail } from '../services/mail.service.js';
 import { oneOf } from '../utils/mongo.js';
 
@@ -703,7 +703,7 @@ export const requestBatchDeleteCode = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user.id).lean();
   if (!user) throw new AppError(401, 'SESSION_ENDED', 'Please sign in again.');
   const sent = await sendCode(user, 'batch_delete');
-  if (!sent) throw new AppError(429, 'WAIT_BEFORE_RESEND', 'Please wait before asking for another code.');
+  if (!sent) throw new AppError(429, 'WAIT_BEFORE_RESEND', resendWaitMessage);
   audit({ req, action: 'registrar.batch.delete_code_sent', targetType: 'Batch', targetId: req.user.id });
   res.json({ message: `We emailed a 6-digit code to ${user.email}.`, email: user.email });
 });

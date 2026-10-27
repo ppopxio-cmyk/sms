@@ -115,11 +115,12 @@ function detailCard(rows) {
 </table>`;
 }
 
+const isRender = Boolean(process.env.RENDER);
+
 async function deliver({ to, subject, html, text, priority = 'normal' }) {
   const isHighPriority = priority === 'high' || /code|verification|sign-in|reset|security|confirm/i.test(subject);
 
-  // 1. Try sending via SMTP (reliable App Password connection)
-  try {
+  const sendSmtp = async () => {
     await transporter.sendMail({
       from: `"${env.MAIL_FROM_NAME}" <${env.SMTP_USER}>`,
       to,
@@ -138,20 +139,50 @@ async function deliver({ to, subject, html, text, priority = 'normal' }) {
     });
     logger.info({ to, subject, transport: 'smtp' }, 'Email delivered successfully via SMTP');
     return true;
+  };
+
+  const sendGmail = async () => {
+    if (!gmailApiReady || gmailApiDisabled) return false;
+    try {
+      await sendViaGmailApi({ to, subject, html, text });
+      logger.info({ to, subject, transport: 'gmail-api' }, 'Email delivered successfully via Gmail API');
+      return true;
+    } catch (apiErr) {
+      logger.error({ err: apiErr.message, to, subject }, 'Gmail API failed');
+      if (/expired|revoked|invalid_grant|unauthorized/i.test(apiErr.message)) {
+        gmailApiDisabled = true;
+      }
+      throw apiErr;
+    }
+  };
+
+  // On Render, outbound SMTP ports (25, 465, 587) are blocked by the platform,
+  // so Gmail API (HTTPS 443) must be the primary transport to avoid connection timeouts.
+  // Locally or on self-hosted environments with open ports, SMTP is preferred.
+  if (isRender && gmailApiReady && !gmailApiDisabled) {
+    try {
+      return await sendGmail();
+    } catch (err) {
+      logger.warn({ err: err.message }, 'Gmail API failed on Render; attempting SMTP fallback');
+      try {
+        return await sendSmtp();
+      } catch (smtpErr) {
+        logger.error({ err: smtpErr.message }, 'Both Gmail API and SMTP failed on Render');
+        return false;
+      }
+    }
+  }
+
+  // Default: Try SMTP first, fallback to Gmail API
+  try {
+    return await sendSmtp();
   } catch (smtpErr) {
     logger.warn({ err: smtpErr.message, to, subject }, 'SMTP failed; checking Gmail API fallback');
-
-    // 2. Fallback to Gmail API if configured and not explicitly disabled
     if (gmailApiReady && !gmailApiDisabled) {
       try {
-        await sendViaGmailApi({ to, subject, html, text });
-        logger.info({ to, subject, transport: 'gmail-api' }, 'Email delivered successfully via Gmail API');
-        return true;
+        return await sendGmail();
       } catch (apiErr) {
-        logger.error({ err: apiErr.message, to, subject }, 'Gmail API also failed; email could not be delivered');
-        if (/expired|revoked|invalid_grant|unauthorized/i.test(apiErr.message)) {
-          gmailApiDisabled = true;
-        }
+        logger.error({ err: apiErr.message, to, subject }, 'Both SMTP and Gmail API failed');
       }
     }
     return false;
