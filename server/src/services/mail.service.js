@@ -6,16 +6,16 @@ import { checkGmailApi, sendViaGmailApi } from './gmailTransport.js';
 
 // How the mail leaves the building: the Gmail API over HTTPS when the Google values are
 // present, otherwise the app password over SMTP. Both send from the same school address.
-export const MAIL_TRANSPORT = gmailApiReady ? 'gmail-api' : 'smtp';
+export const MAIL_TRANSPORT = 'smtp';
 
-const transporter = gmailApiReady
-  ? null
-  : nodemailer.createTransport({
-      service: 'gmail',
-      pool: true,
-      maxConnections: 3,
-      auth: { user: env.SMTP_USER, pass: env.SMTP_APP_PASSWORD },
-    });
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  pool: true,
+  maxConnections: 3,
+  auth: { user: env.SMTP_USER, pass: env.SMTP_APP_PASSWORD },
+});
+
+let gmailApiDisabled = false;
 
 const ENTITIES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ENTITIES[c]);
@@ -109,17 +109,48 @@ function detailCard(rows) {
 }
 
 async function deliver({ to, subject, html, text }) {
+  // 1. Try sending via SMTP (reliable App Password connection)
   try {
-    if (gmailApiReady) await sendViaGmailApi({ to, subject, html, text });
-    else await transporter.sendMail({ from: `"${env.MAIL_FROM_NAME}" <${env.SMTP_USER}>`, to, subject, html, text });
+    await transporter.sendMail({
+      from: `"${env.MAIL_FROM_NAME}" <${env.SMTP_USER}>`,
+      to,
+      subject,
+      html,
+      text,
+    });
+    logger.info({ to, subject, transport: 'smtp' }, 'Email delivered successfully via SMTP');
     return true;
-  } catch (err) {
-    logger.error({ err: err.message, subject, transport: MAIL_TRANSPORT }, 'email could not be sent');
+  } catch (smtpErr) {
+    logger.warn({ err: smtpErr.message, to, subject }, 'SMTP failed; checking Gmail API fallback');
+
+    // 2. Fallback to Gmail API if configured and not explicitly disabled
+    if (gmailApiReady && !gmailApiDisabled) {
+      try {
+        await sendViaGmailApi({ to, subject, html, text });
+        logger.info({ to, subject, transport: 'gmail-api' }, 'Email delivered successfully via Gmail API');
+        return true;
+      } catch (apiErr) {
+        logger.error({ err: apiErr.message, to, subject }, 'Gmail API also failed; email could not be delivered');
+        if (/expired|revoked|invalid_grant|unauthorized/i.test(apiErr.message)) {
+          gmailApiDisabled = true;
+        }
+      }
+    }
     return false;
   }
 }
 
-export const verifyMail = () => (gmailApiReady ? checkGmailApi() : transporter.verify());
+export const verifyMail = async () => {
+  try {
+    await transporter.verify();
+    return true;
+  } catch (err) {
+    if (gmailApiReady && !gmailApiDisabled) {
+      return checkGmailApi();
+    }
+    throw err;
+  }
+};
 
 const COPY = {
   login_2fa: { subject: 'Your sign-in code', accent: 'Sign-in verification', title: 'Here is your sign-in code', intro: 'Someone is signing in to your account. Enter this code to continue.' },
