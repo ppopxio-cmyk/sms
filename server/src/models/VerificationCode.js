@@ -16,6 +16,8 @@ const codeSchema = new mongoose.Schema({
       'student_delete',
       'batch_delete',
       'course_marks_submit',
+      'result_submission',
+      'attendance_finalize',
     ],
     required: true,
   },
