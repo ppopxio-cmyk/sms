@@ -2,13 +2,13 @@ import { env } from '../config/env.js';
 import { issueVerifyLink, issueResetLink } from './link.service.js';
 import { sendVerifyLinkEmail, sendResetLinkEmail } from './mail.service.js';
 import { AppError } from '../utils/AppError.js';
+import { logger } from '../utils/logger.js';
 
 const clientUrl = (path) => `${env.CLIENT_ORIGIN.replace(/\/+$/, '')}${path}`;
 
-// The send is waited for on purpose. Saying "a link is on its way" when Google refused
-// the message is how a broken mail setting stays invisible for a day. True means it
-// really was handed over; WAIT_BEFORE_RESEND still comes back as a thrown 429, so a
-// caller can tell "too soon" from "the mail server said no".
+// A failed email send is surfaced to the user as a recoverable 503 so they can retry from
+// the sign-in or reset page. We keep the explicit throw so the controller can distinguish
+// "mail is down now" from "resend is still on cooldown" (which comes back as 429).
 const MAIL_FAILED = () =>
   new AppError(503, 'MAIL_FAILED', 'The email could not be sent just now. Check the mail settings and try again.');
 
@@ -20,7 +20,10 @@ export async function deliverVerifyLink(user) {
     url: clientUrl(`/verify-email?token=${encodeURIComponent(token)}`),
     hours: env.VERIFY_LINK_TTL_HOURS,
   });
-  if (!sent) throw MAIL_FAILED();
+  if (!sent) {
+    logger.warn({ to: user.email }, 'Verify link email could not be sent');
+    throw MAIL_FAILED();
+  }
   return true;
 }
 
@@ -32,6 +35,9 @@ export async function deliverResetLink(user) {
     url: clientUrl(`/forgot-password?token=${encodeURIComponent(token)}`),
     minutes: env.RESET_LINK_TTL_MINUTES,
   });
-  if (!sent) throw MAIL_FAILED();
+  if (!sent) {
+    logger.warn({ to: user.email }, 'Reset link email could not be sent');
+    throw MAIL_FAILED();
+  }
   return true;
 }
