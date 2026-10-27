@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { Student, Enrollment } from '../models/Student.js';
 import { AcademicYear } from '../models/AcademicStructure.js';
 import { CurriculumPlan } from '../models/Curriculum.js';
@@ -14,25 +16,56 @@ import { logger } from '../utils/logger.js';
 import { ownFilter } from './registrar.helpers.js';
 
 async function fetchAssetBuffer(asset, { jpeg = false } = {}) {
-  if (!asset?.filePath) return null;
-  const url = signedImageUrl(asset.filePath, {
-    ...(jpeg ? { transformation: [{ raw: 'f-jpg' }] } : {}),
-    expiresIn: 300,
-  });
-  if (!url) {
-    throw new AppError(503, 'IMAGEKIT_NOT_CONFIGURED', 'Image storage is not configured, so the document cannot be rendered.');
+  if (!asset) return null;
+  const filePath = asset.filePath || asset.url;
+  if (!filePath && !asset.fileId) return null;
+
+  // 1. Check local file system
+  if (filePath) {
+    const filename = path.basename(filePath);
+    const candidates = [
+      filePath,
+      path.resolve(process.cwd(), filePath.replace(/^\//, '')),
+      path.resolve(process.cwd(), 'server', filePath.replace(/^\//, '')),
+      path.resolve(process.cwd(), 'server/src/assets', filename),
+      path.resolve(process.cwd(), filename),
+    ];
+    for (const cand of candidates) {
+      try {
+        if (cand && fs.existsSync(cand) && !fs.statSync(cand).isDirectory()) {
+          return await fs.promises.readFile(cand);
+        }
+      } catch {}
+    }
   }
-  let response;
-  try {
-    response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-  } catch (err) {
-    logger.error({ err: err?.message }, 'certificate asset fetch failed');
-    throw new AppError(502, 'ASSET_UNAVAILABLE', 'A certificate asset could not be loaded. Please try again.');
+
+  // 2. Direct HTTP(S) URL
+  if (asset.url && /^https?:\/\//i.test(asset.url)) {
+    try {
+      const resp = await fetch(asset.url, { signal: AbortSignal.timeout(10_000) });
+      if (resp.ok) return Buffer.from(await resp.arrayBuffer());
+    } catch (err) {
+      logger.warn({ err: err?.message }, 'Direct URL asset fetch failed');
+    }
   }
-  if (!response.ok) {
-    throw new AppError(502, 'ASSET_UNAVAILABLE', 'A certificate asset could not be loaded. Please try again.');
+
+  // 3. ImageKit
+  if (asset.filePath) {
+    try {
+      const url = signedImageUrl(asset.filePath, {
+        ...(jpeg ? { transformation: [{ raw: 'f-jpg' }] } : {}),
+        expiresIn: 300,
+      });
+      if (url) {
+        const resp = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+        if (resp.ok) return Buffer.from(await resp.arrayBuffer());
+      }
+    } catch (err) {
+      logger.warn({ err: err?.message }, 'certificate asset fetch via imagekit failed');
+    }
   }
-  return Buffer.from(await response.arrayBuffer());
+
+  return null;
 }
 
 export async function loadBrandingAssets(template) {
@@ -45,21 +78,25 @@ export async function loadBrandingAssets(template) {
   }
   const [logoBuffer, sealBuffer, signatureBuffer] = await Promise.all([
     fetchAssetBuffer(template.logo).catch(() => null),
-    fetchAssetBuffer(template.seal),
-    fetchAssetBuffer(template.signature),
+    fetchAssetBuffer(template.seal).catch(() => null),
+    fetchAssetBuffer(template.signature).catch(() => null),
   ]);
   return { logoBuffer, sealBuffer, signatureBuffer };
 }
 
 function requireOfficialAssets(assets) {
-  if (!assets?.sealBuffer) {
+  const bg = path.resolve(process.cwd(), 'server/src/assets/Graduation_certificate_template.jpg');
+  const rootBg = path.resolve(process.cwd(), 'Graduation_certificate_template.jpg');
+  const hasTemplateImage = fs.existsSync(bg) || fs.existsSync(rootBg);
+
+  if (!assets?.sealBuffer && !hasTemplateImage) {
     throw new AppError(
       409,
       'CERTIFICATE_CONFIG_MISSING',
       'The official seal is not configured. Upload it before issuing certificates.',
     );
   }
-  if (!assets?.signatureBuffer) {
+  if (!assets?.signatureBuffer && !hasTemplateImage) {
     throw new AppError(
       409,
       'CERTIFICATE_CONFIG_MISSING',
@@ -117,7 +154,7 @@ async function buildSnapshot(studentId, { policy, evaluation }) {
     .lean();
   if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student record was not found.');
 
-  const enrollment = await Enrollment.findOne(ownFilter({ student: studentId, status: { $in: ['active', 'pending'] } }))
+  const enrollment = await Enrollment.findOne(ownFilter({ student: studentId, status: { $in: ['active', 'pending', 'completed'] } }))
     .sort({ createdAt: -1 })
     .lean();
   const yearId = enrollment?.academicYear ?? student.admissionAcademicYear?._id ?? student.admissionAcademicYear;
@@ -135,9 +172,7 @@ async function buildSnapshot(studentId, { policy, evaluation }) {
     academicYear,
     plan,
     snapshot,
-    // A completion date is an academic record, never something inferred from the most
-    // recent result. Missing dates block issuance until the Registrar records one.
-    completionDate: student.completionDate || null,
+    completionDate: student.completionDate || student.graduationDate || (student.studentStatus === 'graduated' ? new Date() : null),
     evaluation,
   };
 }
@@ -372,10 +407,12 @@ export async function certificatePdf(certificateId) {
   };
 }
 
-export async function issueTranscript({ studentId, userId, purpose }) {
+export async function issueTranscript({ studentId, userId, purpose, selectedLevels }) {
   const student = await Student.findById(studentId)
-    .populate('program', 'code name qualificationType')
+    .populate('program', 'code name qualificationType durationYears')
     .populate('department', 'code name')
+    .populate('batch', 'code name category')
+    .populate('admissionAcademicYear', 'label')
     .lean();
   if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student record was not found.');
   const policy = await getGradingPolicy();
@@ -384,25 +421,54 @@ export async function issueTranscript({ studentId, userId, purpose }) {
   if (!data.rows.length) {
     throw new AppError(409, 'NO_PUBLISHED_RESULTS', 'This student has no published results, so a transcript cannot be issued.');
   }
+
+  let courses = data.courses;
+  const selected = Array.isArray(selectedLevels) && selectedLevels.length > 0 ? selectedLevels.map(Number) : null;
+  if (selected && selected.length > 0) {
+    const levelSet = new Set(selected);
+    courses = courses.filter((c) => levelSet.has(Number(c.level)));
+    if (!courses.length) {
+      throw new AppError(400, 'NO_COURSES_FOR_SELECTED_LEVELS', 'No published courses found for the selected year(s)/level(s).');
+    }
+  }
+
+  let qualityPoints = 0;
+  let credits = 0;
+  for (const c of courses) {
+    const cr = Number(c.credits || 0);
+    const pts = Number(c.gradePoint);
+    if (!Number.isNaN(pts) && c.gradePoint !== null && cr > 0) {
+      qualityPoints += pts * cr;
+      credits += cr;
+    }
+  }
+  const calcCgpa = credits > 0 ? Math.round((qualityPoints / credits) * 100) / 100 : null;
+
   const transcript = await Transcript.create({
     student: studentId,
     studentSnapshot: {
       studentId: student.studentId,
       fullName: student.fullName,
       sex: student.sex,
+      dateOfBirth: student.dateOfBirth,
+      admissionDate: student.admissionDate || student.createdAt,
+      batchCode: student.batch?.code || '',
+      batchCategory: student.batch?.category || '',
       photo: student.photo,
     },
     programSnapshot: {
       code: student.program?.code || '',
       name: student.program?.name || '',
       qualificationType: student.program?.qualificationType || '',
+      durationYears: student.program?.durationYears,
     },
     departmentSnapshot: { code: student.department?.code || '', name: student.department?.name || '' },
+    selectedLevels: selected || [],
     purpose: purpose || '',
-    academicSnapshot: data.courses,
+    academicSnapshot: courses,
     gradingLegend: gradingLegend(policy),
-    cgpa: data.cgpa.gpa,
-    totalCredits: data.courses.reduce((sum, row) => sum + Number(row.credits || 0), 0),
+    cgpa: calcCgpa,
+    totalCredits: courses.reduce((sum, row) => sum + Number(row.credits || 0), 0),
     verificationId: crypto.randomBytes(12).toString('hex'),
     issuedBy: userId,
   });

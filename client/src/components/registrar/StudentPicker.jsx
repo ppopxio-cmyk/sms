@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Search, UserRound, X } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -7,16 +7,34 @@ import { useDebounced } from '../../lib/useDebounced';
 
 // Student lookups are server-side, so the picker never downloads the whole register. It
 // returns the full row because callers need level and programme to calculate eligibility.
-export default function StudentPicker({ label = 'Student', value, onChange, hint, error, disabled = false }) {
+export default function StudentPicker({
+  label = 'Student',
+  value,
+  onChange,
+  hint,
+  error,
+  disabled = false,
+  status,
+  extraParams,
+}) {
   const [term, setTerm] = useState('');
   const [open, setOpen] = useState(false);
   const settled = useDebounced(term.trim(), 250);
   const root = useRef(null);
 
+  const queryParams = useMemo(() => ({
+    search: settled,
+    limit: 8,
+    sort: 'fullName',
+    order: 'asc',
+    ...(status ? { status } : {}),
+    ...(extraParams || {}),
+  }), [settled, status, extraParams]);
+
   const results = useQuery({
-    queryKey: ['registrar', 'student-picker', settled],
+    queryKey: ['registrar', 'student-picker', queryParams],
     queryFn: async () =>
-      (await api.get(`${REGISTRAR}/students`, { params: { search: settled, limit: 8, sort: 'fullName', order: 'asc' } })).data,
+      (await api.get(`${REGISTRAR}/students`, { params: queryParams })).data,
     enabled: open && settled.length >= 2,
     staleTime: 15_000,
   });

@@ -29,6 +29,7 @@ const GROUPS = [
     items: [
       { to: '/registrar/students', label: 'Students', icon: Users },
       { to: '/registrar/batches', label: 'Batches', icon: UserSquare2 },
+      { to: '/registrar/graduated', label: 'Graduated', icon: GraduationCap },
     ],
   },
   {

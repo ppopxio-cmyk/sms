@@ -233,30 +233,37 @@ export const exportTranscriptRecord = asyncHandler(async (req, res) => {
     return sendPdf(res, result);
   }
   const columns = [
+    { key: 'sn', label: 'S.N.', width: 6 },
     { key: 'code', label: 'Course Code', width: 14 },
-    { key: 'title', label: 'Course Title', width: 30 },
-    { key: 'level', label: 'Year / Level', width: 12 },
-    { key: 'academicYear', label: 'Academic Year', width: 14 },
-    { key: 'credits', label: 'Credits', width: 10 },
-    { key: 'mark', label: 'Mark', width: 10 },
-    { key: 'letterGrade', label: 'Grade', width: 10 },
-    { key: 'gradePoint', label: 'Points', width: 10 },
+    { key: 'title', label: 'Course Title', width: 32 },
+    { key: 'level', label: 'Year / Level', width: 14 },
+    { key: 'credits', label: 'Total Hours', width: 12 },
+    { key: 'mark', label: 'Grade (Number)', width: 14 },
+    { key: 'letterGrade', label: 'Grade (Letter)', width: 14 },
+    { key: 'gradePoint', label: 'Grade Point', width: 12 },
   ];
+  let sn = 1;
   const rows = (transcript.academicSnapshot || []).map((r) => ({
+    sn: sn++,
     code: r.code || '—',
     title: r.title || '—',
-    level: r.level != null ? `Level/Year ${r.level}` : '—',
-    academicYear: r.academicYear || '—',
+    level: r.level != null ? `Year ${r.level}` : '—',
     credits: r.credits ?? '—',
     mark: r.mark != null ? r.mark : '—',
     letterGrade: r.letterGrade || '—',
     gradePoint: r.gradePoint != null ? Number(r.gradePoint).toFixed(2) : '—',
   }));
   const summary = [
-    `Student: ${transcript.studentSnapshot?.fullName} (${transcript.studentSnapshot?.studentId})`,
-    `Programme: ${transcript.programSnapshot?.name || '—'}`,
-    `Cumulative CGPA: ${transcript.cgpa ?? '—'} | Total Credits: ${transcript.totalCredits ?? 0}`,
-    `Verification ID: ${transcript.verificationId}`,
+    `Trainee Name: ${transcript.studentSnapshot?.fullName || '—'}`,
+    `Trainee ID: ${transcript.studentSnapshot?.studentId || '—'}`,
+    `Sex: ${transcript.studentSnapshot?.sex ? transcript.studentSnapshot.sex.toUpperCase() : '—'}`,
+    `Date of Birth: ${transcript.studentSnapshot?.dateOfBirth ? new Date(transcript.studentSnapshot.dateOfBirth).toLocaleDateString() : '—'}`,
+    `Programme Name: ${transcript.programSnapshot?.name || '—'}`,
+    `Batch Code: ${transcript.studentSnapshot?.batchCode || '—'}`,
+    `Admission Date: ${transcript.studentSnapshot?.admissionDate ? new Date(transcript.studentSnapshot.admissionDate).toLocaleDateString() : '—'}`,
+    `Issue Date: ${new Date(transcript.issuedAt).toLocaleDateString()}`,
+    `Total Hours: ${transcript.totalCredits ?? 0} | Cumulative CGPA: ${transcript.cgpa != null ? Number(transcript.cgpa).toFixed(2) : '—'}`,
+    `Serial / Verification ID: ${transcript.verificationId}`,
   ].join('\n');
 
   const file = await buildExport({
@@ -274,7 +281,12 @@ export const exportTranscriptRecord = asyncHandler(async (req, res) => {
 });
 
 export const createTranscript = asyncHandler(async (req, res) => {
-  const transcript = await issueTranscript({ studentId: req.body.student, userId: req.user.id, purpose: req.body.purpose });
+  const transcript = await issueTranscript({
+    studentId: req.body.student,
+    userId: req.user.id,
+    purpose: req.body.purpose,
+    selectedLevels: req.body.selectedLevels,
+  });
   audit({ req, action: 'registrar.transcript.issue', targetType: 'Transcript', targetId: transcript._id, meta: { student: transcript.studentSnapshot?.studentId } });
   res.status(201).json({ transcript });
 });

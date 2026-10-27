@@ -319,7 +319,12 @@ function IssueCertificateModal({ open, onClose, onSaved }) {
     >
       <div className="grid gap-4">
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
-        <StudentPicker value={student} onChange={(value) => { setStudent(value); setConfirmed(false); setError(''); }} />
+        <StudentPicker
+          value={student}
+          onChange={(value) => { setStudent(value); setConfirmed(false); setError(''); }}
+          status="graduated"
+          hint="Only graduated students are eligible for certificate issuance"
+        />
         <div className="rounded-2xl bg-slate-50 p-4 text-xs leading-relaxed text-slate-600">
           <p className="flex items-center gap-2 font-semibold text-slate-800"><ShieldCheck className="h-4 w-4 text-brand-600" /> Issuance checks</p>
           <ul className="mt-2 list-inside list-disc space-y-1">

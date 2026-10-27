@@ -50,6 +50,7 @@ const TeacherReports = lazy(() => import('./pages/teacher/TeacherReports.jsx'));
 const RegistrarDashboard = lazy(() => import('./pages/registrar/RegistrarDashboard.jsx'));
 const RegistrarAnalytics = lazy(() => import('./pages/registrar/RegistrarAnalytics.jsx'));
 const RegistrarStudents = lazy(() => import('./pages/registrar/RegistrarStudents.jsx'));
+const RegistrarGraduated = lazy(() => import('./pages/registrar/RegistrarGraduated.jsx'));
 const RegistrarStudent = lazy(() => import('./pages/registrar/RegistrarStudent.jsx'));
 const RegistrarAcademicStructure = lazy(() => import('./pages/registrar/RegistrarAcademicStructure.jsx'));
 const RegistrarDepartmentDetail = lazy(() => import('./pages/registrar/RegistrarDepartmentDetail.jsx'));
@@ -211,6 +212,7 @@ export default function App() {
               <Route path="/registrar/analytics" element={<RegistrarAnalytics />} />
               <Route path="/registrar/students" element={<RegistrarStudents />} />
               <Route path="/registrar/students/:studentId" element={<RegistrarStudent />} />
+              <Route path="/registrar/graduated" element={<RegistrarGraduated />} />
               <Route path="/registrar/academic-structure" element={<RegistrarAcademicStructure />} />
               <Route path="/registrar/academic-structure/departments" element={<RegistrarAcademicStructure defaultTab="departments" />} />
               <Route path="/registrar/academic-structure/programs" element={<RegistrarAcademicStructure defaultTab="programs" />} />

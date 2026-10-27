@@ -777,13 +777,22 @@ export function renderCertificatePdf({
 
 export function renderTranscriptPdf({ transcript, template, photoBuffer, logoBuffer }) {
   return new Promise((resolve, reject) => {
+    try {
+      fs.accessSync(ETHIOPIC_REGULAR);
+      fs.accessSync(ETHIOPIC_BOLD);
+    } catch {
+      return reject(new AppError(500, 'FONT_MISSING', 'The Amharic font is missing from the server assets.'));
+    }
+
     const doc = new PDFDocument({
       size: 'A4',
       margin: 0,
       bufferPages: true,
       info: {
-        Title: `Academic transcript — ${transcript.studentSnapshot?.fullName || ''}`,
+        Title: `Academic Transcript — ${transcript.studentSnapshot?.fullName || ''}`,
         Author: template?.institutionName || 'Registrar',
+        Subject: 'Official Academic Transcript',
+        Creator: 'SMS Academic Registrar',
       },
     });
     const chunks = [];
@@ -792,85 +801,315 @@ export function renderTranscriptPdf({ transcript, template, photoBuffer, logoBuf
     doc.on('error', reject);
     doc.registerFont('NotoEthiopic', ETHIOPIC_REGULAR);
     doc.registerFont('NotoEthiopicBold', ETHIOPIC_BOLD);
-    doc.rect(0, 0, PAGE.width, PAGE.height).fill('#fffdf7');
-    if (logoBuffer) {
-      try {
-        doc.image(logoBuffer, MARGIN, 34, { fit: [42, 42] });
-      } catch {
-        // logo is optional
+
+    const L = 36;
+    const R = PAGE.width - 36;
+    const W = R - L; // 523.28
+    const T_BOTTOM = PAGE.height - 40;
+
+    const drawHeader = (isContinuation = false) => {
+      doc.rect(0, 0, PAGE.width, PAGE.height).fill('#ffffff');
+
+      if (isContinuation) {
+        doc.font('Times-Bold').fontSize(11).fillColor('#0f2747').text(
+          `${template?.institutionName || 'College of Higher Education'} — Official Academic Transcript (Continued)`,
+          L,
+          26,
+          { width: W, align: 'center' },
+        );
+        doc.moveTo(L, 42).lineTo(R, 42).lineWidth(0.5).strokeColor('#cbd5e1').stroke();
+        return 48;
       }
-    }
-    doc.font('Times-Bold').fontSize(17).fillColor('#123b2d').text(template?.institutionName || 'Institution', MARGIN + 52, 38, {
-      width: PAGE.width - MARGIN * 2 - 52,
-    });
-    doc.font('Helvetica').fontSize(8).fillColor('#68756e').text('OFFICIAL ACADEMIC TRANSCRIPT', MARGIN + 52, 58);
-    doc.moveTo(MARGIN, 88).lineTo(PAGE.width - MARGIN, 88).lineWidth(0.8).strokeColor('#b38b4d').stroke();
-    doc.font('Times-Bold').fontSize(13).fillColor('#1b2a23').text(transcript.studentSnapshot?.fullName || '', MARGIN, 104);
-    doc.font('Helvetica').fontSize(8.5).fillColor('#4b5b52');
-    doc.text(
-      `${transcript.studentSnapshot?.studentId || ''}  •  ${transcript.programSnapshot?.name || ''}  •  ${transcript.studentSnapshot?.sex || ''}`,
-      MARGIN,
-      122,
-    );
-    if (photoBuffer) {
-      try {
-        doc.image(photoBuffer, PAGE.width - MARGIN - 55, 100, { cover: [55, 55] });
-      } catch {
-        // photo is not required for the transcript
+
+      // Institutional Logo
+      if (logoBuffer) {
+        try {
+          doc.image(logoBuffer, L, 24, { fit: [46, 46] });
+        } catch {}
       }
-    }
-    let y = 150;
-    y = tableHeader(doc, y);
-    for (const row of transcript.academicSnapshot || []) {
-      if (y + 26 > BOTTOM) {
-        doc.addPage();
-        doc.rect(0, 0, PAGE.width, PAGE.height).fill('#fffdf7');
-        doc.font('Helvetica-Bold').fontSize(9).fillColor('#123b2d').text('Academic transcript (continued)', MARGIN, 40);
-        y = tableHeader(doc, 58);
-      }
-      doc.font('Helvetica').fontSize(7.5).fillColor('#26352d');
-      doc.text(row.academicYear || '—', MARGIN, y + 7, { width: 78, lineBreak: false, ellipsis: true });
-      doc.text(String(row.level ?? '—'), MARGIN + 78, y + 7, { width: 34 });
-      doc.font('Helvetica-Bold').text(row.code || '—', MARGIN + 112, y + 7, { width: 54 });
-      doc.font('Helvetica').text(row.title || '—', MARGIN + 166, y + 5, { width: 188, height: 22, ellipsis: true });
-      doc.text(String(row.credits ?? ''), MARGIN + 354, y + 7, { width: 24, align: 'right' });
-      doc.text(row.mark === null || row.mark === undefined ? '—' : String(row.mark), MARGIN + 378, y + 7, { width: 34, align: 'right' });
-      doc.text(row.letterGrade || '—', MARGIN + 405, y + 7, { width: 40, align: 'center' });
-      doc.text(row.gradePoint === null || row.gradePoint === undefined ? '—' : Number(row.gradePoint).toFixed(2), MARGIN + 443, y + 7, {
-        width: 30,
-        align: 'right',
+
+      // Centered College Names
+      const collegeAmharic = template?.institutionNameAmharic || 'የከፍተኛ ትምህርት ኮሌጅ';
+      const collegeEnglish = (template?.institutionName || 'COLLEGE OF HIGHER EDUCATION').toUpperCase();
+
+      doc.font('NotoEthiopicBold').fontSize(14).fillColor('#0f2747').text(collegeAmharic, L, 22, {
+        width: W,
+        align: 'center',
       });
-      doc.moveTo(MARGIN, y + 27).lineTo(PAGE.width - MARGIN, y + 27).lineWidth(0.25).strokeColor('#d9dfda').stroke();
-      y += 28;
+      doc.font('Times-Bold').fontSize(12).fillColor('#0f2747').text(collegeEnglish, L, 40, {
+        width: W,
+        align: 'center',
+      });
+      doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#8c6b2d').text('OFFICIAL ACADEMIC TRANSCRIPT', L, 56, {
+        width: W,
+        align: 'center',
+        characterSpacing: 1.2,
+      });
+
+      // Top divider
+      doc.moveTo(L, 72).lineTo(R, 72).lineWidth(0.75).strokeColor('#8c6b2d').stroke();
+
+      // Serial & Date row
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#475569');
+      doc.text(`SERIAL NO: ${(transcript.verificationId || '').toUpperCase()}`, L + 2, 77);
+      doc.text(`DATE / TIME: ${certificateDate(transcript.issuedAt)}`, R - 180, 77, { width: 178, align: 'right' });
+
+      doc.moveTo(L, 88).lineTo(R, 88).lineWidth(0.5).strokeColor('#cbd5e1').stroke();
+
+      // Trainee Information Card (Two Columns)
+      const cardY = 92;
+      const cardH = 68;
+      doc.rect(L, cardY, W, cardH).fill('#f8fafc');
+      doc.rect(L, cardY, W, cardH).lineWidth(0.5).strokeColor('#e2e8f0').stroke();
+
+      const snap = transcript.studentSnapshot || {};
+      const prog = transcript.programSnapshot || {};
+      const colW = (W - 20) / 2;
+      const col1X = L + 10;
+      const col2X = L + colW + 16;
+      let ty = cardY + 7;
+
+      const drawField = (x, y, label, value) => {
+        doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#64748b').text(label, x, y, { width: 85 });
+        doc.font('Helvetica').fontSize(8).fillColor('#0f172a').text(String(value || '—'), x + 85, y, {
+          width: colW - 88,
+          ellipsis: true,
+        });
+      };
+
+      drawField(col1X, ty, 'Trainee Name:', snap.fullName);
+      drawField(col2X, ty, 'Programme:', prog.name);
+      ty += 14;
+
+      drawField(col1X, ty, 'Trainee ID:', snap.studentId);
+      drawField(col2X, ty, 'Batch Code:', snap.batchCode || '—');
+      ty += 14;
+
+      drawField(col1X, ty, 'Sex:', snap.sex ? snap.sex.toUpperCase() : '—');
+      drawField(col2X, ty, 'Admission Date:', snap.admissionDate ? certificateDate(snap.admissionDate) : '—');
+      ty += 14;
+
+      drawField(col1X, ty, 'Date of Birth:', snap.dateOfBirth ? certificateDate(snap.dateOfBirth) : '—');
+      drawField(col2X, ty, 'Issue Date:', certificateDate(transcript.issuedAt));
+
+      return cardY + cardH + 10;
+    };
+
+    let y = drawHeader(false);
+
+    // Group courses by level/stage
+    const stageGroups = new Map();
+    for (const c of transcript.academicSnapshot || []) {
+      const lvl = Number(c.level) || 1;
+      if (!stageGroups.has(lvl)) stageGroups.set(lvl, []);
+      stageGroups.get(lvl).push(c);
     }
-    if (y + 100 > BOTTOM) {
+    const stages = Array.from(stageGroups.entries()).sort(([a], [b]) => a - b);
+
+    // Column coordinates
+    // W = 523.28
+    // sn: 26, code: 72, title: 215, hours: 50, mark: 52, letter: 50, points: 58.28
+    const cols = {
+      sn: { x: L, w: 26 },
+      code: { x: L + 26, w: 72 },
+      title: { x: L + 98, w: 215 },
+      hours: { x: L + 313, w: 50 },
+      mark: { x: L + 363, w: 52 },
+      letter: { x: L + 415, w: 50 },
+      points: { x: L + 465, w: 58.28 },
+    };
+
+    const drawTableHeader = (curY, stageLabel) => {
+      // Stage Banner
+      doc.rect(L, curY, W, 17).fill('#0f2747');
+      doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#ffffff').text(stageLabel.toUpperCase(), L + 8, curY + 4, {
+        width: W - 16,
+      });
+      curY += 17;
+
+      // Grouped Header Row 1 & 2
+      const hH = 26;
+      doc.rect(L, curY, W, hH).fill('#f1f5f9');
+      doc.rect(L, curY, W, hH).lineWidth(0.5).strokeColor('#cbd5e1').stroke();
+
+      // Vertical lines inside header
+      doc.moveTo(cols.code.x, curY).lineTo(cols.code.x, curY + hH).lineWidth(0.5).strokeColor('#cbd5e1').stroke();
+      doc.moveTo(cols.title.x, curY).lineTo(cols.title.x, curY + hH).lineWidth(0.5).strokeColor('#cbd5e1').stroke();
+      doc.moveTo(cols.hours.x, curY).lineTo(cols.hours.x, curY + hH).lineWidth(0.5).strokeColor('#cbd5e1').stroke();
+      doc.moveTo(cols.mark.x, curY).lineTo(cols.mark.x, curY + hH).lineWidth(0.5).strokeColor('#cbd5e1').stroke();
+
+      // Top-level labels
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#334155');
+      doc.text('S.N.', cols.sn.x, curY + 8, { width: cols.sn.w, align: 'center' });
+      doc.text('Course Code', cols.code.x + 4, curY + 8, { width: cols.code.w - 8, align: 'left' });
+      doc.text('Course Name', cols.title.x + 4, curY + 8, { width: cols.title.w - 8, align: 'left' });
+      doc.text('Total Hours', cols.hours.x, curY + 8, { width: cols.hours.w, align: 'center' });
+
+      // Grouped "Result" header
+      const resW = cols.mark.w + cols.letter.w + cols.points.w;
+      doc.text('Result', cols.mark.x, curY + 3, { width: resW, align: 'center' });
+      doc.moveTo(cols.mark.x, curY + 13).lineTo(R, curY + 13).lineWidth(0.5).strokeColor('#cbd5e1').stroke();
+
+      // Sub-columns
+      doc.fontSize(7).text('Grade (Num)', cols.mark.x, curY + 16, { width: cols.mark.w, align: 'center' });
+      doc.text('Grade (Ltr)', cols.letter.x, curY + 16, { width: cols.letter.w, align: 'center' });
+      doc.text('Grade Point', cols.points.x, curY + 16, { width: cols.points.w, align: 'center' });
+
+      doc.moveTo(cols.letter.x, curY + 13).lineTo(cols.letter.x, curY + hH).lineWidth(0.5).strokeColor('#cbd5e1').stroke();
+      doc.moveTo(cols.points.x, curY + 13).lineTo(cols.points.x, curY + hH).lineWidth(0.5).strokeColor('#cbd5e1').stroke();
+
+      return curY + hH;
+    };
+
+    for (const [lvl, courseList] of stages) {
+      const isDiploma = transcript.programSnapshot?.qualificationType === 'diploma';
+      const stageName = isDiploma ? `Level ${lvl}` : `Year ${lvl}`;
+
+      // Check if space is needed for table header + at least 2 rows + footer
+      if (y + 110 > T_BOTTOM) {
+        doc.addPage();
+        y = drawHeader(true);
+      }
+
+      y = drawTableHeader(y, `${stageName} Academic Record`);
+
+      let sn = 1;
+      let stageCredits = 0;
+      let stageQualityPoints = 0;
+
+      for (const row of courseList) {
+        if (y + 22 > T_BOTTOM) {
+          doc.addPage();
+          y = drawHeader(true);
+          y = drawTableHeader(y, `${stageName} Academic Record (Continued)`);
+        }
+
+        const cr = Number(row.credits || 0);
+        const pts = row.gradePoint != null ? Number(row.gradePoint) : null;
+        stageCredits += cr;
+        if (pts !== null && cr > 0) {
+          stageQualityPoints += pts * cr;
+        }
+
+        const rowH = 18;
+        // Alternating row background
+        if (sn % 2 === 0) {
+          doc.rect(L, y, W, rowH).fill('#f8fafc');
+        }
+        doc.rect(L, y, W, rowH).lineWidth(0.3).strokeColor('#e2e8f0').stroke();
+
+        doc.font('Helvetica').fontSize(7.5).fillColor('#334155');
+        doc.text(String(sn), cols.sn.x, y + 4.5, { width: cols.sn.w, align: 'center' });
+        doc.font('Helvetica-Bold').text(row.code || '—', cols.code.x + 4, y + 4.5, {
+          width: cols.code.w - 8,
+          ellipsis: true,
+        });
+        doc.font('Helvetica').text(row.title || '—', cols.title.x + 4, y + 4.5, {
+          width: cols.title.w - 8,
+          ellipsis: true,
+        });
+        doc.text(String(cr || '—'), cols.hours.x, y + 4.5, { width: cols.hours.w, align: 'center' });
+        doc.text(row.mark != null ? String(row.mark) : '—', cols.mark.x, y + 4.5, {
+          width: cols.mark.w - 4,
+          align: 'right',
+        });
+        doc.font('Helvetica-Bold').text(row.letterGrade || '—', cols.letter.x, y + 4.5, {
+          width: cols.letter.w,
+          align: 'center',
+        });
+        doc.font('Helvetica').text(pts != null ? pts.toFixed(2) : '—', cols.points.x, y + 4.5, {
+          width: cols.points.w - 6,
+          align: 'right',
+        });
+
+        y += rowH;
+        sn += 1;
+      }
+
+      // Stage Footer (Total Hours & Stage GPA)
+      const stageGpa = stageCredits > 0 ? stageQualityPoints / stageCredits : null;
+      const footH = 18;
+      doc.rect(L, y, W, footH).fill('#f1f5f9');
+      doc.rect(L, y, W, footH).lineWidth(0.5).strokeColor('#cbd5e1').stroke();
+
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#0f2747');
+      doc.text(`Total Hours: ${stageCredits}`, L + 8, y + 4.5);
+      doc.text(
+        `${stageName} GPA: ${stageGpa != null ? stageGpa.toFixed(2) : '—'}`,
+        R - 180,
+        y + 4.5,
+        { width: 172, align: 'right' },
+      );
+
+      y += footH + 10;
+    }
+
+    // Check space for Summary + Footer
+    if (y + 115 > T_BOTTOM) {
       doc.addPage();
-      doc.rect(0, 0, PAGE.width, PAGE.height).fill('#fffdf7');
-      y = 50;
+      y = drawHeader(true);
     }
-    y += 14;
-    doc.font('Times-Bold').fontSize(11).fillColor('#123b2d').text('Summary', MARGIN, y);
-    y = doc.y + 6;
-    doc.font('Helvetica').fontSize(8.5).fillColor('#26352d');
-    doc.text(`Total credits: ${transcript.totalCredits ?? '—'}`, MARGIN, y);
-    doc.text(`Official CGPA: ${transcript.cgpa === null || transcript.cgpa === undefined ? 'Not available' : Number(transcript.cgpa).toFixed(2)}`, MARGIN + 180, y);
-    y += 18;
-    doc.text(`Issued: ${certificateDate(transcript.issuedAt)}`, MARGIN, y);
-    doc.text(`Verification: ${transcript.verificationId}`, MARGIN + 180, y);
-    if (transcript.purpose) doc.text(`Purpose: ${transcript.purpose}`, MARGIN, y + 16, { width: 500 });
-    if (template?.verificationBaseUrl) {
-      doc.text(`Verify: ${template.verificationBaseUrl.replace(/\/+$/, '')}/${transcript.verificationId}`, MARGIN, y + 34);
-    }
+
+    // Overall Cumulative Summary Box
+    const sumH = 24;
+    doc.rect(L, y, W, sumH).fill('#e0f2fe');
+    doc.rect(L, y, W, sumH).lineWidth(0.75).strokeColor('#7dd3fc').stroke();
+
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#0369a1');
+    doc.text(`CUMULATIVE TOTAL HOURS: ${transcript.totalCredits ?? 0}`, L + 12, y + 7);
+    doc.text(
+      `CUMULATIVE CGPA: ${transcript.cgpa != null ? Number(transcript.cgpa).toFixed(2) : '—'} / 4.00`,
+      R - 220,
+      y + 7,
+      { width: 208, align: 'right' },
+    );
+
+    y += sumH + 14;
+
+    // Official Footer (Signature, Stamp, Verification)
+    const footCardY = y;
+    const signW = 180;
+
+    // Official Stamp
+    doc.rect(L + 16, footCardY, 120, 48).lineWidth(0.5).strokeColor('#94a3b8').stroke();
+    doc.font('Helvetica').fontSize(7).fillColor('#64748b').text('OFFICIAL STAMP', L + 16, footCardY + 20, {
+      width: 120,
+      align: 'center',
+    });
+
+    // Official Signature
+    const signX = R - signW - 10;
+    doc.moveTo(signX, footCardY + 32).lineTo(signX + signW, footCardY + 32).lineWidth(0.6).strokeColor('#475569').stroke();
+    doc.font('Helvetica-Bold').fontSize(8).fillColor('#0f2747').text(
+      template?.signatoryName || 'Dr. Abebe Bekele',
+      signX,
+      footCardY + 35,
+      { width: signW, align: 'center' },
+    );
+    doc.font('Helvetica').fontSize(7).fillColor('#64748b').text(
+      template?.signatoryTitle || 'Dean & Academic Registrar',
+      signX,
+      footCardY + 45,
+      { width: signW, align: 'center' },
+    );
+
+    // Verification Info & Page Numbering across all pages
+    const verificationUrl = template?.verificationBaseUrl
+      ? `${template.verificationBaseUrl.replace(/\/+$/, '')}/${transcript.verificationId}`
+      : `http://localhost:5173/verify/${transcript.verificationId}`;
+
     const range = doc.bufferedPageRange();
     for (let index = 0; index < range.count; index += 1) {
       doc.switchToPage(range.start + index);
-      doc.font('Helvetica').fontSize(7).fillColor('#68756e').text(
-        `Official transcript  •  ${transcript.verificationId}  •  Page ${index + 1} of ${range.count}`,
-        MARGIN,
-        PAGE.height - 32,
-        { width: PAGE.width - MARGIN * 2, align: 'center' },
+      doc.moveTo(L, PAGE.height - 34).lineTo(R, PAGE.height - 34).lineWidth(0.4).strokeColor('#e2e8f0').stroke();
+      doc.font('Helvetica').fontSize(6.5).fillColor('#64748b').text(
+        `Verification URL: ${verificationUrl}   •   Serial: ${transcript.verificationId}   •   Page ${index + 1} of ${range.count}`,
+        L,
+        PAGE.height - 28,
+        { width: W, align: 'center' },
       );
     }
+
     doc.end();
   });
 }

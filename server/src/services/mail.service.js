@@ -129,10 +129,17 @@ const COPY = {
   student_delete: { subject: 'Confirm deleting a student record', accent: 'Student record deletion', title: 'Confirm this permanent deletion', intro: 'Use this code to permanently delete the student record you selected. This cannot be undone.' },
   batch_delete: { subject: 'Confirm deleting a batch', accent: 'Batch deletion', title: 'Confirm this batch deletion', intro: 'Use this code to delete the selected batch register. This cannot be undone.' },
   course_marks_submit: { subject: 'Confirm submitting course marks', accent: 'Course marks submission', title: 'Confirm this submission', intro: 'Use this code to submit course marks for registrar review. Submitted marks are locked from further edits.' },
+  result_submission: { subject: 'Confirm results submission & stage finalization', accent: 'Stage completion verification', title: 'Confirm stage results finalization', intro: 'Use this code to verify and submit finalized stage results for GPA calculation. Once submitted, this stage results will be approved and sent to GPA.' },
+  attendance_finalize: { subject: 'Confirm course attendance finalization', accent: 'Attendance finalization', title: 'Confirm finalizing course attendance', intro: 'Use this code to finalize course attendance and compute attendance marks.' },
 };
 
 export function sendCodeEmail({ to, name, code, purpose }) {
-  const c = COPY[purpose];
+  const c = COPY[purpose] || {
+    subject: 'Verification code',
+    accent: 'Security verification',
+    title: 'Your verification code',
+    intro: 'Use this verification code to complete your requested action.',
+  };
   const body =
     para(`Hi ${esc(name)},<br>${esc(c.intro)}`) +
     codeBlock(code, env.CODE_TTL_MINUTES) +

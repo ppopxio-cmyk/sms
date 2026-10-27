@@ -290,6 +290,7 @@ export default function RegistrarTranscripts() {
 function IssueTranscriptModal({ open, onClose, onSaved }) {
   const [student, setStudent] = useState(null);
   const [purpose, setPurpose] = useState('');
+  const [selectedLevels, setSelectedLevels] = useState([]);
   const [error, setError] = useState('');
 
   const gpaQuery = useQuery({
@@ -298,18 +299,53 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
     enabled: Boolean(student?.id && open),
   });
 
+  const availableStages = useMemo(() => {
+    return gpaQuery.data?.stageBreakdown || [];
+  }, [gpaQuery.data?.stageBreakdown]);
+
   useEffect(() => {
     if (open) {
       setStudent(null);
       setPurpose('');
+      setSelectedLevels([]);
       setError('');
     }
   }, [open]);
 
+  useEffect(() => {
+    if (availableStages.length) {
+      // By default select all available stages
+      setSelectedLevels(availableStages.map((s) => s.level));
+    } else {
+      setSelectedLevels([]);
+    }
+  }, [availableStages]);
+
+  const toggleLevel = (level) => {
+    setSelectedLevels((prev) =>
+      prev.includes(level) ? prev.filter((l) => l !== level) : [...prev, level].sort((a, b) => a - b),
+    );
+  };
+
+  const toggleAll = () => {
+    if (selectedLevels.length === availableStages.length) {
+      setSelectedLevels([]);
+    } else {
+      setSelectedLevels(availableStages.map((s) => s.level));
+    }
+  };
+
   const issue = useMutation({
     mutationFn: async () => {
       if (!student) throw new Error('Choose a student.');
-      return (await api.post(`${REGISTRAR}/transcripts`, { student: student.id, purpose: purpose.trim() })).data;
+      if (!selectedLevels.length) throw new Error('Select at least one Year/Level to include in the transcript.');
+      return (
+        await api.post(`${REGISTRAR}/transcripts`, {
+          student: student.id,
+          purpose: purpose.trim(),
+          selectedLevels,
+        })
+      ).data;
     },
     onSuccess: () => {
       toast.success('Official transcript issued.');
@@ -329,7 +365,7 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
     <Modal
       open={open}
       title="Issue official transcript"
-      subtitle="The server snapshots the student's published results, stages, and official grading policy."
+      subtitle="Select the years or levels to include, or issue for all completed stages."
       onClose={issue.isPending ? undefined : onClose}
       dismissible={!issue.isPending}
       footer={
@@ -340,7 +376,7 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
           <Button
             onClick={() => issue.mutate()}
             loading={issue.isPending}
-            disabled={!student || (gpaQuery.isSuccess && !studentHasResults)}
+            disabled={!student || (gpaQuery.isSuccess && !studentHasResults) || !selectedLevels.length}
           >
             Issue transcript
           </Button>
@@ -350,7 +386,13 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
       <div className="grid gap-4">
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
 
-        <StudentPicker value={student} onChange={setStudent} />
+        <StudentPicker
+          value={student}
+          onChange={(val) => {
+            setStudent(val);
+            setError('');
+          }}
+        />
 
         {student && (
           <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
@@ -368,7 +410,9 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-slate-700">Credits / Courses:</span>
-                  <span className="text-slate-900">{gpaQuery.data?.credits ?? 0} credits ({gpaQuery.data?.courseCount ?? 0} courses)</span>
+                  <span className="text-slate-900">
+                    {gpaQuery.data?.credits ?? 0} credits ({gpaQuery.data?.courseCount ?? 0} courses)
+                  </span>
                 </div>
               </div>
             ) : (
@@ -376,6 +420,54 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
                 ⚠️ This student has 0 published results. Publish course results from the Results page first.
               </p>
             )}
+          </div>
+        )}
+
+        {student && studentHasResults && availableStages.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+                Select Year / Level to Include
+              </span>
+              <button
+                type="button"
+                onClick={toggleAll}
+                className="text-xs font-medium text-brand-600 hover:text-brand-700 underline"
+              >
+                {selectedLevels.length === availableStages.length ? 'Deselect all' : 'Select all'}
+              </button>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {availableStages.map((stage) => {
+                const checked = selectedLevels.includes(stage.level);
+                return (
+                  <label
+                    key={stage.level}
+                    className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-2.5 transition ${
+                      checked ? 'border-brand-300 bg-brand-50/60' : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleLevel(stage.level)}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-slate-800">
+                        Year / Level {stage.level}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        {stage.courseCount} course{stage.courseCount === 1 ? '' : 's'} · {stage.credits} credits · GPA: <span className="font-semibold text-slate-700">{stage.gpa ?? '—'}</span>
+                      </p>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Pick all years, a single year, or any combination of years to export.
+            </p>
           </div>
         )}
 

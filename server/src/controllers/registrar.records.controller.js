@@ -191,6 +191,10 @@ export const listResultSubmissions = asyncHandler(async (req, res) => {
   const offeringFilter = mergeFilters(
     query.academicYear ? { academicYear: query.academicYear } : null,
     query.term ? { term: query.term } : null,
+    query.program ? { program: query.program } : null,
+    query.batch ? { batch: query.batch } : null,
+    query.department ? { department: query.department } : null,
+    query.level ? { level: Number(query.level) } : null,
   );
   const offeringIds = (await CourseOffering.find(offeringFilter).select('_id').limit(5000).lean()).map((row) => row._id);
   if (!offeringIds.length) return res.json({ rows: [] });
@@ -277,8 +281,11 @@ export const singleOfferingResults = asyncHandler(async (req, res) => {
 export const requestResultSubmitCode = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user.id).lean();
   if (!user?.email) throw new AppError(400, 'NO_EMAIL', 'Your account has no email address.');
-  await sendCode(user.email, 'result_submission', { reason: 'Verify and submit finalized results' });
-  res.json({ message: 'A 6-digit confirmation code has been sent to your email.' });
+  const sent = await sendCode(user, 'result_submission');
+  if (!sent) {
+    throw new AppError(429, 'WAIT_BEFORE_RESEND', 'Please wait 2 minutes before asking for another verification code.');
+  }
+  res.json({ message: `A 6-digit confirmation code has been sent to ${user.email}.` });
 });
 
 export const submitStageComplete = asyncHandler(async (req, res) => {
@@ -286,13 +293,17 @@ export const submitStageComplete = asyncHandler(async (req, res) => {
   if (!user?.email) throw new AppError(400, 'NO_EMAIL', 'Your account has no email address.');
   const code = String(req.body.code || '').trim();
   if (!code) throw new AppError(400, 'CODE_REQUIRED', 'Confirmation code is required.');
-  const valid = await checkCode(user.email, 'result_submission', code);
-  if (!valid) throw new AppError(400, 'CODE_INVALID', 'The confirmation code is invalid or has expired.');
+  await checkCode(user._id, 'result_submission', code);
 
-  const { programId, level } = req.body;
+  const { programId, level, batchId } = req.body;
   if (!programId || level === undefined) throw new AppError(400, 'STAGE_REQUIRED', 'Program and stage level are required.');
 
-  const offerings = await CourseOffering.find({ program: programId, level: Number(level) }).select('_id status').lean();
+  const offeringFilter = {
+    program: programId,
+    level: Number(level),
+    ...(batchId ? { batch: batchId } : {}),
+  };
+  const offerings = await CourseOffering.find(offeringFilter).select('_id status').lean();
   if (!offerings.length) {
     throw new AppError(400, 'NO_OFFERINGS', 'No course offerings found for this programme and stage.');
   }
@@ -356,8 +367,7 @@ export const submitProgramFinished = asyncHandler(async (req, res) => {
   if (!user?.email) throw new AppError(400, 'NO_EMAIL', 'Your account has no email address.');
   const code = String(req.body.code || '').trim();
   if (!code) throw new AppError(400, 'CODE_REQUIRED', 'Confirmation code is required.');
-  const valid = await checkCode(user.email, 'result_submission', code);
-  if (!valid) throw new AppError(400, 'CODE_INVALID', 'The confirmation code is invalid or has expired.');
+  await checkCode(user._id, 'result_submission', code);
 
   const { programId, batchId } = req.body;
   if (!programId) throw new AppError(400, 'PROGRAM_REQUIRED', 'Program ID is required.');
@@ -734,6 +744,14 @@ export const gpaCgpa = asyncHandler(async (req, res) => {
         totalStages,
         finishedStages,
       };
+
+      if (query.batch) {
+        const batchDoc = await Batch.findById(query.batch).select('readyForCgpa cgpaCalculated').lean();
+        if (batchDoc) {
+          programInfo.readyForCgpa = batchDoc.readyForCgpa || allStagesFinished;
+          programInfo.cgpaCalculated = Boolean(batchDoc.cgpaCalculated);
+        }
+      }
     }
   }
 
@@ -794,6 +812,74 @@ export const gpaCgpa = asyncHandler(async (req, res) => {
     stageCompleted,
     allStagesFinished,
     policyVersion: policy.version,
+  });
+});
+
+export const sendToCgpa = asyncHandler(async (req, res) => {
+  const { programId, batchId } = req.body;
+  if (!programId) throw new AppError(400, 'PROGRAM_REQUIRED', 'Programme is required.');
+
+  const filter = {
+    program: programId,
+    ...(batchId ? { _id: batchId } : {}),
+  };
+  await Batch.updateMany(filter, { $set: { readyForCgpa: true } });
+
+  audit({
+    req,
+    action: 'registrar.gpa.send_to_cgpa',
+    targetType: 'Program',
+    targetId: programId,
+    meta: { batchId },
+  });
+
+  res.json({ success: true, message: 'Programme sent to CGPA tab successfully!' });
+});
+
+export const calculateCgpaAndGraduate = asyncHandler(async (req, res) => {
+  const { programId, batchId } = req.body;
+  if (!programId) throw new AppError(400, 'PROGRAM_REQUIRED', 'Programme is required.');
+
+  const policy = await requireGradingPolicy();
+  const studentFilter = {
+    program: programId,
+    ...(batchId ? { batch: batchId } : {}),
+  };
+  const students = await Student.find(studentFilter);
+  if (!students.length) {
+    throw new AppError(404, 'NO_STUDENTS', 'No students found for this programme and batch.');
+  }
+
+  let graduatedCount = 0;
+  for (const student of students) {
+    const studentResults = await publishedResultsForStudent(student._id);
+    const cumResult = calculateGpa(studentResults, policy);
+
+    student.studentStatus = 'graduated';
+    student.enrollmentStatus = 'completed';
+    student.completionDate = new Date();
+    await student.save();
+    graduatedCount++;
+  }
+
+  const batchFilter = {
+    program: programId,
+    ...(batchId ? { _id: batchId } : {}),
+  };
+  await Batch.updateMany(batchFilter, { $set: { cgpaCalculated: true, status: 'completed' } });
+
+  audit({
+    req,
+    action: 'registrar.cgpa.calculate_and_graduate',
+    targetType: 'Program',
+    targetId: programId,
+    meta: { batchId, graduatedCount },
+  });
+
+  res.json({
+    success: true,
+    count: graduatedCount,
+    message: `Cumulative CGPA calculated for all ${graduatedCount} students. Students have been marked as Graduated!`,
   });
 });
 

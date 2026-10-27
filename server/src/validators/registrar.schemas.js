@@ -333,6 +333,10 @@ export const courseResourceUploadSchema = z.object({
 export const listResultsQuerySchema = paginationSchema.extend({
   academicYear: objectId.optional(),
   term: text(60).optional(),
+  program: objectId.optional(),
+  batch: objectId.optional(),
+  department: objectId.optional(),
+  level: z.coerce.number().optional(),
   status: z.enum(['all', 'draft', 'submitted', 'under_review', 'approved', 'published', 'rejected']).optional().default('all'),
   offering: objectId.optional(),
   student: objectId.optional(),
@@ -430,6 +434,7 @@ export const graduationQuerySchema = paginationSchema.extend({
 export const transcriptCreateSchema = z.object({
   student: objectId,
   purpose: optionalText(300),
+  selectedLevels: z.array(z.coerce.number()).optional(),
 });
 
 export const certificateEligibilitySchema = z.object({

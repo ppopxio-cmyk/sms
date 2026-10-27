@@ -91,7 +91,7 @@ import {
   reviewResult, approveResult, publishResult, rejectResult, correctResult,
   approveResultSubmission, declineResultSubmission, publishResultSubmission,
   singleOfferingResults, requestResultSubmitCode, submitStageComplete, submitProgramFinished,
-  gpaCgpa, exportStudentGpaRecord, listGraduation, evaluateGraduation, graduationStudent, resultOptions,
+  gpaCgpa, sendToCgpa, calculateCgpaAndGraduate, exportStudentGpaRecord, listGraduation, evaluateGraduation, graduationStudent, resultOptions,
 } from '../controllers/registrar.records.controller.js';
 import {
   viewPolicy, updatePolicy as updateGradingPolicy, previewPolicy, policyHistory,
@@ -289,6 +289,8 @@ r.get(
   exportStudentGpaRecord,
 );
 r.get('/gpa-cgpa', requirePermission('gpa:view'), validate(gpaQuerySchema, 'query'), gpaCgpa);
+r.post('/gpa-cgpa/send-to-cgpa', requirePermission('gpa:view'), sendToCgpa);
+r.post('/gpa-cgpa/calculate-cgpa', requirePermission('gpa:view'), calculateCgpaAndGraduate);
 
 // ---- Grading Policy ---------------------------------------------------------
 r.get('/grading-policy', requirePermission('grading_policy:view'), viewPolicy);

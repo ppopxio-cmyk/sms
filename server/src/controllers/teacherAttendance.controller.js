@@ -83,8 +83,11 @@ export const exportHistory = asyncHandler(async (req, res) => {
 export const requestFinalizeCode = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user.id).lean();
   if (!user?.email) throw new AppError(400, 'NO_EMAIL', 'Your account has no email address.');
-  await sendCode(user.email, 'attendance_finalize', { reason: 'Finalize course attendance and sync marks' });
-  res.json({ message: 'A confirmation code has been emailed to you.' });
+  const sent = await sendCode(user, 'attendance_finalize');
+  if (!sent) {
+    throw new AppError(429, 'WAIT_BEFORE_RESEND', 'Please wait 2 minutes before asking for another verification code.');
+  }
+  res.json({ message: `A confirmation code has been sent to ${user.email}.` });
 });
 
 export const finalizeCourse = asyncHandler(async (req, res) => {
@@ -92,8 +95,7 @@ export const finalizeCourse = asyncHandler(async (req, res) => {
   if (!user?.email) throw new AppError(400, 'NO_EMAIL', 'Your account has no email address.');
   const code = String(req.body.code || '').trim();
   if (!code) throw new AppError(400, 'CODE_REQUIRED', 'Confirmation code is required.');
-  const valid = await checkCode(user.email, 'attendance_finalize', code);
-  if (!valid) throw new AppError(400, 'CODE_INVALID', 'The code is invalid or has expired.');
+  await checkCode(user._id, 'attendance_finalize', code);
 
   const result = await finalizeCourseAttendance(req.user.id, req.valid.params.assignmentId);
   audit({
