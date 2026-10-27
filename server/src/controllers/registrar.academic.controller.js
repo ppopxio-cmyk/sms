@@ -18,6 +18,7 @@ import { Material } from '../models/Material.js';
 import { sendCode } from '../services/codeDelivery.js';
 import { checkCode } from '../services/code.service.js';
 import { sendCurriculumOfferingEmail } from '../services/mail.service.js';
+import { oneOf } from '../utils/mongo.js';
 
 async function recalcPlan(planId) {
   const total = await planCredits(planId);
@@ -2101,6 +2102,308 @@ export const createOffering = asyncHandler(async (req, res) => {
   });
   audit({ req, action: 'registrar.offering.create', targetType: 'CourseOffering', targetId: offering._id });
   res.status(201).json({ offering });
+});
+
+export const bulkCreateOfferings = asyncHandler(async (req, res) => {
+  const {
+    academicYear: reqYearId,
+    term = 'Semester 1',
+    department: reqDeptId,
+    program: reqProgramId,
+    category = 'regular',
+    level: reqLevel,
+    status = 'open',
+    capacity = 60,
+    autoAssignTeacher = true,
+    autoRegisterStudents = true,
+  } = req.body;
+
+  let academicYearDoc = null;
+  if (reqYearId) {
+    academicYearDoc = await AcademicYear.findById(reqYearId).lean();
+  }
+  if (!academicYearDoc) {
+    academicYearDoc =
+      (await AcademicYear.findOne(ownFilter({ isCurrent: true })).lean()) ||
+      (await AcademicYear.findOne().sort({ startDate: -1 }).lean());
+  }
+  if (!academicYearDoc) {
+    throw new AppError(400, 'ACADEMIC_YEAR_REQUIRED', 'Please create an academic year first.');
+  }
+
+  const courseFilter = ownFilter({ active: true });
+  if (reqDeptId) courseFilter.department = reqDeptId;
+  if (reqProgramId) courseFilter.program = reqProgramId;
+
+  const courses = await Course.find(courseFilter)
+    .populate('department', 'code name')
+    .populate('program', 'code name department qualificationType')
+    .lean();
+
+  if (!courses.length) {
+    throw new AppError(404, 'NO_COURSES_FOUND', 'No active courses found matching the criteria.');
+  }
+
+  // Pre-fetch all necessary collections in parallel to eliminate N+1 round trips over the network
+  const [
+    allPrograms,
+    allTeachers,
+    allCurriculumCourses,
+    existingOfferings,
+    existingResources,
+    existingMaterials,
+    allActiveStudents,
+  ] = await Promise.all([
+    Program.find({ active: true }).populate('teachers', 'name email').lean(),
+    User.find(ownFilter({ role: oneOf(['TEACHER', 'teacher']), status: 'active', deletedAt: null }))
+      .select('name email department')
+      .lean(),
+    CurriculumCourse.find({ active: true }).lean(),
+    CourseOffering.find({ academicYear: academicYearDoc._id, term, category }),
+    CourseResource.find(ownFilter({ deletedAt: null })).select('program courseCode').lean(),
+    Material.find(ownFilter({ deletedAt: null })).select('offering').lean(),
+    autoRegisterStudents
+      ? Student.find(ownFilter({ enrollmentStatus: 'active' })).select('_id program level').lean()
+      : Promise.resolve([]),
+  ]);
+
+  const existingOfferingMap = new Map();
+  for (const o of existingOfferings) {
+    const key = `${o.course}-${o.program}-${o.level}`;
+    existingOfferingMap.set(key, o);
+  }
+
+  const existingResourceSet = new Set(
+    existingResources.map((r) => `${r.program}-${String(r.courseCode || '').toUpperCase()}`),
+  );
+  const existingMaterialSet = new Set(existingMaterials.map((m) => String(m.offering)));
+
+  let createdCount = 0;
+  let updatedCount = 0;
+  let skippedCount = 0;
+
+  const offeringsToInsert = [];
+  const resourcesToInsert = [];
+  const newOfferingMeta = [];
+
+  for (const course of courses) {
+    let deptId = course.department?._id || course.department;
+
+    let programObj = course.program;
+    if (!programObj?._id) {
+      programObj =
+        allPrograms.find((p) => String(p.department?._id || p.department) === String(deptId)) ||
+        allPrograms[0] ||
+        null;
+    }
+    if (!programObj?._id) continue;
+
+    if (!deptId) {
+      deptId = programObj.department?._id || programObj.department;
+    }
+
+    let courseLevel = reqLevel;
+    if (!courseLevel) {
+      const match = String(course.code || '').match(/[A-Za-z]+[-_ ]?([1-9])/);
+      courseLevel = match ? Number(match[1]) : 1;
+    }
+
+    const creditHours = course.creditHours || 3;
+
+    let teacherId = null;
+    if (autoAssignTeacher) {
+      const progTeachers = (programObj.teachers || []).filter(Boolean);
+      if (progTeachers.length) {
+        teacherId = progTeachers[0]?._id || progTeachers[0];
+      } else {
+        const deptTeacher = allTeachers.find((t) => String(t.department) === String(deptId));
+        if (deptTeacher) teacherId = deptTeacher._id;
+        else if (allTeachers.length) teacherId = allTeachers[0]._id;
+      }
+    }
+
+    const key = `${course._id}-${programObj._id}-${courseLevel}`;
+    const existing = existingOfferingMap.get(key);
+
+    if (existing) {
+      let changed = false;
+      if (existing.status !== status && status === 'open') {
+        existing.status = 'open';
+        changed = true;
+      }
+      if (!existing.teacher && teacherId) {
+        existing.teacher = teacherId;
+        changed = true;
+      }
+      if (changed) {
+        await existing.save();
+        updatedCount++;
+      } else {
+        skippedCount++;
+      }
+    } else {
+      const matchingCurriculumCourse = allCurriculumCourses.find(
+        (c) => String(c.course) === String(course._id),
+      );
+      const matchingPlanId = matchingCurriculumCourse?.plan || null;
+      const matchingCurriculumCourseId = matchingCurriculumCourse?._id || null;
+
+      const newOffering = {
+        course: course._id,
+        curriculumPlan: matchingPlanId,
+        curriculumCourse: matchingCurriculumCourseId,
+        program: programObj._id,
+        department: deptId,
+        academicYear: academicYearDoc._id,
+        term,
+        level: courseLevel,
+        category,
+        creditHours,
+        teacher: teacherId,
+        capacity,
+        registeredCount: 0,
+        status,
+        teacherHistory: teacherId ? [{ teacher: teacherId, by: req.user.id, reason: 'Bulk offering generation' }] : [],
+        createdBy: req.user.id,
+        updatedBy: req.user.id,
+      };
+
+      offeringsToInsert.push(newOffering);
+      newOfferingMeta.push({ course, programObj, deptId, courseLevel, creditHours });
+      createdCount++;
+    }
+
+    // Check course resource
+    const courseCode = String(course.code || '').trim().toUpperCase();
+    const courseTitle = String(course.title || course.name || course.code).trim();
+    const resKey = `${programObj._id}-${courseCode}`;
+
+    if (courseCode && !existingResourceSet.has(resKey)) {
+      resourcesToInsert.push({
+        program: programObj._id,
+        department: deptId,
+        courseName: courseTitle,
+        courseCode,
+        creditHours,
+        fileName: `${courseCode}_Course_Guide.pdf`,
+        filePath: `/courses/${programObj.code || 'academic'}/${courseCode}-guide.pdf`,
+        fileId: `guide-${course._id}`,
+        contentType: 'application/pdf',
+        bytes: 1024 * 180,
+        uploadedBy: req.user.id,
+      });
+      existingResourceSet.add(resKey);
+    }
+  }
+
+  // Insert any newly created offerings in one bulk call
+  let insertedOfferings = [];
+  if (offeringsToInsert.length > 0) {
+    insertedOfferings = await CourseOffering.insertMany(offeringsToInsert, { ordered: false });
+  }
+
+  // Insert any missing course resources
+  if (resourcesToInsert.length > 0) {
+    await CourseResource.insertMany(resourcesToInsert, { ordered: false }).catch(() => {});
+  }
+
+  // Prepare syllabus materials and registrations for newly inserted offerings
+  const materialsToInsert = [];
+  const registrationOps = [];
+  const offeringsToUpdateRegisteredCount = [];
+
+  for (let i = 0; i < insertedOfferings.length; i++) {
+    const offDoc = insertedOfferings[i];
+    const meta = newOfferingMeta[i];
+    if (!offDoc || !meta) continue;
+
+    const courseCode = String(meta.course.code || '').trim().toUpperCase();
+    const courseTitle = String(meta.course.title || meta.course.name || meta.course.code).trim();
+
+    if (!existingMaterialSet.has(String(offDoc._id))) {
+      materialsToInsert.push({
+        offering: offDoc._id,
+        kind: 'note',
+        title: `${courseCode} Syllabus & Lecture Outline`,
+        description: `Official syllabus and course guide for ${courseCode} - ${courseTitle}.`,
+        content: `Course: ${courseCode} - ${courseTitle}\nProgramme: ${meta.programObj.name || 'Programme'}\nLevel: ${meta.courseLevel}\nTerm: ${term}\nCredit Hours: ${meta.creditHours}\nStatus: Active\n\nApproved syllabus for classroom instruction. Attendance and marks are active.`,
+        visibility: 'published',
+        createdBy: req.user.id,
+      });
+      existingMaterialSet.add(String(offDoc._id));
+    }
+
+    if (autoRegisterStudents && allActiveStudents.length > 0) {
+      const matchingStudents = allActiveStudents.filter(
+        (s) => String(s.program) === String(meta.programObj._id) && Number(s.level) === Number(meta.courseLevel),
+      );
+
+      if (matchingStudents.length > 0) {
+        for (const stu of matchingStudents) {
+          registrationOps.push({
+            updateOne: {
+              filter: { student: stu._id, offering: offDoc._id },
+              update: {
+                $setOnInsert: {
+                  student: stu._id,
+                  offering: offDoc._id,
+                  course: meta.course._id,
+                  academicYear: academicYearDoc._id,
+                  term,
+                  creditHours: meta.creditHours,
+                  status: 'registered',
+                  registeredAt: new Date(),
+                  registeredBy: req.user.id,
+                },
+              },
+              upsert: true,
+            },
+          });
+        }
+        offeringsToUpdateRegisteredCount.push({
+          updateOne: {
+            filter: { _id: offDoc._id },
+            update: { $set: { registeredCount: matchingStudents.length } },
+          },
+        });
+      }
+    }
+  }
+
+  // Bulk write materials, registrations, and count updates
+  if (materialsToInsert.length > 0) {
+    await Material.insertMany(materialsToInsert, { ordered: false }).catch(() => {});
+  }
+  if (registrationOps.length > 0) {
+    await CourseRegistration.bulkWrite(registrationOps, { ordered: false }).catch(() => {});
+  }
+  if (offeringsToUpdateRegisteredCount.length > 0) {
+    await CourseOffering.bulkWrite(offeringsToUpdateRegisteredCount, { ordered: false }).catch(() => {});
+  }
+
+  audit({
+    req,
+    action: 'registrar.offering.bulk_create',
+    targetType: 'CourseOffering',
+    meta: {
+      academicYear: academicYearDoc.label,
+      term,
+      createdCount,
+      updatedCount,
+      skippedCount,
+      totalCourses: courses.length,
+    },
+  });
+
+  res.json({
+    message: `Generated course offerings: ${createdCount} created, ${updatedCount} updated, ${skippedCount} already up to date.`,
+    created: createdCount,
+    updated: updatedCount,
+    skipped: skippedCount,
+    total: courses.length,
+    academicYear: academicYearDoc.label,
+    term,
+  });
 });
 
 export const updateOffering = asyncHandler(async (req, res) => {

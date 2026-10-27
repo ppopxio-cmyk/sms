@@ -1,20 +1,34 @@
-import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { BookOpen, Building2, Calendar, CheckCircle2, Clock, Users } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { BookOpen, Building2, Calendar, CheckCircle2, Clock, Layers, Sparkles, Users } from 'lucide-react';
+import { toast } from 'sonner';
 import { api } from '../../lib/api';
 import { REGISTRAR, humanStatus, levelLabel, toneForStatus } from '../../lib/registrar';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
 import RegistrarTable from '../../components/registrar/RegistrarTable';
 import Card, { CardBody, CardHeader } from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
+import Button from '../../components/ui/Button';
+import Modal from '../../components/ui/Modal';
+import { SelectField } from '../../components/registrar/Fields';
 import SearchInput from '../../components/ui/SearchInput';
 import Pagination from '../../components/ui/Pagination';
 
 export default function RegistrarCourseOffering() {
+  const queryClient = useQueryClient();
   const [selectedDept, setSelectedDept] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
+
+  // Bulk offering modal state
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const [bulkYear, setBulkYear] = useState('');
+  const [bulkTerm, setBulkTerm] = useState('Semester 1');
+  const [bulkDept, setBulkDept] = useState('');
+  const [bulkCategory, setBulkCategory] = useState('regular');
+  const [autoAssignTeacher, setAutoAssignTeacher] = useState(true);
+  const [autoRegisterStudents, setAutoRegisterStudents] = useState(true);
 
   // Fetch options to get all departments
   const optionsQuery = useQuery({
@@ -24,6 +38,41 @@ export default function RegistrarCourseOffering() {
   });
 
   const departments = optionsQuery.data?.departments || [];
+  const academicYears = optionsQuery.data?.academicYears || [];
+
+  // Default bulk year to current academic year
+  useEffect(() => {
+    if (!bulkYear && academicYears.length > 0) {
+      const current = academicYears.find((y) => y.isCurrent) || academicYears[0];
+      if (current) setBulkYear(current.id);
+    }
+  }, [academicYears, bulkYear]);
+
+  // Bulk generate mutation
+  const bulkMutation = useMutation({
+    mutationFn: async () => {
+      return (
+        await api.post(`${REGISTRAR}/offerings/bulk`, {
+          academicYear: bulkYear || undefined,
+          term: bulkTerm,
+          department: bulkDept || undefined,
+          category: bulkCategory,
+          autoAssignTeacher,
+          autoRegisterStudents,
+        })
+      ).data;
+    },
+    onSuccess: (data) => {
+      toast.success(data.message || 'Course offerings generated successfully.');
+      setBulkModalOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'all-course-offerings'] });
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'offering-options'] });
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'offerings'] });
+    },
+    onError: (err) => {
+      toast.error(err.response?.data?.message || 'Failed to generate course offerings.');
+    },
+  });
 
   // Fetch all course offerings
   const offeringsQuery = useQuery({
@@ -148,6 +197,17 @@ export default function RegistrarCourseOffering() {
       <RegistrarPageHeader
         title="Course offerings"
         subtitle="View all assigned course offerings produced from published curriculum plans across departments."
+        actions={
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={() => setBulkModalOpen(true)}
+            className="gap-2 shadow-sm"
+          >
+            <Sparkles className="h-4 w-4" />
+            Bulk generate offerings
+          </Button>
+        }
       />
 
       <Card>
@@ -214,6 +274,114 @@ export default function RegistrarCourseOffering() {
           />
         </div>
       </Card>
+
+      {/* Bulk Offerings Modal */}
+      <Modal
+        open={bulkModalOpen}
+        onClose={() => !bulkMutation.isPending && setBulkModalOpen(false)}
+        title="Bulk generate course offerings"
+        subtitle="Create open course offerings in bulk for all active courses, assigning teachers and enrolling students."
+        size="md"
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            <Button
+              variant="ghost"
+              onClick={() => setBulkModalOpen(false)}
+              disabled={bulkMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => bulkMutation.mutate()}
+              loading={bulkMutation.isPending}
+              className="gap-2"
+            >
+              <Sparkles className="h-4 w-4" />
+              Generate offerings
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-brand-100 bg-brand-50/60 p-4 text-xs text-brand-900 leading-relaxed">
+            <p className="font-semibold text-brand-950 flex items-center gap-1.5 mb-1">
+              <CheckCircle2 className="h-4 w-4 text-brand-600" /> Automated Academic Scheduling
+            </p>
+            This scans all active courses in your selected department (or college-wide), creates open offerings for the selected academic term, ensures course guides and syllabi are published, and enrolls active students.
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <SelectField
+              label="Academic year"
+              value={bulkYear}
+              onChange={(e) => setBulkYear(e.target.value)}
+            >
+              {academicYears.map((y) => (
+                <option key={y.id} value={y.id}>
+                  {y.label} {y.isCurrent ? '(Current)' : ''}
+                </option>
+              ))}
+            </SelectField>
+
+            <SelectField
+              label="Term / Semester"
+              value={bulkTerm}
+              onChange={(e) => setBulkTerm(e.target.value)}
+            >
+              <option value="Semester 1">Semester 1</option>
+              <option value="Semester 2">Semester 2</option>
+              <option value="Term 1">Term 1</option>
+              <option value="Term 2">Term 2</option>
+              <option value="Summer">Summer Term</option>
+            </SelectField>
+
+            <SelectField
+              label="Department scope"
+              value={bulkDept}
+              onChange={(e) => setBulkDept(e.target.value)}
+            >
+              <option value="">All departments (All courses)</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.code} · {d.name}
+                </option>
+              ))}
+            </SelectField>
+
+            <SelectField
+              label="Delivery stream"
+              value={bulkCategory}
+              onChange={(e) => setBulkCategory(e.target.value)}
+            >
+              <option value="regular">Regular</option>
+              <option value="extension">Extension</option>
+            </SelectField>
+          </div>
+
+          <div className="space-y-2.5 rounded-xl border border-slate-100 bg-slate-50/70 p-3.5">
+            <label className="flex items-center gap-2.5 text-xs font-medium text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoAssignTeacher}
+                onChange={(e) => setAutoAssignTeacher(e.target.checked)}
+                className="rounded text-brand-600 focus:ring-brand-500"
+              />
+              Auto-assign qualified department & programme teachers
+            </label>
+
+            <label className="flex items-center gap-2.5 text-xs font-medium text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoRegisterStudents}
+                onChange={(e) => setAutoRegisterStudents(e.target.checked)}
+                className="rounded text-brand-600 focus:ring-brand-500"
+              />
+              Automatically enroll active students of matching programmes
+            </label>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

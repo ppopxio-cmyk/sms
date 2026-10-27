@@ -12,13 +12,22 @@ export async function sendCode(user, purpose) {
       else userObj = { _id: user, email: user };
     }
     const code = await issueCode(userObj, purpose);
-    const sent = await sendCodeEmail({
+
+    // Dispatch email immediately with high priority
+    const emailPromise = sendCodeEmail({
       to: userObj.email,
       name: userObj.name || userObj.fullName || userObj.email?.split('@')[0],
       code,
       purpose,
     });
-    return sent !== false;
+
+    // Fast resolution: give a brief window for immediate confirmation, but never block user UI
+    const quickResult = await Promise.race([
+      emailPromise,
+      new Promise((resolve) => setTimeout(() => resolve('in_flight'), 1200)),
+    ]);
+
+    return quickResult !== false;
   } catch (err) {
     if (err.code === 'WAIT_BEFORE_RESEND') return false;
     throw err;

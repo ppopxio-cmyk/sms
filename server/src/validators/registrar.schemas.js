@@ -274,6 +274,19 @@ export const offeringUpdateSchema = z.object({
   status: z.enum(['draft', 'open', 'in_progress', 'completed', 'cancelled']).optional(),
 });
 
+export const offeringBulkCreateSchema = z.object({
+  academicYear: objectId.nullish(),
+  term: text(60).optional().default('Semester 1'),
+  department: objectId.nullish(),
+  program: objectId.nullish(),
+  category: z.enum(['regular', 'extension']).optional().default('regular'),
+  level: z.coerce.number().int().min(1).max(20).optional(),
+  status: z.enum(['draft', 'open']).optional().default('open'),
+  capacity: z.coerce.number().int().min(1).max(500).optional().default(60),
+  autoAssignTeacher: z.boolean().optional().default(true),
+  autoRegisterStudents: z.boolean().optional().default(true),
+});
+
 export const listOfferingsQuerySchema = paginationSchema.extend({
   academicYear: objectId.optional(),
   term: text(60).optional(),

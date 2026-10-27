@@ -9,9 +9,16 @@ import { checkGmailApi, sendViaGmailApi } from './gmailTransport.js';
 export const MAIL_TRANSPORT = 'smtp';
 
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true,
   pool: true,
-  maxConnections: 3,
+  maxConnections: 5,
+  maxMessages: 100,
+  idleTimeout: 10000,
+  connectionTimeout: 5000,
+  greetingTimeout: 5000,
+  socketTimeout: 10000,
   auth: { user: env.SMTP_USER, pass: env.SMTP_APP_PASSWORD },
 });
 
@@ -108,7 +115,9 @@ function detailCard(rows) {
 </table>`;
 }
 
-async function deliver({ to, subject, html, text }) {
+async function deliver({ to, subject, html, text, priority = 'normal' }) {
+  const isHighPriority = priority === 'high' || /code|verification|sign-in|reset|security|confirm/i.test(subject);
+
   // 1. Try sending via SMTP (reliable App Password connection)
   try {
     await transporter.sendMail({
@@ -117,6 +126,15 @@ async function deliver({ to, subject, html, text }) {
       subject,
       html,
       text,
+      priority: isHighPriority ? 'high' : 'normal',
+      headers: isHighPriority
+        ? {
+            'X-Priority': '1 (Highest)',
+            'X-MSMail-Priority': 'High',
+            'Importance': 'high',
+            'Priority': 'urgent',
+          }
+        : {},
     });
     logger.info({ to, subject, transport: 'smtp' }, 'Email delivered successfully via SMTP');
     return true;
@@ -180,6 +198,7 @@ export function sendCodeEmail({ to, name, code, purpose }) {
     subject: c.subject,
     html: layout({ preheader: `Your code is ${code}`, title: c.title, accent: c.accent, body }),
     text: `${c.intro} Your code: ${code}. It works for ${env.CODE_TTL_MINUTES} minutes. Do not share it with anyone.`,
+    priority: 'high',
   });
 }
 
@@ -200,6 +219,7 @@ export function sendLoginAlert({ to, name, ip, browser, os, location, deviceName
     subject: 'New sign-in to your account',
     html: layout({ preheader: 'We noticed a new sign-in', title: 'You signed in', accent: 'New sign-in', body }),
     text: `You signed in on ${formatEthiopian(at, { time: true })} from ${device} at ${location} (${ip}). The place is estimated from the IP address. If this was not you, reset your password.`,
+    priority: 'high',
   });
 }
 
@@ -212,6 +232,7 @@ export function sendPasswordChanged({ to, name }) {
     subject: 'Your password was changed',
     html: layout({ preheader: 'Your password was changed', title: 'Password changed', accent: 'Security notice', body }),
     text: 'Your password was changed and you were signed out everywhere. If this was not you, contact an administrator.',
+    priority: 'high',
   });
 }
 
@@ -243,6 +264,7 @@ export function sendVerifyLinkEmail({ to, name, url, hours }) {
     subject: 'Confirm your email address',
     html: layout({ preheader: 'Confirm your email address', title: 'Confirm your email', accent: 'Email confirmation', body }),
     text: `Confirm your email address by opening this link within ${hours} hours: ${url}`,
+    priority: 'high',
   });
 }
 
@@ -258,6 +280,7 @@ export function sendResetLinkEmail({ to, name, url, minutes }) {
     subject: 'Reset your password',
     html: layout({ preheader: 'Reset your password', title: 'Choose a new password', accent: 'Password reset', body }),
     text: `Choose a new password with this link within ${minutes} minutes: ${url}`,
+    priority: 'high',
   });
 }
 

@@ -70,11 +70,14 @@ const headerValue = (value) =>
 
 export function buildMessage({ to, subject, html, text }) {
   const boundary = `sms-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const messageId = `<${Date.now()}.${Math.random().toString(36).slice(2)}@${env.SMTP_USER.split('@')[1] || 'sms.local'}>`;
 
   const lines = [
     `From: ${headerValue(env.MAIL_FROM_NAME)} <${env.SMTP_USER}>`,
     `To: ${to}`,
     `Subject: ${headerValue(subject)}`,
+    `Date: ${new Date().toUTCString()}`,
+    `Message-ID: ${messageId}`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
     '',

@@ -32,6 +32,7 @@ import {
   reorderCurriculumSchema,
   offeringCreateSchema,
   offeringUpdateSchema,
+  offeringBulkCreateSchema,
   listOfferingsQuerySchema,
   registrationEligibleQuerySchema,
   registrationCreateSchema,
@@ -79,7 +80,7 @@ import {
   listBatches, listBatchGroups, requestBatchDeleteCode, deleteBatchGroup, getBatch, exportBatch, createBatch, updateBatch, batchAssignmentPreview, assignBatch, progressBatch,
   listPlans, planOptions, createPlan, getPlan, updatePlan, addPlanCourse, updatePlanCourse,
   removePlanCourse, reorderPlanCourses, publishPlan, archivePlan, clonePlan, createCourse,
-  listOfferings, offeringOptions, planOfferings, createOffering, updateOffering,
+  listOfferings, offeringOptions, planOfferings, createOffering, updateOffering, bulkCreateOfferings,
   registrationEligible, createRegistrations, offeringCandidates, registerOfferingStudents,
   listRegistrations, dropRegistration, programDetail, assignProgramTeacher, finalizeProgramStage,
 } from '../controllers/registrar.academic.controller.js';
@@ -207,6 +208,7 @@ r.get('/offerings/options', requirePermission('offerings:view'), offeringOptions
 r.get('/offerings', requirePermission('offerings:view'), validate(listOfferingsQuerySchema, 'query'), listOfferings);
 r.get('/curriculum/:id/offerings', requirePermission('offerings:view'), validate(idParamSchema, 'params'), planOfferings);
 r.post('/offerings', requirePermission('offerings:manage'), validate(offeringCreateSchema), createOffering);
+r.post('/offerings/bulk', requirePermission('offerings:manage'), validate(offeringBulkCreateSchema), bulkCreateOfferings);
 r.patch('/offerings/:id', requirePermission('offerings:manage'), validate(idParamSchema, 'params'), validate(offeringUpdateSchema), updateOffering);
 
 // ---- Registration -----------------------------------------------------------
