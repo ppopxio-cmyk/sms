@@ -203,8 +203,12 @@ async function assertPhoneAvailable(phone, excludeId) {
 export const listStudents = asyncHandler(async (req, res) => {
   const query = req.valid.query;
   const { page, limit, skip } = pageOf(query);
+  const statusFilter = query.status && query.status !== 'all' && query.status !== 'graduated'
+    ? { studentStatus: query.status }
+    : { studentStatus: { $ne: 'graduated' } };
+
   const filter = mergeFilters(
-    query.status && query.status !== 'all' ? { studentStatus: query.status } : null,
+    statusFilter,
     query.program ? { program: query.program } : null,
     query.department ? { department: query.department } : null,
     query.batch ? { batch: query.batch } : null,
@@ -619,10 +623,11 @@ export const exportStudentProfile = asyncHandler(async (req, res) => {
 });
 
 export const studentSummary = asyncHandler(async (_req, res) => {
-  // The summary is only ever shown on the unfiltered register, so it aggregates
-  // every student without applying the search / filter parameters.
+  // Exclude graduated students from the student register summary (they have their own graduated hub)
+  const notGraduated = { studentStatus: { $ne: 'graduated' } };
   const [byDepartment, byProgram, byBatch, total] = await Promise.all([
     Student.aggregate([
+      { $match: notGraduated },
       { $group: { _id: '$department', count: { $sum: 1 } } },
       { $sort: { count: -1 } },
       { $limit: 12 },
@@ -630,6 +635,7 @@ export const studentSummary = asyncHandler(async (_req, res) => {
       { $unwind: { path: '$record', preserveNullAndEmptyArrays: true } },
     ]),
     Student.aggregate([
+      { $match: notGraduated },
       { $group: { _id: '$program', count: { $sum: 1 } } },
       { $sort: { count: -1 } },
       { $limit: 12 },
@@ -637,13 +643,14 @@ export const studentSummary = asyncHandler(async (_req, res) => {
       { $unwind: { path: '$record', preserveNullAndEmptyArrays: true } },
     ]),
     Student.aggregate([
+      { $match: notGraduated },
       { $group: { _id: '$batch', count: { $sum: 1 } } },
       { $sort: { count: -1 } },
       { $limit: 12 },
       { $lookup: { from: 'batches', localField: '_id', foreignField: '_id', as: 'record' } },
       { $unwind: { path: '$record', preserveNullAndEmptyArrays: true } },
     ]),
-    Student.countDocuments({}),
+    Student.countDocuments(notGraduated),
   ]);
 
   const label = (record) => record?.name || record?.code || 'Not assigned';

@@ -321,8 +321,12 @@ export const verifyDocument = asyncHandler(async (req, res) => {
   const value = String(req.params.verificationId || '').trim();
   const certificate = await Certificate.findOne(ownFilter({
     $or: [{ verificationId: value }, { certificateNumber: value }],
-  })).select('certificateNumber verificationId studentSnapshot programSnapshot departmentSnapshot academicYearLabel cgpa status issuedAt revokedAt').lean();
+  }))
+    .populate('student', 'photo')
+    .lean();
+
   if (certificate) {
+    const photo = certificate.student?.photo?.url || certificate.studentSnapshot?.photo?.url || null;
     return res.json({
       valid: certificate.status === 'issued',
       kind: 'certificate',
@@ -331,21 +335,26 @@ export const verifyDocument = asyncHandler(async (req, res) => {
         verificationId: certificate.verificationId,
         studentName: certificate.studentSnapshot?.fullName,
         studentId: certificate.studentSnapshot?.studentId,
+        photo,
         program: certificate.programSnapshot?.name,
         qualification: certificate.programSnapshot?.qualificationType,
         department: certificate.departmentSnapshot?.name,
         academicYear: certificate.academicYearLabel,
         cgpa: certificate.cgpa,
+        completionDate: certificate.completionDate,
         status: certificate.status,
         issuedAt: certificate.issuedAt,
         revokedAt: certificate.revokedAt,
       },
     });
   }
+
   const transcript = await Transcript.findOne({ verificationId: value })
-    .select('verificationId studentSnapshot programSnapshot departmentSnapshot cgpa totalCredits status issuedAt revokedAt')
+    .populate('student', 'photo')
     .lean();
+
   if (transcript) {
+    const photo = transcript.student?.photo?.url || transcript.studentSnapshot?.photo?.url || null;
     return res.json({
       valid: transcript.status === 'issued',
       kind: 'transcript',
@@ -353,6 +362,7 @@ export const verifyDocument = asyncHandler(async (req, res) => {
         verificationId: transcript.verificationId,
         studentName: transcript.studentSnapshot?.fullName,
         studentId: transcript.studentSnapshot?.studentId,
+        photo,
         program: transcript.programSnapshot?.name,
         qualification: transcript.programSnapshot?.qualificationType,
         department: transcript.departmentSnapshot?.name,
@@ -364,7 +374,11 @@ export const verifyDocument = asyncHandler(async (req, res) => {
       },
     });
   }
-  throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'No issued document matches that verification reference.');
+
+  res.status(200).json({
+    valid: false,
+    message: 'No issued official document matches this verification reference.',
+  });
 });
 
 export const certificateMeta = asyncHandler(async (_req, res) => {

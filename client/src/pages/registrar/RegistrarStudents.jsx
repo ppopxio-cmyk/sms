@@ -40,6 +40,7 @@ export default function RegistrarStudents() {
   const [draftDepartment, setDraftDepartment] = useState('');
   const [draftBatch, setDraftBatch] = useState('');
   const [draftCategory, setDraftCategory] = useState('all');
+  const [hasClickedShow, setHasClickedShow] = useState(false);
 
   const [appliedFilters, setAppliedFilters] = useState({
     status: 'all',
@@ -102,6 +103,7 @@ export default function RegistrarStudents() {
   const students = useQuery({
     queryKey: ['registrar', 'students', params],
     queryFn: async () => (await api.get(`${REGISTRAR}/students`, { params })).data,
+    enabled: hasClickedShow,
     placeholderData: (previous) => previous,
   });
 
@@ -125,6 +127,7 @@ export default function RegistrarStudents() {
   }, [options.data?.batches, draftProgram, draftCategory]);
 
   const handleShowStudents = () => {
+    setHasClickedShow(true);
     setPage(1);
     setAppliedFilters({
       status: draftStatus,
@@ -354,7 +357,6 @@ export default function RegistrarStudents() {
               <option value="all">All statuses</option>
               <option value="active">Active</option>
               <option value="pending">Pending</option>
-              <option value="graduated">Graduated</option>
               <option value="withdrawn">Withdrawn</option>
               <option value="suspended">Suspended</option>
               <option value="archived">Archived</option>
@@ -377,35 +379,59 @@ export default function RegistrarStudents() {
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Student register</h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              {students.isFetching ? 'Updating…' : `${pagination.total ?? 0} record${pagination.total === 1 ? '' : 's'}`}
+              {!hasClickedShow
+                ? 'Click "Show Students" to view records'
+                : students.isFetching
+                  ? 'Updating…'
+                  : `${pagination.total ?? 0} record${pagination.total === 1 ? '' : 's'}`}
             </p>
           </div>
           <p className="text-xs text-slate-400">Admissions are recorded here; there is no separate enrollment step.</p>
         </div>
-        <RegistrarTable
-          columns={columns}
-          rows={rows}
-          loading={students.isLoading}
-          error={students.error ? students.error?.response?.data?.message || 'The student register could not be loaded.' : null}
-          onRetry={students.refetch}
-          rowKey={(row) => row.id}
-          onRowClick={(row) => navigate(`/registrar/students/${row.id}`)}
-          noResults={filtered}
-          emptyTitle="No students yet"
-          emptyMessage="Admit the first student to start building the official register."
-          noResultsTitle="No students match those filters"
-          noResultsMessage="Clear the search or choose a different programme, department or status."
-        />
-        <div className="px-5 pb-4">
-          <Pagination
-            page={pagination.page}
-            pages={pagination.pages}
-            total={pagination.total}
-            limit={pagination.limit}
-            onPage={setPage}
-            onLimit={(value) => { setLimit(value); setPage(1); }}
-          />
-        </div>
+
+        {!hasClickedShow ? (
+          <div className="py-16 text-center px-4">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 mb-4 ring-8 ring-indigo-50/50">
+              <Filter className="h-7 w-7" />
+            </div>
+            <h3 className="text-base font-bold text-slate-800">Ready to View Students</h3>
+            <p className="mt-1 text-xs text-slate-500 max-w-md mx-auto">
+              Select your filters above (Department, Programme, Category, Batch, or Status) and click <span className="font-semibold text-brand-600">"Show Students"</span> to display the student register.
+            </p>
+            <div className="mt-5">
+              <Button onClick={handleShowStudents} className="gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold shadow-sm">
+                <Filter className="h-4 w-4" /> Show Students
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <RegistrarTable
+              columns={columns}
+              rows={rows}
+              loading={students.isLoading}
+              error={students.error ? students.error?.response?.data?.message || 'The student register could not be loaded.' : null}
+              onRetry={students.refetch}
+              rowKey={(row) => row.id}
+              onRowClick={(row) => navigate(`/registrar/students/${row.id}`)}
+              noResults={filtered}
+              emptyTitle="No students yet"
+              emptyMessage="Admit the first student to start building the official register."
+              noResultsTitle="No students match those filters"
+              noResultsMessage="Clear the search or choose a different programme, department or status."
+            />
+            <div className="px-5 pb-4">
+              <Pagination
+                page={pagination.page}
+                pages={pagination.pages}
+                total={pagination.total}
+                limit={pagination.limit}
+                onPage={setPage}
+                onLimit={(value) => { setLimit(value); setPage(1); }}
+              />
+            </div>
+          </>
+        )}
       </Card>
 
       <StudentFormModal

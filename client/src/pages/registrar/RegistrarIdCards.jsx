@@ -81,21 +81,46 @@ export default function RegistrarIdCards() {
   const departments = optionsQuery.data?.departments || [];
   const allPrograms = optionsQuery.data?.programs || [];
 
+  // Deduplicate batches by code / name to prevent repeated batch entries
+  const uniqueBatches = useMemo(() => {
+    const seen = new Set();
+    const list = [];
+    for (const b of batches) {
+      const codeKey = (b.code || b.name || '').trim().toLowerCase();
+      if (!seen.has(codeKey)) {
+        seen.add(codeKey);
+        list.push(b);
+      }
+    }
+    return list;
+  }, [batches]);
+
   // Filter programmes by selected department
   const filteredPrograms = useMemo(() => {
     if (!filterDept) return allPrograms;
     return allPrograms.filter((p) => p.department === filterDept);
   }, [allPrograms, filterDept]);
 
-  // Cohort Cards: derived from batches and programs
+  // Cohort Cards: derived from batches and programs (deduplicated by programme + batch)
   const cohortCards = useMemo(() => {
     const list = [];
+    const seenCohortKey = new Set();
+
     for (const b of batches) {
-      if (filterBatch && b.id !== filterBatch && b.code !== filterBatch) continue;
+      if (filterBatch) {
+        const matchesCode = (b.code || '').toLowerCase() === filterBatch.toLowerCase();
+        const matchesName = (b.name || '').toLowerCase() === filterBatch.toLowerCase();
+        const matchesId = b.id === filterBatch;
+        if (!matchesCode && !matchesName && !matchesId) continue;
+      }
       for (const p of allPrograms) {
         if (filterDept && p.department !== filterDept) continue;
         if (filterProg && p.id !== filterProg) continue;
         if (b.program && b.program !== p.id) continue;
+
+        const cohortKey = `${p.id}_${(b.code || b.name || '').trim().toLowerCase()}`;
+        if (seenCohortKey.has(cohortKey)) continue;
+        seenCohortKey.add(cohortKey);
 
         const dept = departments.find((d) => d.id === p.department) || { name: 'Department' };
         list.push({
@@ -449,8 +474,8 @@ export default function RegistrarIdCards() {
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
               >
                 <option value="">All Batches</option>
-                {batches.map((b) => (
-                  <option key={b.id} value={b.id}>
+                {uniqueBatches.map((b) => (
+                  <option key={b.id} value={b.code || b.id}>
                     {b.name} ({b.code})
                   </option>
                 ))}

@@ -114,18 +114,7 @@ async function drawCleanTrainingCertificatePage(doc, {
     drawVectorCrest(doc, 46 + logoBoxSize / 2, 40 + logoBoxSize / 2, 34);
   }
 
-  // 4. Near the top center: Official Seal / Authority Emblem
-  if (sealBuffer) {
-    try {
-      doc.image(sealBuffer, width / 2 - 24, 34, { fit: [48, 48], align: 'center', valign: 'center' });
-    } catch {
-      drawAuthorityEmblem(doc, width / 2, 54, 20);
-    }
-  } else {
-    drawAuthorityEmblem(doc, width / 2, 54, 20);
-  }
-
-  // 5. Upper-Right Corner: Trainee Photograph (x: 720, y: 40)
+  // 4. Upper-Right Corner: Trainee Photograph (x: 720, y: 40)
   const photoW = 76;
   const photoH = 92;
   const photoX = width - 46 - photoW;
@@ -144,23 +133,12 @@ async function drawCleanTrainingCertificatePage(doc, {
   }
   doc.restore();
 
-  // 6. Centered Institution / Training Authority Header
+  // 5. Centered College / Institution Header
   const headerX = 140;
   const headerW = width - 280;
 
-  doc.fillColor('#0f2747').font('Helvetica-Bold').fontSize(8.5).text('FEDERAL DEMOCRATIC REPUBLIC OF ETHIOPIA', headerX, 38, {
-    width: headerW,
-    align: 'center',
-    characterSpacing: 1.5,
-  });
-  doc.fillColor('#475569').font('Helvetica').fontSize(7.5).text('MINISTRY OF EDUCATION · HIGHER EDUCATION AUTHORITY', headerX, 50, {
-    width: headerW,
-    align: 'center',
-    characterSpacing: 1,
-  });
-
   const instName = template.institutionName || 'COLLEGE OF ADVANCED TECHNOLOGY & HEALTH SCIENCES';
-  doc.fillColor('#0f172a').font('Times-Bold').fontSize(instName.length > 40 ? 17 : 20).text(instName, headerX, 70, {
+  doc.fillColor('#0f172a').font('Times-Bold').fontSize(instName.length > 40 ? 19 : 22).text(instName, headerX, 52, {
     width: headerW,
     align: 'center',
   });
@@ -175,29 +153,29 @@ async function drawCleanTrainingCertificatePage(doc, {
   }
 
   // Large, Bold, Centered Title in formal serif
-  doc.fillColor('#0f2747').font('Times-Bold').fontSize(25).text('TRAINING COMPLETION CERTIFICATE', 46, 122, {
+  doc.fillColor('#0f2747').font('Times-Bold').fontSize(26).text('TRAINING COMPLETION CERTIFICATE', 46, 114, {
     width: width - 92,
     align: 'center',
     characterSpacing: 1.5,
   });
 
   // Dual-line decorative separator with centered gold diamond
-  const divY = 156;
+  const divY = 150;
   doc.save();
   doc.moveTo(160, divY).lineTo(width / 2 - 20, divY).lineWidth(0.8).strokeColor('#b89047').stroke();
   doc.moveTo(width / 2 + 20, divY).lineTo(width - 160, divY).lineWidth(0.8).strokeColor('#b89047').stroke();
   doc.polygon([width / 2, divY - 4], [width / 2 + 5, divY], [width / 2, divY + 4], [width / 2 - 5, divY]).fill('#0f2747');
   doc.restore();
 
-  // 7. Main Body
-  doc.fillColor('#475569').font('Times-Italic').fontSize(12).text('This is to certify that', 46, 168, {
+  // 6. Main Body
+  doc.fillColor('#475569').font('Times-Italic').fontSize(12).text('This is to certify that', 46, 164, {
     width: width - 92,
     align: 'center',
   });
 
   const snap = certificate.studentSnapshot || {};
   const studentName = snap.fullName || 'Trainee Full Name';
-  doc.fillColor('#0f172a').font('Times-Bold').fontSize(24).text(studentName, 46, 186, {
+  doc.fillColor('#0f172a').font('Times-Bold').fontSize(24).text(studentName, 46, 184, {
     width: width - 92,
     align: 'center',
   });
@@ -205,10 +183,10 @@ async function drawCleanTrainingCertificatePage(doc, {
   // Name underline
   const nameWidth = Math.min(width - 240, doc.widthOfString(studentName) + 40);
   doc.save();
-  doc.moveTo((width - nameWidth) / 2, 214).lineTo((width + nameWidth) / 2, 214).lineWidth(1).strokeColor('#b89047').stroke();
+  doc.moveTo((width - nameWidth) / 2, 212).lineTo((width + nameWidth) / 2, 212).lineWidth(1).strokeColor('#b89047').stroke();
   doc.restore();
 
-  doc.fillColor('#475569').font('Helvetica-Bold').fontSize(9).text(`STUDENT ID: ${snap.studentId || '—'}`, 46, 220, {
+  doc.fillColor('#475569').font('Helvetica-Bold').fontSize(9).text(`STUDENT ID: ${snap.studentId || '—'}`, 46, 218, {
     width: width - 92,
     align: 'center',
     characterSpacing: 0.8,
@@ -217,45 +195,44 @@ async function drawCleanTrainingCertificatePage(doc, {
   doc.fillColor('#334155').font('Times-Roman').fontSize(11).text(
     'has satisfactorily completed the prescribed requirements and training curriculum for the award of:',
     46,
-    236,
+    234,
     { width: width - 92, align: 'center' },
   );
 
-  // Structured Information Card (6 Placeholders / Fields)
+  // Structured Information Card (No CREDITS COMPLETED field)
   const cardX = 64;
   const cardW = width - 128;
-  const cardY = 256;
+  const cardY = 254;
   const cardH = 126;
 
   doc.save();
   doc.roundedRect(cardX, cardY, cardW, cardH, 6).fill('#ffffff').strokeColor('#cbd5e1').lineWidth(1).stroke();
   doc.restore();
 
-  // 3 Columns x 2 Rows of Placeholders
+  // Balanced 5 Fields Layout: 3 on Top Row, 2 on Bottom Row
   const colW = cardW / 3;
   const row1Y = cardY + 14;
   const row2Y = cardY + 68;
 
   const fields = [
-    { label: 'SECTOR / FIELD OF STUDY', val: certificate.departmentSnapshot?.name || 'Information Technology', x: cardX + 16, y: row1Y },
-    { label: 'TRAINING PROGRAMME', val: certificate.programSnapshot?.name || 'Computer Science', x: cardX + colW + 10, y: row1Y },
-    { label: 'QUALIFICATION LEVEL', val: (certificate.programSnapshot?.qualificationType || 'Degree').toUpperCase(), x: cardX + colW * 2 + 10, y: row1Y },
-    { label: 'TRAINING PERIOD', val: `${certificateDate(certificate.admissionDate || '2019-01-10')} — ${certificateDate(certificate.completionDate || new Date())}`, x: cardX + 16, y: row2Y },
-    { label: 'CREDITS COMPLETED', val: `${certificate.earnedCredits || 0} / ${certificate.requiredCredits || 0} Credit Hours`, x: cardX + colW + 10, y: row2Y },
-    { label: 'CUMULATIVE CGPA / GRADE', val: certificate.cgpa != null ? `${Number(certificate.cgpa).toFixed(2)} / 4.00 (${cgpaClassification(certificate.cgpa)})` : 'COMPLETED', x: cardX + colW * 2 + 10, y: row2Y },
+    { label: 'SECTOR / FIELD OF STUDY', val: certificate.departmentSnapshot?.name || 'Information Technology', x: cardX + 16, y: row1Y, w: colW - 24 },
+    { label: 'TRAINING PROGRAMME', val: certificate.programSnapshot?.name || 'Computer Science', x: cardX + colW + 10, y: row1Y, w: colW - 24 },
+    { label: 'QUALIFICATION LEVEL', val: (certificate.programSnapshot?.qualificationType || 'Degree').toUpperCase(), x: cardX + colW * 2 + 10, y: row1Y, w: colW - 24 },
+    { label: 'TRAINING PERIOD', val: `${certificateDate(certificate.admissionDate || '2019-01-10')} — ${certificateDate(certificate.completionDate || new Date())}`, x: cardX + 16, y: row2Y, w: cardW / 2 - 24 },
+    { label: 'CUMULATIVE CGPA / GRADE', val: certificate.cgpa != null ? `${Number(certificate.cgpa).toFixed(2)} / 4.00 (${cgpaClassification(certificate.cgpa)})` : 'COMPLETED', x: cardX + cardW / 2 + 10, y: row2Y, w: cardW / 2 - 24 },
   ];
 
   for (const f of fields) {
-    doc.fillColor('#64748b').font('Helvetica-Bold').fontSize(7.5).text(f.label, f.x, f.y, { width: colW - 24 });
-    doc.fillColor('#0f172a').font('Times-Bold').fontSize(11.5).text(f.val, f.x, f.y + 13, { width: colW - 24 });
+    doc.fillColor('#64748b').font('Helvetica-Bold').fontSize(7.5).text(f.label, f.x, f.y, { width: f.w });
+    doc.fillColor('#0f172a').font('Times-Bold').fontSize(12).text(f.val, f.x, f.y + 13, { width: f.w });
   }
 
-  // 8. Bottom Section: Signatures, Seal, Serial Number, and QR Code
-  const botY = 405;
+  // 7. Bottom Section: Signatures, Serial Number, and QR Code (Clean, no stamp circle)
+  const botY = 415;
 
   // Dean's Signature (Left)
-  const deanX = 54;
-  const sigW = 160;
+  const deanX = 64;
+  const sigW = 170;
   doc.save();
   doc.moveTo(deanX, botY + 45).lineTo(deanX + sigW, botY + 45).lineWidth(0.8).strokeColor('#94a3b8').stroke();
   doc.restore();
@@ -263,7 +240,7 @@ async function drawCleanTrainingCertificatePage(doc, {
   doc.fillColor('#64748b').font('Helvetica').fontSize(7.5).text('College Leadership', deanX, botY + 61, { width: sigW, align: 'center' });
 
   // Registrar's Signature (Center-Left)
-  const regX = 236;
+  const regX = 265;
   if (signatureBuffer) {
     try {
       doc.image(signatureBuffer, regX + 15, botY, { fit: [sigW - 30, 42], align: 'center' });
@@ -275,30 +252,20 @@ async function drawCleanTrainingCertificatePage(doc, {
   doc.fillColor('#0f2747').font('Helvetica-Bold').fontSize(9).text(template.signatoryName || 'Dr. Academic Registrar', regX, botY + 49, { width: sigW, align: 'center' });
   doc.fillColor('#64748b').font('Helvetica').fontSize(7.5).text(template.signatoryTitle || 'Office of the Academic Registrar', regX, botY + 61, { width: sigW, align: 'center' });
 
-  // Official Stamp / Seal (Center)
-  const stampX = 440;
-  const stampY = botY + 30;
-  doc.save();
-  doc.circle(stampX, stampY, 32).strokeColor('#0f2747').lineWidth(1.2).stroke();
-  doc.circle(stampX, stampY, 29).strokeColor('#b89047').lineWidth(0.6).stroke();
-  doc.fillColor('#0f2747').font('Helvetica-Bold').fontSize(6).text('OFFICIAL REGISTRAR STAMP', stampX - 28, stampY - 12, { width: 56, align: 'center' });
-  doc.fillColor('#b89047').font('Helvetica-Bold').fontSize(7).text('APPROVED', stampX - 28, stampY - 1, { width: 56, align: 'center' });
-  doc.fillColor('#64748b').font('Helvetica').fontSize(5.5).text(formatEthiopian(certificate.issuedAt || new Date()), stampX - 28, stampY + 11, { width: 56, align: 'center' });
-  doc.restore();
-
-  // Certificate Serial Number & Verification Info (Center-Right)
-  const infoX = 496;
+  // Certificate Serial Number & Verification Reference (Center-Right)
+  const infoX = 475;
   doc.fillColor('#64748b').font('Helvetica').fontSize(7.5).text('CERTIFICATE SERIAL NUMBER:', infoX, botY + 10);
-  doc.fillColor('#0f2747').font('Helvetica-Bold').fontSize(10).text(certificate.certificateNumber || 'CERT-2019-XXXX', infoX, botY + 22);
-  doc.fillColor('#64748b').font('Helvetica').fontSize(7.5).text('VERIFICATION REFERENCE:', infoX, botY + 38);
-  doc.fillColor('#1e40af').font('Helvetica-Bold').fontSize(9.5).text(certificate.verificationId || 'V-XXXXXXXX', infoX, botY + 50);
-  doc.fillColor('#64748b').font('Helvetica').fontSize(7).text(`Date of Issue: ${certificateDate(certificate.issuedAt)}`, infoX, botY + 64);
+  doc.fillColor('#0f2747').font('Helvetica-Bold').fontSize(10.5).text(certificate.certificateNumber || 'CERT-2019-XXXX', infoX, botY + 22);
+  doc.fillColor('#64748b').font('Helvetica').fontSize(7.5).text('VERIFICATION REFERENCE ID:', infoX, botY + 38);
+  doc.fillColor('#1e40af').font('Helvetica-Bold').fontSize(10).text(certificate.verificationId || 'V-XXXXXXXX', infoX, botY + 50);
+  doc.fillColor('#64748b').font('Helvetica').fontSize(7).text(`Date of Issue: ${certificateDate(certificate.issuedAt)}`, infoX, botY + 65);
 
-  // QR Code (Right, x: 724, y: botY - 5)
+  // QR Code (Right, x: 724, y: botY - 5) - Links to https://sms-two-kappa.vercel.app/verify/<verificationId>
   const qrX = 724;
   const qrY = botY - 5;
   const qrSize = 64;
-  const verifyUrl = `${template.verificationBaseUrl || 'https://sms-portal.edu/verify'}/${certificate.verificationId || certificate.certificateNumber || ''}`;
+  const verifyRef = certificate.verificationId || certificate.certificateNumber || '';
+  const verifyUrl = `https://sms-two-kappa.vercel.app/verify/${verifyRef}`;
 
   try {
     const qrBuffer = await QRCode.toBuffer(verifyUrl, { width: 140, margin: 1, color: { dark: '#0f2747', light: '#ffffff' } });
@@ -1006,10 +973,6 @@ export function renderCertificatePdf({
         preview,
       });
 
-      // Page 2: Official Course-by-Course Academic Record
-      doc.addPage({ size: 'A4', layout: 'portrait', margin: 0 });
-      drawAcademicRecord(doc, { certificate, template: merged, preview });
-      addPageFooter(doc, merged);
       doc.end();
     } catch (err) {
       reject(err);

@@ -74,6 +74,7 @@ const RegistrarIdCards = lazy(() => import('./pages/registrar/RegistrarIdCards.j
 const RegistrarReports = lazy(() => import('./pages/registrar/RegistrarReports.jsx'));
 const RegistrarAnnouncements = lazy(() => import('./pages/registrar/RegistrarAnnouncements.jsx'));
 const RegistrarNotifications = lazy(() => import('./pages/registrar/RegistrarNotifications.jsx'));
+const PublicVerification = lazy(() => import('./pages/PublicVerification.jsx'));
 const NotFound = lazy(() => import('./pages/NotFound.jsx'));
 
 // The accountant's generic dashboard still lives under its own prefix. The Registrar
@@ -155,6 +156,7 @@ export default function App() {
         {/* Opened from an email, often on a device that is not signed in, so this one
             is public. Without a token it sends the visitor to the sign-in page. */}
         <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/verify/:verificationId" element={<PublicVerification />} />
 
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/terms" element={<Terms />} />
