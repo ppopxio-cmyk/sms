@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   AlertTriangle,
   Award,
   BookOpen,
+  Calculator,
   CheckCircle2,
   ClipboardCheck,
   Eye,
@@ -169,7 +171,7 @@ export default function RegistrarResults() {
       batch: resolvedBatchId || selectedBatch,
       department: selectedDept,
       program: selectedProg,
-      level: Number(selectedLevel),
+      level: selectedLevel === 'all' ? 'all' : Number(selectedLevel),
     });
   };
 
@@ -193,7 +195,7 @@ export default function RegistrarResults() {
     mutationFn: async ({ programId, level, batchId, code }) =>
       (await api.post(`${REGISTRAR}/results/submit-stage-complete`, { programId, level, batchId, code })).data,
     onSuccess: (data) => {
-      toast.success(data.message || 'Stage results accepted and sent to GPA page!');
+      toast.success(data.message || 'Results accepted, graded, and sent to GPA page!');
       setStageSubmitModal(null);
       setVerificationCode('');
       invalidate();
@@ -207,10 +209,19 @@ export default function RegistrarResults() {
     const rows = submissions.data?.rows || [];
     return rows.filter((r) => {
       const matchProg = String(r.program?.id || r.program) === String(activeQuery.program);
-      const matchLevel = Number(r.level || 1) === Number(activeQuery.level);
+      const matchLevel = activeQuery.level === 'all' || Number(r.level || 1) === Number(activeQuery.level);
       return matchProg && matchLevel;
     });
   }, [submissions.data?.rows, activeQuery]);
+
+  const totalStagesCount = availableStages.length || 4;
+  const finalizedStages = selectedProgDoc?.finalizedStages || [];
+  const allPublished = matchingCourses.length > 0 && matchingCourses.every(
+    (c) => c.status === 'published' || (c.counts?.total > 0 && c.counts?.published === c.counts?.total)
+  );
+  const isAlreadyFinalized = activeQuery?.level === 'all'
+    ? (allPublished || finalizedStages.length >= totalStagesCount)
+    : (allPublished || finalizedStages.includes(Number(activeQuery?.level)));
 
   const selectedDeptDoc = useMemo(
     () => departments.find((d) => d.id === (activeQuery?.department || selectedDept)),
@@ -304,6 +315,7 @@ export default function RegistrarResults() {
               required
             >
               <option value="">Choose stage / year...</option>
+              <option value="all">All Years / Stages (Complete Programme)</option>
               {availableStages.map((s) => (
                 <option key={s.stage} value={s.stage}>
                   {s.label}
@@ -344,12 +356,34 @@ export default function RegistrarResults() {
         <SkeletonCard lines={8} />
       ) : matchingCourses.length === 0 ? (
         <Card>
-          <CardBody className="py-10">
-            <EmptyState
-              icon={ClipboardCheck}
-              title="No results found"
-              message={`No submitted course marks found for ${selectedProgDoc?.name || 'this programme'} · ${stageUnit} ${activeQuery.level}.`}
-            />
+          <CardBody className="py-10 text-center">
+            {isAlreadyFinalized ? (
+              <>
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+                  <CheckCircle2 className="h-6 w-6" />
+                </div>
+                <h3 className="mt-3 text-sm font-bold text-slate-800">
+                  {activeQuery.level === 'all' ? 'All Years / Stages' : `${stageUnit} ${activeQuery.level}`} Already Finalized & Published
+                </h3>
+                <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
+                  Course marks for {selectedProgDoc?.name} have been graded according to policy and forwarded to the GPA calculation page.
+                </p>
+                <div className="mt-4 flex justify-center">
+                  <Link
+                    to="/registrar/gpa-cgpa"
+                    className="focus-ring inline-flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-xs font-bold text-white shadow-sm transition"
+                  >
+                    <Calculator className="h-4 w-4" /> Go to GPA Calculation →
+                  </Link>
+                </div>
+              </>
+            ) : (
+              <EmptyState
+                icon={ClipboardCheck}
+                title="No results found"
+                message={`No submitted course marks found for ${selectedProgDoc?.name || 'this programme'} · ${activeQuery.level === 'all' ? 'All Stages' : `${stageUnit} ${activeQuery.level}`}.`}
+              />
+            )}
           </CardBody>
         </Card>
       ) : (
@@ -366,8 +400,8 @@ export default function RegistrarResults() {
                     <h2 className="text-base font-bold text-slate-900">
                       {selectedProgDoc?.name} ({selectedProgDoc?.code})
                     </h2>
-                    <Badge tone="brand">
-                      {stageUnit} {activeQuery.level}
+                    <Badge tone={isAlreadyFinalized ? 'success' : 'brand'}>
+                      {activeQuery.level === 'all' ? 'All Years / Stages' : `${stageUnit} ${activeQuery.level}`}
                     </Badge>
                   </div>
                   <p className="mt-0.5 text-xs text-slate-500">
@@ -375,7 +409,14 @@ export default function RegistrarResults() {
                   </p>
                 </div>
               </div>
-              <Badge tone="neutral">{matchingCourses.length} Courses Submitted</Badge>
+              <div className="flex items-center gap-2">
+                {isAlreadyFinalized && (
+                  <Badge tone="success" className="gap-1">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Published
+                  </Badge>
+                )}
+                <Badge tone="neutral">{matchingCourses.length} Courses</Badge>
+              </div>
             </div>
           </div>
 
@@ -427,35 +468,70 @@ export default function RegistrarResults() {
             </table>
           </div>
 
-          {/* Unified Stage Footer: "Accept & Grade Year X" */}
-          <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 bg-slate-50/80 p-5">
-            <div>
-              <p className="text-xs font-semibold text-slate-800">
-                Accept all {matchingCourses.length} course results for {stageUnit} {activeQuery.level}
-              </p>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                Submitting will grade all student marks according to official grading policy and forward this stage to the GPA tab.
-              </p>
-            </div>
+          {/* Unified Stage Footer */}
+          {isAlreadyFinalized ? (
+            <div className="flex flex-wrap items-center justify-between gap-4 border-t border-emerald-100 bg-emerald-50/70 p-5">
+              <div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  <p className="text-xs font-bold text-emerald-900">
+                    {activeQuery.level === 'all'
+                      ? `All years/stages for ${selectedProgDoc?.name} are finalized, graded, and published!`
+                      : `${stageUnit} ${activeQuery.level} results finalized, graded, and published!`}
+                  </p>
+                </div>
+                <p className="text-[11px] text-emerald-700 mt-0.5">
+                  Results are officially recorded and forwarded to the GPA calculation page for stage GPA and transcripts.
+                </p>
+              </div>
 
-            <Button
-              variant="primary"
-              onClick={() => {
-                setStageSubmitModal({
-                  programId: activeQuery.program,
-                  programName: selectedProgDoc?.name,
-                  level: activeQuery.level,
-                  batchId: resolvedBatchId || activeQuery.batch,
-                  coursesCount: matchingCourses.length,
-                });
-                setVerificationCode('');
-              }}
-              className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
-            >
-              <CheckCircle2 className="h-4 w-4" />
-              Accept & Grade {stageUnit} {activeQuery.level}
-            </Button>
-          </div>
+              <div className="flex items-center gap-2.5">
+                <Button
+                  disabled
+                  className="gap-2 bg-emerald-700 text-white cursor-default opacity-90 shadow-none hover:bg-emerald-700"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  Results Published
+                </Button>
+                <Link
+                  to="/registrar/gpa-cgpa"
+                  className="focus-ring inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition"
+                >
+                  <Calculator className="h-4 w-4" />
+                  Open in GPA Tab →
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 bg-slate-50/80 p-5">
+              <div>
+                <p className="text-xs font-semibold text-slate-800">
+                  Accept all {matchingCourses.length} course results for {activeQuery.level === 'all' ? `All ${stageUnit}s` : `${stageUnit} ${activeQuery.level}`}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Submitting will grade all student marks according to official grading policy and forward this stage to the GPA tab.
+                </p>
+              </div>
+
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setStageSubmitModal({
+                    programId: activeQuery.program,
+                    programName: selectedProgDoc?.name,
+                    level: activeQuery.level,
+                    batchId: resolvedBatchId || activeQuery.batch,
+                    coursesCount: matchingCourses.length,
+                  });
+                  setVerificationCode('');
+                }}
+                className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Accept & Grade {activeQuery.level === 'all' ? `All ${stageUnit}s` : `${stageUnit} ${activeQuery.level}`}
+              </Button>
+            </div>
+          )}
         </Card>
       )}
 
@@ -520,7 +596,7 @@ export default function RegistrarResults() {
       <Modal
         open={Boolean(stageSubmitModal)}
         onClose={() => setStageSubmitModal(null)}
-        title={`Accept & Grade ${stageUnit} ${stageSubmitModal?.level}`}
+        title={stageSubmitModal?.level === 'all' ? `Accept & Grade All ${stageUnit}s (Complete Programme)` : `Accept & Grade ${stageUnit} ${stageSubmitModal?.level}`}
         subtitle={`${stageSubmitModal?.programName} · All ${stageSubmitModal?.coursesCount} courses`}
         size="md"
         footer={
@@ -553,7 +629,15 @@ export default function RegistrarResults() {
       >
         <div className="space-y-4">
           <p className="text-sm leading-relaxed text-slate-600">
-            Accepting <strong>{stageUnit} {stageSubmitModal?.level}</strong> will finalize and grade all course results for <strong>{stageSubmitModal?.programName}</strong>. Results will be officially recorded and forwarded to the <strong>GPA page</strong> for stage GPA calculation.
+            {stageSubmitModal?.level === 'all' ? (
+              <>
+                Accepting <strong>All Years/Stages</strong> will finalize and grade all course results for <strong>{stageSubmitModal?.programName}</strong>. All results will be officially recorded and forwarded to the <strong>GPA page</strong> for GPA calculation.
+              </>
+            ) : (
+              <>
+                Accepting <strong>{stageUnit} {stageSubmitModal?.level}</strong> will finalize and grade all course results for <strong>{stageSubmitModal?.programName}</strong>. Results will be officially recorded and forwarded to the <strong>GPA page</strong> for stage GPA calculation.
+              </>
+            )}
           </p>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">

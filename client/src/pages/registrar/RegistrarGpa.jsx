@@ -14,122 +14,100 @@ import {
   Send,
   FileText,
   Search,
+  ArrowLeft,
+  Building2,
+  UsersRound,
+  Check,
+  ExternalLink,
+  ChevronRight,
 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import { REGISTRAR, humanStatus, toneForStatus } from '../../lib/registrar';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
 import RegistrarTable from '../../components/registrar/RegistrarTable';
-import StudentPicker from '../../components/registrar/StudentPicker';
-import { SelectField } from '../../components/registrar/Fields';
 import Card, { CardBody, CardHeader } from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
+import Modal from '../../components/ui/Modal';
 import ExportMenu from '../../components/ui/ExportMenu';
-import { ErrorState } from '../../components/ui/StatePanel';
+import { ErrorState, EmptyState } from '../../components/ui/StatePanel';
 import { SkeletonCard } from '../../components/ui/Skeleton';
-import StatCard from '../../components/ui/StatCard';
 
 export default function RegistrarGpa() {
   const queryClient = useQueryClient();
   const [activeMainTab, setActiveMainTab] = useState('gpa'); // 'gpa' | 'cgpa'
 
-  // Dropdown filter states (strict cascaded dropdowns, no 'All')
-  const [batch, setBatch] = useState('');
-  const [department, setDepartment] = useState('');
-  const [program, setProgram] = useState('');
-  const [level, setLevel] = useState('');
+  // Selected cohort for GPA tab & CGPA tab
+  const [selectedGpaCohort, setSelectedGpaCohort] = useState(null);
+  const [selectedCgpaCohort, setSelectedCgpaCohort] = useState(null);
+  const [selectedLevel, setSelectedLevel] = useState(1);
   const [student, setStudent] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const options = useQuery({
-    queryKey: ['registrar', 'students', 'options'],
-    queryFn: async () => (await api.get(`${REGISTRAR}/students/options`)).data,
-    staleTime: 5 * 60_000,
+  // 1. Fetch all cohorts ready to calculate (departments, batches, and programs with submitted/published marks)
+  const readyCohortsQuery = useQuery({
+    queryKey: ['registrar', 'ready-gpa-cohorts'],
+    queryFn: async () => (await api.get(`${REGISTRAR}/gpa-cgpa/ready-cohorts`)).data,
   });
 
-  const departments = options.data?.departments || [];
-  const allPrograms = options.data?.programs || [];
-  const rawBatches = options.data?.batches || [];
+  const cohorts = readyCohortsQuery.data?.cohorts || [];
 
-  // Unique batches
-  const availableBatches = useMemo(() => {
-    const map = new Map();
-    for (const b of rawBatches) {
-      if (b.status === 'archived') continue;
-      const cat = b.category || 'regular';
-      const key = `${b.code}::${cat}`;
-      if (!map.has(key)) {
-        map.set(key, {
-          id: b.id || b._id,
-          code: b.code,
-          category: cat,
-          program: b.program,
-        });
-      }
-    }
-    return Array.from(map.values());
-  }, [rawBatches]);
-
-  // Filter programmes by selected department
-  const programsInDept = useMemo(() => {
-    if (!department) return [];
-    return allPrograms.filter(
-      (p) => String(p.department?.id || p.department) === String(department),
+  // Filter cohorts by search query
+  const filteredGpaCohorts = useMemo(() => {
+    if (!searchQuery.trim()) return cohorts;
+    const q = searchQuery.toLowerCase();
+    return cohorts.filter(
+      (c) =>
+        c.department.name.toLowerCase().includes(q) ||
+        c.department.code.toLowerCase().includes(q) ||
+        c.program.name.toLowerCase().includes(q) ||
+        c.program.code.toLowerCase().includes(q) ||
+        c.batch.code.toLowerCase().includes(q),
     );
-  }, [allPrograms, department]);
+  }, [cohorts, searchQuery]);
 
-  const selectedProgramDoc = useMemo(
-    () => allPrograms.find((p) => p.id === program),
-    [allPrograms, program],
-  );
+  // Only submitted cohorts for the CGPA tab (readyForCgpa === true or cgpaCalculated === true or allStagesPublished)
+  const submittedCgpaCohorts = useMemo(() => {
+    return cohorts.filter(
+      (c) => c.readyForCgpa || c.cgpaCalculated || c.allStagesPublished,
+    );
+  }, [cohorts]);
 
-  const durationUnit = useMemo(() => {
-    if (!selectedProgramDoc) return 'Year';
-    if (selectedProgramDoc.qualificationType === 'degree') return 'Year';
-    if (selectedProgramDoc.qualificationType === 'diploma') return 'Level';
-    return selectedProgramDoc.shortTerm?.unit === 'months' ? 'Month' : 'Week';
-  }, [selectedProgramDoc]);
+  // Active cohort depending on main tab
+  const activeCohort = activeMainTab === 'gpa' ? selectedGpaCohort : selectedCgpaCohort;
 
-  const totalStages = useMemo(() => {
-    if (!selectedProgramDoc) return 4;
-    if (selectedProgramDoc.qualificationType === 'degree') return selectedProgramDoc.durationYears || 4;
-    if (selectedProgramDoc.qualificationType === 'diploma') {
-      return selectedProgramDoc.levels?.length ? Math.max(...selectedProgramDoc.levels) : 4;
-    }
-    return selectedProgramDoc.shortTerm?.duration || 1;
-  }, [selectedProgramDoc]);
+  const durationUnit = activeCohort?.durationUnit || 'Year';
 
-  const stageOptions = useMemo(() => {
-    const list = [];
-    for (let i = 1; i <= totalStages; i++) {
-      list.push({ stage: i, label: `${durationUnit} ${i}` });
-    }
-    return list;
-  }, [durationUnit, totalStages]);
-
-  const listParams = {
-    ...(program ? { program } : {}),
-    ...(batch ? { batch } : {}),
-    ...(activeMainTab === 'gpa' && level ? { level: Number(level) } : {}),
-  };
+  // GPA list query for the active cohort
+  const listParams = useMemo(() => {
+    if (!activeCohort) return null;
+    return {
+      program: activeCohort.program.id,
+      batch: activeCohort.batch.id,
+      ...(activeMainTab === 'gpa' ? { level: Number(selectedLevel) } : {}),
+    };
+  }, [activeCohort, activeMainTab, selectedLevel]);
 
   const list = useQuery({
     queryKey: ['registrar', 'gpa-list', listParams, activeMainTab],
     queryFn: async () => (await api.get(`${REGISTRAR}/gpa-cgpa`, { params: listParams })).data,
-    enabled: Boolean(program && batch && (activeMainTab === 'cgpa' || level)),
+    enabled: Boolean(activeCohort && listParams),
   });
 
+  // Individual student detail modal
   const detail = useQuery({
-    queryKey: ['registrar', 'gpa', student?.id],
+    queryKey: ['registrar', 'gpa-student-detail', student?.id],
     queryFn: async () => (await api.get(`${REGISTRAR}/gpa-cgpa`, { params: { student: student.id } })).data,
     enabled: Boolean(student?.id),
   });
 
-  const isStageSelected = activeMainTab === 'gpa' && Boolean(level);
-  const stageCompleted = Boolean(list.data?.stageCompleted);
-  const allStagesFinished = Boolean(list.data?.allStagesFinished);
-  const readyForCgpa = Boolean(list.data?.programInfo?.readyForCgpa || allStagesFinished);
-  const isCgpaCalculated = Boolean(list.data?.programInfo?.cgpaCalculated);
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['registrar', 'ready-gpa-cohorts'] });
+    queryClient.invalidateQueries({ queryKey: ['registrar', 'gpa-list'] });
+    queryClient.invalidateQueries({ queryKey: ['registrar', 'students'] });
+  };
 
+  // Mutation: Calculate Stage GPA
   const calculateGpaMutation = useMutation({
     mutationFn: async () => {
       await list.refetch();
@@ -137,33 +115,46 @@ export default function RegistrarGpa() {
     },
     onSuccess: (count) => {
       toast.success(
-        `${durationUnit} ${level} GPA calculated for all ${count} student(s) and recorded for single-year transcripts!`,
+        `${durationUnit} ${selectedLevel} GPA calculated for all ${count} student(s) of ${activeCohort?.program.name}!`,
       );
-      queryClient.invalidateQueries({ queryKey: ['registrar', 'gpa-list'] });
+      invalidate();
     },
     onError: (err) => toast.error(errorMessage(err, 'Failed to calculate Stage GPA.')),
   });
 
+  // Mutation: Send to CGPA & Transcripts (NO EMAIL CODE NEEDED)
   const sendToCgpaMutation = useMutation({
     mutationFn: async () =>
-      (await api.post(`${REGISTRAR}/gpa-cgpa/send-to-cgpa`, { programId: program, batchId: batch })).data,
+      (
+        await api.post(`${REGISTRAR}/gpa-cgpa/send-to-cgpa`, {
+          programId: activeCohort?.program.id,
+          batchId: activeCohort?.batch.id,
+        })
+      ).data,
     onSuccess: (data) => {
-      toast.success(data.message || 'All years GPA verified! Programme sent to CGPA tab.');
-      queryClient.invalidateQueries({ queryKey: ['registrar', 'gpa-list'] });
+      toast.success(
+        data.message ||
+          `${activeCohort?.program.name} (${activeCohort?.department.name}) successfully sent to CGPA & Transcripts!`,
+      );
+      invalidate();
+      setSelectedCgpaCohort(activeCohort);
       setActiveMainTab('cgpa');
     },
     onError: (err) => toast.error(errorMessage(err, 'Could not send programme to CGPA.')),
   });
 
+  // Mutation: Calculate Cumulative CGPA & Graduate Students
   const calculateCgpaMutation = useMutation({
-    mutationFn: async () =>
-      (await api.post(`${REGISTRAR}/gpa-cgpa/calculate-cgpa`, { programId: program, batchId: batch })).data,
+    mutationFn: async ({ programId, batchId }) =>
+      (await api.post(`${REGISTRAR}/gpa-cgpa/calculate-cgpa`, { programId, batchId })).data,
     onSuccess: (data) => {
-      toast.success(data.message || 'Cumulative CGPA calculated and all students marked as Graduated!');
-      queryClient.invalidateQueries({ queryKey: ['registrar', 'gpa-list'] });
-      queryClient.invalidateQueries({ queryKey: ['registrar', 'students'] });
+      toast.success(
+        data.message ||
+          `Cumulative CGPA calculated for all students! Students marked as Graduated.`,
+      );
+      invalidate();
     },
-    onError: (err) => toast.error(errorMessage(err, 'Could not calculate CGPA.')),
+    onError: (err) => toast.error(errorMessage(err, 'Could not calculate Cumulative CGPA.')),
   });
 
   const listRows = list.data?.rows ?? [];
@@ -176,22 +167,28 @@ export default function RegistrarGpa() {
         <div>
           <p className="text-sm font-semibold text-slate-900">{row.fullName}</p>
           <p className="text-xs text-slate-500 font-mono">
-            {row.studentId} · <span className="font-sans">{row.program || '—'}{row.batch ? ` (${row.batch})` : ''}</span>
+            {row.studentId} ·{' '}
+            <span className="font-sans">
+              {row.program || '—'}
+              {row.batch ? ` (${row.batch})` : ''}
+            </span>
           </p>
         </div>
       ),
     },
-    ...(activeMainTab === 'gpa' && isStageSelected
+    ...(activeMainTab === 'gpa'
       ? [
           {
             key: 'stageGpa',
-            label: `${durationUnit} ${level} GPA`,
+            label: `${durationUnit} ${selectedLevel} GPA`,
             render: (row) => (
               <div>
-                <span className="text-base font-bold tabular-nums text-brand-600">
-                  {row.stageGpa ?? '—'}
+                <span className="text-base font-bold tabular-nums text-brand-700">
+                  {row.stageGpa != null ? Number(row.stageGpa).toFixed(2) : '—'}
                 </span>
-                <p className="text-[11px] text-slate-500">{row.stageCredits ?? 0} credits · {row.stageCourses ?? 0} courses</p>
+                <p className="text-[11px] text-slate-500">
+                  {row.stageCredits ?? 0} credits · {row.stageCourses ?? 0} courses
+                </p>
               </div>
             ),
           },
@@ -204,16 +201,16 @@ export default function RegistrarGpa() {
             label: 'Cumulative CGPA',
             render: (row) => (
               <span className="text-base font-bold tabular-nums text-indigo-700">
-                {row.cgpa ?? '—'}
+                {row.cgpa != null ? Number(row.cgpa).toFixed(2) : '—'}
               </span>
             ),
           },
           {
             key: 'status',
             label: 'Graduation Status',
-            render: (row) => (
-              <Badge tone={isCgpaCalculated ? 'success' : 'neutral'}>
-                {isCgpaCalculated ? 'Calculated · Graduated' : 'Ready for CGPA'}
+            render: () => (
+              <Badge tone={activeCohort?.cgpaCalculated ? 'success' : 'brand'}>
+                {activeCohort?.cgpaCalculated ? 'Graduated' : 'Ready for CGPA'}
               </Badge>
             ),
           },
@@ -233,7 +230,7 @@ export default function RegistrarGpa() {
             variant="secondary"
             onClick={() => setStudent({ id: row.id, fullName: row.fullName, studentId: row.studentId })}
           >
-            Open record
+            Open Record
           </Button>
         </div>
       ),
@@ -243,15 +240,17 @@ export default function RegistrarGpa() {
   return (
     <div className="space-y-6">
       <RegistrarPageHeader
-        title="GPA & CGPA Calculation"
-        subtitle="Calculate Stage GPA for single-year transcripts or Cumulative CGPA for all completed years and graduation evaluation."
+        title="GPA & Cumulative CGPA Workbench"
+        subtitle="Only departments and programmes with published marks are displayed. Calculate Stage GPA by year/level or finalize Cumulative CGPA to evaluate graduation and issue transcripts."
       />
 
       {/* Main Mode Tabs: GPA vs CGPA */}
       <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
         <button
           type="button"
-          onClick={() => setActiveMainTab('gpa')}
+          onClick={() => {
+            setActiveMainTab('gpa');
+          }}
           className={`focus-ring inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition ${
             activeMainTab === 'gpa'
               ? 'bg-brand-600 text-white shadow-sm ring-2 ring-brand-400'
@@ -259,12 +258,14 @@ export default function RegistrarGpa() {
           }`}
         >
           <Calculator className="h-4 w-4" />
-          <span>Stage GPA</span>
+          <span>1. Stage GPA Calculation ({cohorts.length} Cohorts Ready)</span>
         </button>
 
         <button
           type="button"
-          onClick={() => setActiveMainTab('cgpa')}
+          onClick={() => {
+            setActiveMainTab('cgpa');
+          }}
           className={`focus-ring inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition ${
             activeMainTab === 'cgpa'
               ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-400'
@@ -272,232 +273,421 @@ export default function RegistrarGpa() {
           }`}
         >
           <Award className="h-4 w-4" />
-          <span>Cumulative CGPA</span>
+          <span>2. Cumulative CGPA ({submittedCgpaCohorts.length} Submitted to CGPA)</span>
         </button>
       </div>
 
-      {/* Cascaded Filter Dropdowns (Strictly selects, no 'All' options) */}
-      <Card>
-        <CardBody className="p-4 sm:p-5">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 items-end">
-            <SelectField
-              label="1. Batch"
-              value={batch}
-              onChange={(e) => {
-                setBatch(e.target.value);
-                setDepartment('');
-                setProgram('');
-                setLevel('');
-              }}
-              required
-            >
-              <option value="">Choose batch...</option>
-              {availableBatches.map((b) => (
-                <option key={b.id || b.code} value={b.id}>
-                  {b.code} ({b.category || 'regular'})
-                </option>
-              ))}
-            </SelectField>
-
-            <SelectField
-              label="2. Department"
-              value={department}
-              onChange={(e) => {
-                setDepartment(e.target.value);
-                setProgram('');
-                setLevel('');
-              }}
-              disabled={!batch}
-              required
-            >
-              <option value="">Choose department...</option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.code} · {d.name}
-                </option>
-              ))}
-            </SelectField>
-
-            <SelectField
-              label="3. Programme"
-              value={program}
-              onChange={(e) => {
-                setProgram(e.target.value);
-                setLevel('');
-              }}
-              disabled={!department}
-              required
-            >
-              <option value="">Choose programme...</option>
-              {programsInDept.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.code} · {p.name}
-                </option>
-              ))}
-            </SelectField>
-
-            {activeMainTab === 'gpa' ? (
-              <SelectField
-                label={`4. ${durationUnit} / Stage`}
-                value={level}
-                onChange={(e) => setLevel(e.target.value)}
-                disabled={!program}
-                required
-              >
-                <option value="">Choose stage / year...</option>
-                {stageOptions.map((s) => (
-                  <option key={s.stage} value={s.stage}>
-                    {s.label}
-                  </option>
-                ))}
-              </SelectField>
-            ) : (
-              <div className="flex flex-col justify-end">
-                <span className="text-xs font-semibold text-slate-500 mb-2">Cumulative Scope:</span>
-                <Badge tone="indigo" className="py-2 justify-center">
-                  All {totalStages} {durationUnit}s Included
-                </Badge>
-              </div>
-            )}
-          </div>
-        </CardBody>
-      </Card>
-
-      {/* Main View Area */}
-      {!program || !batch || (activeMainTab === 'gpa' && !level) ? (
-        <Card>
-          <CardBody className="py-12 text-center">
-            <Calculator className="mx-auto h-12 w-12 text-slate-300" />
-            <h3 className="mt-3 text-sm font-semibold text-slate-800">
-              Select Batch, Department, Programme {activeMainTab === 'gpa' ? 'and Stage' : ''}
-            </h3>
-            <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
-              Choose from the cascaded dropdowns above to calculate {activeMainTab === 'gpa' ? `Stage GPA for ${durationUnit} ${level || ''}` : 'Cumulative CGPA across all years'}.
-            </p>
-          </CardBody>
-        </Card>
-      ) : list.isLoading ? (
-        <SkeletonCard lines={8} />
-      ) : list.error ? (
-        <Card>
-          <ErrorState message={list.error?.response?.data?.message || 'GPA records could not be loaded.'} />
-        </Card>
-      ) : (
-        <div className="space-y-5">
-          {/* Action Bar based on Mode */}
-          {activeMainTab === 'gpa' ? (
-            /* GPA TAB HEADER & ACTIONS */
-            <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex items-center gap-3">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700 shadow-sm">
-                  <Calculator className="h-6 w-6" />
-                </span>
+      {/* =========================================================================
+          TAB 1: STAGE GPA CALCULATION
+          ========================================================================= */}
+      {activeMainTab === 'gpa' && (
+        <>
+          {/* VIEW A: OVERVIEW CARDS (When no cohort is actively opened) */}
+          {!selectedGpaCohort ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-slate-900">
-                      {selectedProgramDoc?.name} · {durationUnit} {level} GPA
-                    </h3>
-                    {stageCompleted ? (
-                      <Badge tone="success">Results Accepted & Ready</Badge>
-                    ) : (
-                      <Badge tone="warning">Pending Results Submission</Badge>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Calculated for single {durationUnit} {level} transcript. Does not send to CGPA until all years finish.
+                  <h2 className="text-base font-bold text-slate-900">
+                    Cohorts Ready for GPA Calculation
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    These department and programme cohorts have received submitted or published marks from course teachers.
                   </p>
+                </div>
+                <div className="w-full sm:w-72">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Filter department, programme, batch..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  onClick={() => calculateGpaMutation.mutate()}
-                  loading={calculateGpaMutation.isPending || list.isFetching}
-                  className="gap-1.5 bg-brand-600 hover:bg-brand-700 text-white"
-                >
-                  <RefreshCw className="h-4 w-4" /> Calculate {durationUnit} {level} GPA
-                </Button>
+              {readyCohortsQuery.isLoading ? (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <SkeletonCard />
+                  <SkeletonCard />
+                  <SkeletonCard />
+                </div>
+              ) : filteredGpaCohorts.length === 0 ? (
+                <Card>
+                  <CardBody className="py-12 text-center">
+                    <Calculator className="mx-auto h-12 w-12 text-slate-300" />
+                    <h3 className="mt-3 text-sm font-semibold text-slate-800">
+                      No Cohorts Ready for GPA
+                    </h3>
+                    <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
+                      Go to the <strong>Results page</strong> and click "Accept & Grade" for submitted courses to forward them to GPA calculation.
+                    </p>
+                    <div className="mt-4">
+                      <Link to="/registrar/results">
+                        <Button className="gap-2 bg-brand-600 hover:bg-brand-700 text-white text-xs">
+                          <CheckCircle2 className="h-4 w-4" /> Go to Submitted Results
+                        </Button>
+                      </Link>
+                    </div>
+                  </CardBody>
+                </Card>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {filteredGpaCohorts.map((cohort) => (
+                    <Card
+                      key={cohort.id}
+                      className="group flex flex-col justify-between overflow-hidden border border-slate-200 transition hover:border-brand-300 hover:shadow-md"
+                    >
+                      <div className="p-5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
+                            <Building2 className="h-3.5 w-3.5" />
+                            {cohort.department.name}
+                          </span>
+                          <Badge tone={cohort.batch.category === 'extension' ? 'warning' : 'neutral'}>
+                            {cohort.batch.code} · {humanStatus(cohort.batch.category)}
+                          </Badge>
+                        </div>
 
-                {allStagesFinished && (
-                  <Button
-                    onClick={() => sendToCgpaMutation.mutate()}
-                    loading={sendToCgpaMutation.isPending}
-                    className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold ring-2 ring-indigo-300"
-                  >
-                    <Send className="h-4 w-4" /> Send to CGPA (All {totalStages} {durationUnit}s Finished)
-                  </Button>
-                )}
-              </div>
+                        <h3 className="mt-3 text-base font-bold text-slate-900 group-hover:text-brand-700 transition">
+                          {cohort.program.name}
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {cohort.program.qualificationType.toUpperCase()} · {cohort.totalStages} {cohort.durationUnit}s · Batch: {cohort.batch.name}
+                        </p>
+
+                        <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs">
+                          <span className="flex items-center gap-1.5 font-semibold text-slate-700">
+                            <UsersRound className="h-4 w-4 text-slate-400" />
+                            {cohort.studentCount} Students
+                          </span>
+                          <span className="font-medium text-slate-500">
+                            {cohort.totalPublishedResults} Published Marks
+                          </span>
+                        </div>
+
+                        {/* Stages breakdown pill list */}
+                        <div className="mt-3 space-y-1.5">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                            {cohort.durationUnit} Stages Progress:
+                          </p>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {cohort.stages.map((st) => (
+                              <div
+                                key={st.level}
+                                className={`flex items-center justify-between rounded-lg px-2 py-1 text-[11px] font-medium ${
+                                  st.status === 'published'
+                                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                    : st.status === 'submitted'
+                                    ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                    : 'bg-slate-50 text-slate-500 border border-slate-200'
+                                }`}
+                              >
+                                <span>{st.label}</span>
+                                <span className="font-bold">
+                                  {st.status === 'published' ? 'Ready' : st.status === 'submitted' ? 'Review' : 'Pending'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="border-t border-slate-100 bg-slate-50/80 p-4">
+                        <Button
+                          onClick={() => {
+                            setSelectedGpaCohort(cohort);
+                            setSelectedLevel(cohort.stages[0]?.level || 1);
+                          }}
+                          className="w-full gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold"
+                        >
+                          <Calculator className="h-4 w-4" /> Calculate GPA
+                          <ChevronRight className="h-4 w-4 ml-auto" />
+                        </Button>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
-            /* CGPA TAB HEADER & ACTIONS */
-            <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-indigo-200 bg-indigo-50/50 p-5 shadow-sm">
-              <div className="flex items-center gap-3">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
-                  <Award className="h-6 w-6" />
-                </span>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-slate-900">
-                      {selectedProgramDoc?.name} · Cumulative Programme CGPA
-                    </h3>
-                    <Badge tone={isCgpaCalculated ? 'success' : readyForCgpa ? 'indigo' : 'warning'}>
-                      {isCgpaCalculated
-                        ? 'Status: Calculated · Graduated'
-                        : readyForCgpa
-                        ? 'Ready for CGPA Calculation'
-                        : 'Waiting for all years completion'}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-slate-600 mt-0.5">
-                    Covers all {totalStages} {durationUnit}s. Calculating CGPA finalizes student academic status and sets students to <strong>Graduated</strong>.
-                  </p>
+            /* VIEW B: SPECIFIC COHORT GPA WORKBENCH */
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setSelectedGpaCohort(null)}
+                  className="gap-1.5 text-xs font-semibold"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" /> Back to all ready cohorts
+                </Button>
+                <div className="flex items-center gap-2">
+                  <Badge tone="brand">
+                    {selectedGpaCohort.department.name} · {selectedGpaCohort.program.name}
+                  </Badge>
+                  <Badge tone="neutral">
+                    {selectedGpaCohort.batch.code} ({selectedGpaCohort.batch.category})
+                  </Badge>
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  onClick={() => calculateCgpaMutation.mutate()}
-                  loading={calculateCgpaMutation.isPending || list.isFetching}
-                  disabled={!readyForCgpa}
-                  className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
-                >
-                  <Award className="h-4 w-4" /> Calculate Cumulative CGPA & Graduate
-                </Button>
+              {/* Stage Tabs Bar & Calculation Controls */}
+              <Card className="p-4 sm:p-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">
+                      {selectedGpaCohort.program.name} · {durationUnit} {selectedLevel} GPA
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {selectedGpaCohort.department.name} · Batch: {selectedGpaCohort.batch.code} · {selectedGpaCohort.studentCount} enrolled students
+                    </p>
+                  </div>
 
-                {isCgpaCalculated && (
-                  <Link to="/registrar/graduated">
-                    <Button variant="secondary" className="gap-1.5 border-emerald-300 text-emerald-800">
-                      <GraduationCap className="h-4 w-4 text-emerald-600" /> View in Graduated Page
+                  {/* Stage Switcher Pills */}
+                  <div className="flex flex-wrap items-center gap-1.5 rounded-xl bg-slate-100 p-1">
+                    {selectedGpaCohort.stages.map((st) => (
+                      <button
+                        key={st.level}
+                        type="button"
+                        onClick={() => setSelectedLevel(st.level)}
+                        className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                          Number(selectedLevel) === st.level
+                            ? 'bg-white text-brand-700 shadow-sm'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {st.label}
+                        {st.status === 'published' && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      onClick={() => calculateGpaMutation.mutate()}
+                      loading={calculateGpaMutation.isPending || list.isFetching}
+                      className="gap-1.5 bg-brand-600 hover:bg-brand-700 text-white"
+                    >
+                      <RefreshCw className="h-4 w-4" /> Calculate {durationUnit} {selectedLevel} GPA
                     </Button>
-                  </Link>
-                )}
-              </div>
+
+                    <Button
+                      onClick={() => sendToCgpaMutation.mutate()}
+                      loading={sendToCgpaMutation.isPending}
+                      className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                    >
+                      <Send className="h-4 w-4" /> Send to CGPA & Transcripts
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+
+              {/* Table of Students for Selected Cohort and Stage */}
+              <Card>
+                <CardHeader
+                  title={`Students enrolled in ${selectedGpaCohort.program.name} · ${durationUnit} ${selectedLevel}`}
+                  subtitle={`${listRows.length} enrolled student(s) in this cohort.`}
+                  icon={Calculator}
+                  action={<Badge tone="neutral">Policy v{list.data?.policyVersion ?? '1'}</Badge>}
+                />
+                <RegistrarTable
+                  columns={listColumns}
+                  rows={listRows}
+                  loading={list.isFetching}
+                  rowKey={(row) => row.id}
+                  emptyTitle="No student records loaded"
+                  emptyMessage="Click 'Calculate GPA' above to view student marks."
+                />
+              </Card>
             </div>
           )}
+        </>
+      )}
 
-          {/* Table of Students */}
-          <Card>
-            <CardHeader
-              title={
-                activeMainTab === 'gpa'
-                  ? `Students enrolled in ${selectedProgramDoc?.name} · ${durationUnit} ${level}`
-                  : `All students in ${selectedProgramDoc?.name} (Cumulative Overview)`
-              }
-              subtitle={`${listRows.length} enrolled student(s) in this batch.`}
-              icon={activeMainTab === 'gpa' ? Calculator : Award}
-              action={<Badge tone="neutral">Policy v{list.data?.policyVersion ?? '—'}</Badge>}
-            />
-            <RegistrarTable
-              columns={listColumns}
-              rows={listRows}
-              loading={list.isFetching}
-              rowKey={(row) => row.id}
-              emptyTitle="No students found"
-              emptyMessage="No students found matching this selection."
-            />
-          </Card>
-        </div>
+      {/* =========================================================================
+          TAB 2: CUMULATIVE CGPA (ONLY SUBMITTED DEPARTMENTS)
+          ========================================================================= */}
+      {activeMainTab === 'cgpa' && (
+        <>
+          {/* VIEW A: SUBMITTED COHORTS CARDS (NO FILTER BUTTONS REQUIRED) */}
+          {!selectedCgpaCohort ? (
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">
+                  Submitted Programmes Ready for Cumulative CGPA
+                </h2>
+                <p className="text-xs text-slate-500">
+                  These programmes and departments have completed all stages and have been submitted to the CGPA & Transcripts hub.
+                </p>
+              </div>
+
+              {submittedCgpaCohorts.length === 0 ? (
+                <Card>
+                  <CardBody className="py-12 text-center">
+                    <Award className="mx-auto h-12 w-12 text-slate-300" />
+                    <h3 className="mt-3 text-sm font-semibold text-slate-800">
+                      No Programmes Submitted to CGPA Yet
+                    </h3>
+                    <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
+                      Go to the <strong>Stage GPA tab</strong> above, select a cohort, and click <strong>"Send to CGPA & Transcripts"</strong>.
+                    </p>
+                    <div className="mt-4">
+                      <Button
+                        onClick={() => setActiveMainTab('gpa')}
+                        className="gap-2 bg-brand-600 hover:bg-brand-700 text-white text-xs"
+                      >
+                        <Calculator className="h-4 w-4" /> Go to Stage GPA Tab
+                      </Button>
+                    </div>
+                  </CardBody>
+                </Card>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {submittedCgpaCohorts.map((cohort) => (
+                    <Card
+                      key={cohort.id}
+                      className="group flex flex-col justify-between overflow-hidden border border-slate-200 transition hover:border-indigo-300 hover:shadow-md"
+                    >
+                      <div className="p-5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">
+                            <Building2 className="h-3.5 w-3.5" />
+                            {cohort.department.name}
+                          </span>
+                          <Badge tone={cohort.batch.category === 'extension' ? 'warning' : 'neutral'}>
+                            {cohort.batch.code} · {humanStatus(cohort.batch.category)}
+                          </Badge>
+                        </div>
+
+                        <h3 className="mt-3 text-base font-bold text-slate-900 group-hover:text-indigo-700 transition">
+                          {cohort.program.name}
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {cohort.program.qualificationType.toUpperCase()} · All {cohort.totalStages} {cohort.durationUnit}s Included
+                        </p>
+
+                        <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs">
+                          <span className="flex items-center gap-1.5 font-semibold text-slate-700">
+                            <UsersRound className="h-4 w-4 text-slate-400" />
+                            {cohort.studentCount} Graduating Students
+                          </span>
+                          <Badge tone={cohort.cgpaCalculated ? 'success' : 'indigo'}>
+                            {cohort.cgpaCalculated ? 'CGPA Finalized' : 'Ready for CGPA'}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      <div className="border-t border-slate-100 bg-slate-50/80 p-4">
+                        <Button
+                          onClick={() => setSelectedCgpaCohort(cohort)}
+                          className="w-full gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+                        >
+                          <Award className="h-4 w-4" /> Open Cumulative CGPA
+                          <ChevronRight className="h-4 w-4 ml-auto" />
+                        </Button>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* VIEW B: SPECIFIC COHORT CUMULATIVE CGPA WORKBENCH */
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setSelectedCgpaCohort(null)}
+                  className="gap-1.5 text-xs font-semibold"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" /> Back to submitted cohorts
+                </Button>
+                <div className="flex items-center gap-2">
+                  <Badge tone="indigo">
+                    {selectedCgpaCohort.department.name} · {selectedCgpaCohort.program.name}
+                  </Badge>
+                  <Badge tone="neutral">
+                    {selectedCgpaCohort.batch.code} ({selectedCgpaCohort.batch.category})
+                  </Badge>
+                </div>
+              </div>
+
+              {/* CGPA Cohort Banner & Finalize Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-indigo-200 bg-indigo-50/60 p-5 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
+                    <Award className="h-6 w-6" />
+                  </span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-slate-900">
+                        {selectedCgpaCohort.program.name} · Cumulative Programme CGPA
+                      </h3>
+                      <Badge tone={selectedCgpaCohort.cgpaCalculated ? 'success' : 'indigo'}>
+                        {selectedCgpaCohort.cgpaCalculated ? 'Status: Graduated & Finalized' : 'Ready for Final CGPA'}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      Covers all {selectedCgpaCohort.totalStages} {selectedCgpaCohort.durationUnit}s. Finalizing CGPA records official GPA and marks students as <strong>Graduated</strong>.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    onClick={() =>
+                      calculateCgpaMutation.mutate({
+                        programId: selectedCgpaCohort.program.id,
+                        batchId: selectedCgpaCohort.batch.id,
+                      })
+                    }
+                    loading={calculateCgpaMutation.isPending}
+                    className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+                  >
+                    <Award className="h-4 w-4" /> Finalize CGPA & Graduate Students
+                  </Button>
+
+                  <Link to="/registrar/transcripts">
+                    <Button variant="secondary" className="gap-1.5 text-xs">
+                      <FileText className="h-4 w-4 text-slate-600" /> Transcripts Hub
+                    </Button>
+                  </Link>
+
+                  <Link to="/registrar/certificates">
+                    <Button variant="secondary" className="gap-1.5 text-xs">
+                      <GraduationCap className="h-4 w-4 text-emerald-600" /> Issue Certificates
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+
+              {/* Table of Graduating Students */}
+              <Card>
+                <CardHeader
+                  title={`All students in ${selectedCgpaCohort.program.name} (Cumulative Overview)`}
+                  subtitle={`${listRows.length} graduating student(s) in this cohort.`}
+                  icon={Award}
+                  action={<Badge tone="neutral">Policy v{list.data?.policyVersion ?? '1'}</Badge>}
+                />
+                <RegistrarTable
+                  columns={listColumns}
+                  rows={listRows}
+                  loading={list.isFetching}
+                  rowKey={(row) => row.id}
+                  emptyTitle="No students found"
+                  emptyMessage="No students found matching this programme and batch."
+                />
+              </Card>
+            </div>
+          )}
+        </>
       )}
 
       {/* Student Detail Modal */}
@@ -512,7 +702,7 @@ export default function RegistrarGpa() {
             <div className="flex items-center justify-between w-full">
               <ExportMenu
                 basePath={`${REGISTRAR}/gpa-cgpa/${student.id}/export`}
-                params={level ? { level: Number(level) } : {}}
+                params={selectedLevel ? { level: Number(selectedLevel) } : {}}
                 filenamePrefix={`GPA_${student.studentId || 'record'}`}
                 label="Export Student GPA"
                 formats={['pdf', 'xlsx', 'docx']}
@@ -527,7 +717,7 @@ export default function RegistrarGpa() {
             <section className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
                 <span className="text-xs text-slate-400">Cumulative CGPA</span>
-                <p className="text-xl font-bold text-indigo-700">{detail.data.cgpa ?? '—'}</p>
+                <p className="text-xl font-bold text-indigo-700">{detail.data.cgpa != null ? Number(detail.data.cgpa).toFixed(2) : '—'}</p>
               </div>
               <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
                 <span className="text-xs text-slate-400">Total Credits Counted</span>
@@ -548,7 +738,7 @@ export default function RegistrarGpa() {
                   {detail.data.stageBreakdown.map((sb) => (
                     <div key={sb.level} className="rounded-lg bg-slate-50 p-2.5 text-xs">
                       <span className="font-semibold text-slate-700">{durationUnit} {sb.level}</span>
-                      <p className="text-base font-bold text-brand-700 mt-0.5">{sb.gpa ?? '—'}</p>
+                      <p className="text-base font-bold text-brand-700 mt-0.5">{sb.gpa != null ? Number(sb.gpa).toFixed(2) : '—'}</p>
                       <p className="text-[10px] text-slate-400">{sb.credits} cr · {sb.courseCount} crs</p>
                     </div>
                   ))}

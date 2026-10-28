@@ -173,7 +173,7 @@ async function missingResults(query) {
     .filter((row) => row.missing > 0);
 }
 
-const REVIEWABLE_RESULT_STATUSES = ['submitted', 'under_review', 'approved'];
+const REVIEWABLE_RESULT_STATUSES = ['submitted', 'under_review', 'approved', 'published'];
 
 function resultsForOffering(offeringId, statuses) {
   return Result.find(ownFilter({ offering: offeringId, status: { $in: statuses } }));
@@ -207,18 +207,19 @@ export const listResultSubmissions = asyncHandler(async (req, res) => {
         submitted: { $sum: { $cond: [{ $eq: ['$status', 'submitted'] }, 1, 0] } },
         underReview: { $sum: { $cond: [{ $eq: ['$status', 'under_review'] }, 1, 0] } },
         approved: { $sum: { $cond: [{ $eq: ['$status', 'approved'] }, 1, 0] } },
+        published: { $sum: { $cond: [{ $eq: ['$status', 'published'] }, 1, 0] } },
         latestSubmittedAt: { $max: '$submittedAt' },
         latestUpdatedAt: { $max: '$updatedAt' },
       },
     },
     { $sort: { latestSubmittedAt: -1, latestUpdatedAt: -1 } },
-    { $limit: 200 },
+    { $limit: 500 },
   ]);
   const offerings = await CourseOffering.find(ownFilter({ _id: { $in: groups.map((row) => row._id) } }))
     .populate('course', 'code title')
     .populate('teacher', 'name email')
     .populate('academicYear', 'label')
-    .populate('program', 'code name qualificationType durationYears levels shortTerm')
+    .populate('program', 'code name qualificationType durationYears levels shortTerm finalizedStages')
     .populate('department', 'code name')
     .populate('batch', 'code name category currentLevel')
     .lean();
@@ -227,6 +228,14 @@ export const listResultSubmissions = asyncHandler(async (req, res) => {
     rows: groups.map((group) => {
       const offering = byId.get(String(group._id));
       const pending = group.submitted + group.underReview;
+      let status = 'approved';
+      if (pending > 0) {
+        status = group.underReview ? 'under_review' : 'submitted';
+      } else if (group.published === group.total && group.total > 0) {
+        status = 'published';
+      } else {
+        status = 'approved';
+      }
       return {
         id: String(group._id),
         course: offering?.course ? { id: String(offering.course._id), code: offering.course.code, title: offering.course.title } : null,
@@ -240,6 +249,7 @@ export const listResultSubmissions = asyncHandler(async (req, res) => {
           durationYears: offering.program.durationYears,
           levels: offering.program.levels,
           shortTerm: offering.program.shortTerm,
+          finalizedStages: offering.program.finalizedStages || [],
         } : null,
         batch: offering?.batch ? { id: String(offering.batch._id), code: offering.batch.code, name: offering.batch.name, category: offering.batch.category } : null,
         category: offering?.category || offering?.batch?.category || 'regular',
@@ -251,9 +261,10 @@ export const listResultSubmissions = asyncHandler(async (req, res) => {
           submitted: group.submitted,
           underReview: group.underReview,
           approved: group.approved,
+          published: group.published,
           pending,
         },
-        status: pending ? (group.underReview ? 'under_review' : 'submitted') : 'approved',
+        status,
         latestSubmittedAt: group.latestSubmittedAt,
         latestUpdatedAt: group.latestUpdatedAt,
       };
@@ -298,6 +309,9 @@ export const submitStageComplete = asyncHandler(async (req, res) => {
   const { programId, level, batchId } = req.body;
   if (!programId || level === undefined) throw new AppError(400, 'STAGE_REQUIRED', 'Program and stage level are required.');
 
+  const isAllLevels = String(level).toLowerCase() === 'all';
+  const levelNumber = isAllLevels ? null : Number(level);
+
   // Resolve the exact batch for this program if a batchId (or batch code) was passed
   let effectiveBatchId = null;
   if (batchId) {
@@ -319,25 +333,27 @@ export const submitStageComplete = asyncHandler(async (req, res) => {
     }
   }
 
-  // Try finding offerings with effectiveBatchId first; if none, fall back to program and level
+  // Try finding offerings with effectiveBatchId first; if none, fall back to program
   let offerings = [];
   if (effectiveBatchId) {
     offerings = await CourseOffering.find({
       program: programId,
-      level: Number(level),
+      ...(isAllLevels ? {} : { level: levelNumber }),
       batch: effectiveBatchId,
-    }).select('_id status batch').lean();
+    }).select('_id status batch level').lean();
   }
 
   if (!offerings.length) {
     offerings = await CourseOffering.find({
       program: programId,
-      level: Number(level),
-    }).select('_id status batch').lean();
+      ...(isAllLevels ? {} : { level: levelNumber }),
+    }).select('_id status batch level').lean();
   }
 
   if (!offerings.length) {
-    throw new AppError(400, 'NO_OFFERINGS', 'No course offerings found for this programme and stage.');
+    throw new AppError(400, 'NO_OFFERINGS', isAllLevels
+      ? 'No course offerings found for this programme.'
+      : `No course offerings found for this programme and stage ${level}.`);
   }
   const offeringIds = offerings.map((o) => o._id);
 
@@ -357,7 +373,9 @@ export const submitStageComplete = asyncHandler(async (req, res) => {
     throw new AppError(
       400,
       'STAGE_INCOMPLETE',
-      `Cannot publish Year/Level ${level}: not all courses in this stage have submitted results. Teachers must submit marks for all courses before this stage can be published to GPA and transcripts.`
+      isAllLevels
+        ? `Cannot publish complete programme: ${unsubmitted.length} course(s) do not have submitted results yet. Teachers must submit marks for all courses before results can be published to GPA.`
+        : `Cannot publish Year/Level ${level}: not all courses in this stage have submitted results. Teachers must submit marks for all courses before this stage can be published to GPA and transcripts.`
     );
   }
 
@@ -394,17 +412,25 @@ export const submitStageComplete = asyncHandler(async (req, res) => {
     { $set: { status: 'completed' } },
   );
 
-  await Program.updateOne(
-    { _id: programId },
-    { $addToSet: { finalizedStages: Number(level) } }
-  );
-
   const prog = await Program.findById(programId).lean();
   let totalStages = 4;
   if (prog) {
     if (prog.qualificationType === 'degree') totalStages = prog.durationYears || 4;
     else if (prog.qualificationType === 'diploma') totalStages = prog.levels?.length ? Math.max(...prog.levels) : 4;
     else if (prog.shortTerm?.duration) totalStages = prog.shortTerm.duration;
+  }
+  const allStages = Array.from({ length: totalStages }, (_, i) => i + 1);
+
+  if (isAllLevels) {
+    await Program.updateOne(
+      { _id: programId },
+      { $addToSet: { finalizedStages: { $each: allStages } } }
+    );
+  } else {
+    await Program.updateOne(
+      { _id: programId },
+      { $addToSet: { finalizedStages: levelNumber } }
+    );
   }
 
   const allOfferings = await CourseOffering.find({
@@ -420,21 +446,30 @@ export const submitStageComplete = asyncHandler(async (req, res) => {
     }
   }
 
-  const allStagesFinished = totalStages > 0 && finishedStages.length >= totalStages;
+  const allStagesFinished = isAllLevels || (totalStages > 0 && finishedStages.length >= totalStages);
   const targetBatchId = effectiveBatchId || offerings[0]?.batch || batchId;
-  if (targetBatchId && allStagesFinished) {
-    await Batch.updateOne({ _id: targetBatchId }, { $set: { status: 'completed', readyForCgpa: true } });
+  if (targetBatchId) {
+    await Batch.updateOne(
+      { _id: targetBatchId },
+      { $set: { readyForCgpa: true, ...(allStagesFinished ? { status: 'completed' } : {}) } }
+    );
   }
 
   audit({
     req,
-    action: 'registrar.results.stage_submitted',
+    action: isAllLevels ? 'registrar.results.all_stages_submitted' : 'registrar.results.stage_submitted',
     targetType: 'Program',
     targetId: programId,
-    meta: { level, publishedCount: results.length },
+    meta: { level, publishedCount: results.length, allStages: isAllLevels },
   });
 
-  res.json({ message: `Level/Year ${level} results finalized and published. Ready for GPA calculation!`, publishedCount: results.length });
+  res.json({
+    message: isAllLevels
+      ? `All ${totalStages} years/stages finalized and published. Ready for GPA calculation!`
+      : `Level/Year ${level} results finalized and published. Ready for GPA calculation!`,
+    publishedCount: results.length,
+    allStages: isAllLevels,
+  });
 });
 
 export const submitProgramFinished = asyncHandler(async (req, res) => {
@@ -769,6 +804,146 @@ export const correctResult = asyncHandler(async (req, res) => {
   res.json({ result });
 });
 
+export const readyGpaCohorts = asyncHandler(async (req, res) => {
+  const policy = await getGradingPolicy();
+
+  // Load all batches
+  const batches = await Batch.find({ status: { $ne: 'archived' } })
+    .populate('program', 'code name qualificationType durationYears levels shortTerm finalizedStages')
+    .populate('department', 'code name')
+    .populate('admissionAcademicYear', 'label')
+    .lean();
+
+  // Bulk query all offerings
+  const allOfferings = await CourseOffering.find({}).select('_id level program batch course creditHours').lean();
+  const offeringsByBatch = new Map();
+  for (const off of allOfferings) {
+    const key = String(off.batch);
+    if (!offeringsByBatch.has(key)) offeringsByBatch.set(key, []);
+    offeringsByBatch.get(key).push(off);
+  }
+
+  // Bulk aggregate result counts by offering
+  const offeringCounts = await Result.aggregate([
+    { $match: { status: { $in: ['submitted', 'under_review', 'approved', 'published'] } } },
+    {
+      $group: {
+        _id: '$offering',
+        published: { $sum: { $cond: [{ $eq: ['$status', 'published'] }, 1, 0] } },
+        submitted: { $sum: { $cond: [{ $in: ['$status', ['submitted', 'under_review', 'approved']] }, 1, 0] } },
+      },
+    },
+  ]);
+  const countMap = new Map(offeringCounts.map((r) => [String(r._id), r]));
+
+  // Bulk aggregate student counts by batch
+  const studentCounts = await Student.aggregate([
+    { $match: { studentStatus: { $ne: 'archived' } } },
+    { $group: { _id: '$batch', count: { $sum: 1 } } },
+  ]);
+  const studentMap = new Map(studentCounts.map((r) => [String(r._id), r.count]));
+
+  const cohorts = [];
+
+  for (const b of batches) {
+    const prog = b.program;
+    const dept = b.department;
+    if (!prog || !dept) continue;
+
+    const offerings = offeringsByBatch.get(String(b._id)) || [];
+    if (!offerings.length) continue;
+
+    let pubCount = 0;
+    let subCount = 0;
+    for (const off of offerings) {
+      const c = countMap.get(String(off._id));
+      if (c) {
+        pubCount += c.published || 0;
+        subCount += c.submitted || 0;
+      }
+    }
+
+    // Only include cohort if it has published or submitted results ready
+    if (pubCount === 0 && subCount === 0) continue;
+
+    const totalStages = prog.qualificationType === 'degree'
+      ? (prog.durationYears || 4)
+      : prog.qualificationType === 'diploma'
+      ? (prog.levels?.length ? Math.max(...prog.levels) : 4)
+      : (prog.shortTerm?.duration || 1);
+
+    const durationUnit = prog.qualificationType === 'degree' ? 'Year' : prog.qualificationType === 'diploma' ? 'Level' : 'Month';
+
+    const stages = [];
+    let allPublished = true;
+    for (let s = 1; s <= totalStages; s++) {
+      const sOfferings = offerings.filter((o) => o.level === s);
+      let sPub = 0;
+      let sSub = 0;
+      for (const off of sOfferings) {
+        const c = countMap.get(String(off._id));
+        if (c) {
+          sPub += c.published || 0;
+          sSub += c.submitted || 0;
+        }
+      }
+
+      const isFin = (prog.finalizedStages || []).includes(s) || (sPub > 0 && sSub === 0);
+      if (!isFin) allPublished = false;
+
+      stages.push({
+        level: s,
+        label: `${durationUnit} ${s}`,
+        offeringCount: sOfferings.length,
+        publishedCount: sPub,
+        submittedCount: sSub,
+        status: isFin ? 'published' : sSub > 0 ? 'submitted' : 'pending',
+      });
+    }
+
+    const studentCount = studentMap.get(String(b._id)) || 0;
+
+    cohorts.push({
+      id: `${prog._id}_${b._id}`,
+      program: {
+        id: String(prog._id),
+        code: prog.code,
+        name: prog.name,
+        qualificationType: prog.qualificationType,
+        durationYears: prog.durationYears,
+        durationUnit,
+        finalizedStages: prog.finalizedStages || [],
+      },
+      department: {
+        id: String(dept._id),
+        code: dept.code,
+        name: dept.name,
+      },
+      batch: {
+        id: String(b._id),
+        code: b.code,
+        name: b.name,
+        category: b.category || 'regular',
+        admissionAcademicYear: b.admissionAcademicYear?.label || '2019',
+        readyForCgpa: Boolean(b.readyForCgpa || allPublished),
+        cgpaCalculated: Boolean(b.cgpaCalculated),
+        status: b.status,
+      },
+      totalStages,
+      durationUnit,
+      stages,
+      allStagesPublished: allPublished,
+      studentCount,
+      totalPublishedResults: pubCount,
+      totalSubmittedResults: subCount,
+      readyForCgpa: Boolean(b.readyForCgpa || allPublished),
+      cgpaCalculated: Boolean(b.cgpaCalculated),
+    });
+  }
+
+  res.json({ cohorts, configured: Boolean(policy) });
+});
+
 export const gpaCgpa = asyncHandler(async (req, res) => {
   const query = req.valid.query;
   const policy = await getGradingPolicy();
@@ -949,7 +1124,7 @@ export const sendToCgpa = asyncHandler(async (req, res) => {
     program: programId,
     ...(batchId ? { _id: batchId } : {}),
   };
-  await Batch.updateMany(filter, { $set: { readyForCgpa: true } });
+  await Batch.updateMany(filter, { $set: { readyForCgpa: true, sentToTranscripts: true } });
 
   audit({
     req,
