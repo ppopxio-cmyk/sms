@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { AttendanceRecord, Result, GradingPolicy } from '../models/Records.js';
+import { AttendanceRecord, Result, GradingPolicy, findBand } from '../models/Records.js';
 import { Student, Enrollment } from '../models/Student.js';
 import { CourseOffering } from '../models/Offering.js';
 import { AcademicYear, Program, Batch } from '../models/AcademicStructure.js';
@@ -366,15 +366,26 @@ export const submitStageComplete = asyncHandler(async (req, res) => {
 
   for (const r of results) {
     if (r.totalMark !== null && r.totalMark !== undefined) {
-      const band = gradeFor(policy, r.totalMark);
-      r.letterGrade = band.letter;
-      r.gradePoint = band.points;
-      r.passed = band.pass;
+      try {
+        const band = gradeFor(policy, r.totalMark);
+        if (band) {
+          r.letterGrade = band.letter;
+          r.gradePoint = band.points;
+          r.passed = band.pass;
+        }
+      } catch {
+        const fallback = findBand(policy, Number(r.totalMark));
+        if (fallback) {
+          r.letterGrade = fallback.letter;
+          r.gradePoint = fallback.points;
+          r.passed = fallback.pass;
+        }
+      }
       r.gradingPolicyVersion = policy.version;
     }
     r.status = 'published';
     r.publishedAt = new Date();
-    r.publishedBy = req.user.id;
+    r.publishedBy = req.user?.id ? new mongoose.Types.ObjectId(req.user.id) : null;
     await r.save();
   }
 
@@ -473,15 +484,26 @@ export const submitProgramFinished = asyncHandler(async (req, res) => {
 
   for (const r of results) {
     if (r.totalMark !== null && r.totalMark !== undefined) {
-      const band = gradeFor(policy, r.totalMark);
-      r.letterGrade = band.letter;
-      r.gradePoint = band.points;
-      r.passed = band.pass;
+      try {
+        const band = gradeFor(policy, r.totalMark);
+        if (band) {
+          r.letterGrade = band.letter;
+          r.gradePoint = band.points;
+          r.passed = band.pass;
+        }
+      } catch {
+        const fallback = findBand(policy, Number(r.totalMark));
+        if (fallback) {
+          r.letterGrade = fallback.letter;
+          r.gradePoint = fallback.points;
+          r.passed = fallback.pass;
+        }
+      }
       r.gradingPolicyVersion = policy.version;
     }
     r.status = 'published';
     r.publishedAt = new Date();
-    r.publishedBy = req.user.id;
+    r.publishedBy = req.user?.id ? new mongoose.Types.ObjectId(req.user.id) : null;
     await r.save();
   }
 

@@ -5,6 +5,7 @@ import { validate } from '../middleware/validate.js';
 import { uploadLimiter, exportLimiter } from '../middleware/rateLimit.js';
 import {
   idParamSchema,
+  batchIdParamSchema,
   studentIdParamSchema,
   listStudentsQuerySchema,
   createStudentSchema,
@@ -174,12 +175,12 @@ r.get('/batches', requirePermission('batches:view'), validate(listBatchesQuerySc
 r.get('/batches/groups', requirePermission('batches:view'), validate(listBatchesQuerySchema, 'query'), listBatchGroups);
 r.post('/batches/groups/delete-code', requirePermission('batches:manage'), requestBatchDeleteCode);
 r.post('/batches/groups/delete', requirePermission('batches:manage'), validate(batchDeleteSchema), deleteBatchGroup);
-r.get('/batches/:id', requirePermission('batches:view'), validate(idParamSchema, 'params'), getBatch);
+r.get('/batches/:id', requirePermission('batches:view'), validate(batchIdParamSchema, 'params'), getBatch);
 r.get(
   '/batches/:id/export',
   exportLimiter,
   requirePermission('batches:view'),
-  validate(idParamSchema, 'params'),
+  validate(batchIdParamSchema, 'params'),
   validate(batchExportQuerySchema, 'query'),
   exportBatch,
 );

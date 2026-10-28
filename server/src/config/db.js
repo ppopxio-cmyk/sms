@@ -2,7 +2,6 @@ import mongoose from 'mongoose';
 import { env } from './env.js';
 
 mongoose.set('strictQuery', true);
-mongoose.set('sanitizeFilter', true);
 
 export async function connectDB(uri = env.MONGODB_URI, maxRetries = 5) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {

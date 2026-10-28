@@ -7,6 +7,7 @@ const optionalText = (max = 200) => text(max).optional().default('');
 const date = z.coerce.date();
 
 export const idParamSchema = z.object({ id: objectId });
+export const batchIdParamSchema = z.object({ id: z.string().trim().min(1, 'Batch identifier is required.') });
 export const studentIdParamSchema = z.object({ studentId: objectId });
 
 // Ethiopian mobile numbers are stored in the international form (+251 9XX XXX XXX).

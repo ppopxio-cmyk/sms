@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Department, Program, Course, AcademicYear, AcademicTerm, CalendarEvent, Batch } from '../models/AcademicStructure.js';
 import { Student, Enrollment, ProgressionRecord } from '../models/Student.js';
 import { CurriculumPlan, CurriculumCourse } from '../models/Curriculum.js';
@@ -953,11 +954,23 @@ export const updateBatch = asyncHandler(async (req, res) => {
 });
 
 export const getBatch = asyncHandler(async (req, res) => {
-  const batch = await Batch.findById(req.valid.params.id)
-    .populate('program', 'code name qualificationType durationYears')
-    .populate('department', 'code name')
-    .populate('admissionAcademicYear', 'label startDate endDate')
-    .lean();
+  const paramId = req.valid.params.id;
+  const isObjectId = mongoose.isValidObjectId(paramId);
+  let batch = isObjectId
+    ? await Batch.findById(paramId)
+        .populate('program', 'code name qualificationType durationYears')
+        .populate('department', 'code name')
+        .populate('admissionAcademicYear', 'label startDate endDate')
+        .lean()
+    : null;
+
+  if (!batch) {
+    batch = await Batch.findOne({ code: paramId.toUpperCase() })
+      .populate('program', 'code name qualificationType durationYears')
+      .populate('department', 'code name')
+      .populate('admissionAcademicYear', 'label startDate endDate')
+      .lean();
+  }
   if (!batch) throw new AppError(404, 'BATCH_NOT_FOUND', 'That batch was not found.');
 
   // Find all batches sharing this code and category (the full batch group across all programmes)
@@ -1059,11 +1072,23 @@ export const getBatch = asyncHandler(async (req, res) => {
 });
 
 export const exportBatch = asyncHandler(async (req, res) => {
-  const batch = await Batch.findById(req.valid.params.id)
-    .populate('program', 'code name qualificationType')
-    .populate('department', 'code name')
-    .populate('admissionAcademicYear', 'label')
-    .lean();
+  const paramId = req.valid.params.id;
+  const isObjectId = mongoose.isValidObjectId(paramId);
+  let batch = isObjectId
+    ? await Batch.findById(paramId)
+        .populate('program', 'code name qualificationType')
+        .populate('department', 'code name')
+        .populate('admissionAcademicYear', 'label')
+        .lean()
+    : null;
+
+  if (!batch) {
+    batch = await Batch.findOne({ code: paramId.toUpperCase() })
+      .populate('program', 'code name qualificationType')
+      .populate('department', 'code name')
+      .populate('admissionAcademicYear', 'label')
+      .lean();
+  }
   if (!batch) throw new AppError(404, 'BATCH_NOT_FOUND', 'That batch was not found.');
 
   const groupBatches = await Batch.find({ code: batch.code, category: batch.category }).select('_id').lean();
