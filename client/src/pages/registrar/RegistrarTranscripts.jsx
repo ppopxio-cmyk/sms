@@ -525,12 +525,6 @@ function TranscriptDetailModal({ transcript, onClose, onDownload }) {
             <span>ID: <code className="font-mono text-slate-700">{transcript.verificationId}</code></span>
           </div>
           <div className="flex items-center gap-2">
-            <ExportMenu
-              basePath={`${REGISTRAR}/transcripts/${transcript.id}/export`}
-              filenamePrefix={`Transcript_${transcript.student?.studentId || transcript.id}`}
-              label="Export Record"
-              formats={['docx', 'xlsx']}
-            />
             <Button size="sm" variant="primary" onClick={handlePdf} loading={downloading}>
               <Download className="h-3.5 w-3.5" /> Download PDF
             </Button>

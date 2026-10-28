@@ -17,10 +17,17 @@ import {
   Search,
   ExternalLink,
   Ban,
+  ArrowLeft,
   ArrowRight,
+  Layers,
+  UsersRound,
+  Printer,
+  ChevronRight,
+  RefreshCw,
+  Plus,
 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
-import { REGISTRAR, displayDateTime, downloadFile } from '../../lib/registrar';
+import { REGISTRAR, displayDateTime } from '../../lib/registrar';
 import { formatEthiopian } from '../../lib/ethiopianDate';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
 import RegistrarTable from '../../components/registrar/RegistrarTable';
@@ -44,174 +51,171 @@ function downloadBlob(blob, filename) {
 
 export default function RegistrarIdCards() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState('issue'); // 'issue' | 'history'
 
-  // Cascaded Selection States for Issuing
-  const [selectedDeptId, setSelectedDeptId] = useState('');
-  const [selectedProgId, setSelectedProgId] = useState('');
-  const [selectedBatchId, setSelectedBatchId] = useState('');
-  const [selectedStudentId, setSelectedStudentId] = useState('');
-  const [notes, setNotes] = useState('');
+  // Selected Programme Cohort Slug State: null | { programId, batchId, programName, departmentName, batchCode }
+  const [openedCohort, setOpenedCohort] = useState(null);
+  const [slugSubTab, setSlugSubTab] = useState('students'); // 'students' | 'history'
 
-  // History Tab Filters
-  const [historyDept, setHistoryDept] = useState('');
-  const [historyProg, setHistoryProg] = useState('');
-  const [historyBatch, setHistoryBatch] = useState('');
-  const [historyPage, setHistoryPage] = useState(1);
-  const [appliedHistoryFilters, setAppliedHistoryFilters] = useState({});
+  // Selection Dropdown States for Root Overview
+  const [filterBatch, setFilterBatch] = useState('');
+  const [filterDept, setFilterDept] = useState('');
+  const [filterProg, setFilterProg] = useState('');
 
-  // Preview Modal States
+  // Single Student Actions / Preview Modal States
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewBlob, setPreviewBlob] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
-  const [previewTitle, setPreviewTitle] = useState('ID Card Preview');
-  const [previewing, setPreviewing] = useState(false);
+  const [previewTitle, setPreviewTitle] = useState('Student ID Card Preview');
+  const [previewingId, setPreviewingId] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
 
-  // Fetch filter options (departments, programmes, batches)
+  // Fetch all options (batches, departments, programs)
   const optionsQuery = useQuery({
     queryKey: ['registrar', 'students', 'options'],
     queryFn: async () => (await api.get(`${REGISTRAR}/students/options`)).data,
     staleTime: 5 * 60_000,
   });
 
+  const batches = optionsQuery.data?.batches || [];
   const departments = optionsQuery.data?.departments || [];
   const allPrograms = optionsQuery.data?.programs || [];
-  const allBatches = optionsQuery.data?.batches || [];
 
   // Filter programmes by selected department
   const filteredPrograms = useMemo(() => {
-    if (!selectedDeptId) return allPrograms;
-    return allPrograms.filter((p) => p.department === selectedDeptId);
-  }, [allPrograms, selectedDeptId]);
+    if (!filterDept) return allPrograms;
+    return allPrograms.filter((p) => p.department === filterDept);
+  }, [allPrograms, filterDept]);
 
-  // Filter batches by selected programme
-  const filteredBatches = useMemo(() => {
-    if (!selectedProgId) return allBatches;
-    return allBatches.filter((b) => b.program === selectedProgId);
-  }, [allBatches, selectedProgId]);
+  // Cohort Cards: derived from batches and programs
+  const cohortCards = useMemo(() => {
+    const list = [];
+    for (const b of batches) {
+      if (filterBatch && b.id !== filterBatch && b.code !== filterBatch) continue;
+      for (const p of allPrograms) {
+        if (filterDept && p.department !== filterDept) continue;
+        if (filterProg && p.id !== filterProg) continue;
+        if (b.program && b.program !== p.id) continue;
 
-  // Query students matching selected batch and programme
-  const studentsQuery = useQuery({
-    queryKey: ['registrar', 'id-cards-students', selectedDeptId, selectedProgId, selectedBatchId],
+        const dept = departments.find((d) => d.id === p.department) || { name: 'Department' };
+        list.push({
+          id: `${p.id}_${b.id}`,
+          programId: p.id,
+          batchId: b.id,
+          programName: p.name,
+          programCode: p.code,
+          qualificationType: p.qualificationType,
+          departmentName: dept.name,
+          departmentId: dept.id,
+          batchCode: b.code,
+          batchName: b.name,
+          category: b.category || 'regular',
+        });
+      }
+    }
+    return list;
+  }, [batches, allPrograms, departments, filterBatch, filterDept, filterProg]);
+
+  // Query Programme Cohort Summary when a programme is opened
+  const cohortSummaryQuery = useQuery({
+    queryKey: ['registrar', 'id-cards-cohort-summary', openedCohort?.programId, openedCohort?.batchId],
     queryFn: async () => {
-      const params = {
-        limit: 100,
-        ...(selectedProgId ? { program: selectedProgId } : {}),
-        ...(selectedDeptId ? { department: selectedDeptId } : {}),
-        ...(selectedBatchId ? { batch: selectedBatchId } : {}),
-      };
-      return (await api.get(`${REGISTRAR}/students`, { params })).data;
+      const res = await api.get(`${REGISTRAR}/id-cards/cohort-summary`, {
+        params: {
+          programId: openedCohort.programId,
+          batchId: openedCohort.batchId,
+        },
+      });
+      return res.data;
     },
-    enabled: Boolean(selectedProgId || selectedBatchId),
+    enabled: Boolean(openedCohort?.programId && openedCohort?.batchId),
   });
 
-  const studentsList = studentsQuery.data?.rows || [];
+  const cohortData = cohortSummaryQuery.data;
+  const students = cohortData?.students || [];
+  const history = cohortData?.history || [];
+  const totalStudents = cohortData?.totalStudents || 0;
+  const photoCount = cohortData?.photoCount || 0;
+  const issuedCount = cohortData?.issuedCount || 0;
+  const allHavePhotos = Boolean(cohortData?.allHavePhotos);
+  const allIssued = Boolean(cohortData?.allIssued);
 
-  // Query selected student card eligibility
-  const eligibilityQuery = useQuery({
-    queryKey: ['registrar', 'id-card-eligibility', selectedStudentId],
-    queryFn: async () => (await api.get(`${REGISTRAR}/id-cards/student/${selectedStudentId}`)).data,
-    enabled: Boolean(selectedStudentId),
-  });
-
-  const eligibility = eligibilityQuery.data;
-  const currentStudent = eligibility?.student;
-  const issueCount = eligibility?.issueCount ?? 0;
-  const hasPhoto = Boolean(eligibility?.hasPhoto);
-  const canIssue = Boolean(eligibility?.canIssue);
-
-  // Mutation: Issue Student ID Card
+  // Mutation: Issue / Reissue ID Card for a single student
   const issueMutation = useMutation({
-    mutationFn: async () => {
-      return (
-        await api.post(`${REGISTRAR}/id-cards/issue`, {
-          studentId: selectedStudentId,
-          notes,
-        })
-      ).data;
+    mutationFn: async ({ studentId, notes }) => {
+      return (await api.post(`${REGISTRAR}/id-cards/issue`, { studentId, notes })).data;
     },
     onSuccess: (data) => {
       toast.success(data.message || 'Student ID Card issued successfully!');
-      queryClient.invalidateQueries({ queryKey: ['registrar', 'id-card-eligibility'] });
-      queryClient.invalidateQueries({ queryKey: ['registrar', 'id-cards-history'] });
-      setNotes('');
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'id-cards-cohort-summary'] });
     },
     onError: (err) => {
       toast.error(errorMessage(err, 'Failed to issue student ID card.'));
     },
   });
 
-  // Query ID Cards History
-  const historyQuery = useQuery({
-    queryKey: ['registrar', 'id-cards-history', appliedHistoryFilters, historyPage],
-    queryFn: async () => {
-      const params = {
-        page: historyPage,
-        limit: 20,
-        ...appliedHistoryFilters,
-      };
-      return (await api.get(`${REGISTRAR}/id-cards`, { params })).data;
-    },
-    enabled: activeTab === 'history',
-  });
-
-  const historyRows = historyQuery.data?.rows || [];
-  const historyTotal = historyQuery.data?.total || 0;
-  const historyPages = Math.ceil(historyTotal / 20) || 1;
-
-  // Handle Preview ID Card (Calls preview endpoint without issuing)
-  const handlePreviewCurrent = async () => {
-    if (!selectedStudentId) return;
-    setPreviewing(true);
+  // Handle Single Student Preview (Modal iframe)
+  const handlePreviewStudent = async (student) => {
+    setPreviewingId(student.id);
     try {
       const res = await api.post(
         `${REGISTRAR}/id-cards/preview`,
-        { studentId: selectedStudentId },
+        { studentId: student.id },
         { responseType: 'blob' },
       );
       const blob = new Blob([res.data], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setPreviewBlob(blob);
       setPreviewUrl(url);
-      setPreviewTitle(`Student ID Card Preview · ${currentStudent?.fullName || 'Student'}`);
+      setPreviewTitle(`ID Card Preview · ${student.fullName} (${student.studentId})`);
       setPreviewOpen(true);
     } catch (err) {
       toast.error(errorMessage(err, 'Could not generate ID card preview.'));
     } finally {
-      setPreviewing(false);
+      setPreviewingId(null);
     }
   };
 
-  // Handle View from History
-  const handleViewHistoryCard = async (row) => {
-    setDownloadingId(row.id);
+  // Handle Single Student Direct Download
+  const handleDownloadStudent = async (student) => {
+    setDownloadingId(student.id);
     try {
-      const res = await api.get(`${REGISTRAR}/id-cards/${row.id}/pdf`, { responseType: 'blob' });
-      const blob = new Blob([res.data], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      setPreviewBlob(blob);
-      setPreviewUrl(url);
-      setPreviewTitle(`Official ID Card #${row.issueNumber} · ${row.studentSnapshot?.fullName || ''}`);
-      setPreviewOpen(true);
-    } catch (err) {
-      toast.error(errorMessage(err, 'Could not load ID card PDF.'));
-    } finally {
-      setDownloadingId(null);
-    }
-  };
-
-  // Handle Direct Download from History
-  const handleDownloadHistoryCard = async (row) => {
-    setDownloadingId(row.id);
-    try {
-      const res = await api.get(`${REGISTRAR}/id-cards/${row.id}/pdf`, { responseType: 'blob' });
-      downloadBlob(res.data, `ID_Card_${row.studentSnapshot?.studentId || row.id}.pdf`);
+      if (student.latestCard?.id) {
+        const res = await api.get(`${REGISTRAR}/id-cards/${student.latestCard.id}/pdf`, { responseType: 'blob' });
+        downloadBlob(res.data, `ID_Card_${student.studentId || student.fullName}.pdf`);
+      } else {
+        const res = await api.post(`${REGISTRAR}/id-cards/preview`, { studentId: student.id }, { responseType: 'blob' });
+        downloadBlob(res.data, `ID_Card_${student.studentId || student.fullName}.pdf`);
+      }
       toast.success('ID Card PDF downloaded.');
     } catch (err) {
       toast.error(errorMessage(err, 'Could not download ID card PDF.'));
     } finally {
       setDownloadingId(null);
+    }
+  };
+
+  // Handle Bulk Download of All Students' IDs in 1 PDF (Landscape View)
+  const handleBulkDownload = async () => {
+    if (!openedCohort) return;
+    setBulkDownloading(true);
+    try {
+      const res = await api.get(`${REGISTRAR}/id-cards/bulk-pdf`, {
+        params: {
+          programId: openedCohort.programId,
+          batchId: openedCohort.batchId,
+        },
+        responseType: 'blob',
+      });
+      downloadBlob(
+        res.data,
+        `All_IDs_Landscape_${openedCohort.programCode || 'PROG'}_${openedCohort.batchCode || '2019'}.pdf`,
+      );
+      toast.success('All student ID cards generated in 1 landscape PDF!');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not generate bulk landscape ID cards PDF.'));
+    } finally {
+      setBulkDownloading(false);
     }
   };
 
@@ -222,71 +226,170 @@ export default function RegistrarIdCards() {
     setPreviewOpen(false);
   };
 
-  // Table Columns for Issued ID Cards History
-  const historyColumns = [
+  // Columns for Students Table in Cohort Slug View
+  const studentColumns = [
     {
-      key: 'student',
-      label: 'Student',
+      key: 'photo',
+      label: 'Photo',
       render: (row) => (
-        <div className="flex items-center gap-3">
-          {row.studentSnapshot?.photo?.url || row.student?.photo?.url ? (
+        <div className="flex items-center gap-2">
+          {row.photo?.url ? (
             <img
-              src={row.studentSnapshot?.photo?.url || row.student?.photo?.url}
+              src={row.photo.url}
               alt=""
-              className="h-10 w-10 rounded-full object-cover ring-1 ring-slate-200"
+              className="h-10 w-10 rounded-full object-cover ring-2 ring-emerald-500 shadow-sm"
             />
           ) : (
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-500">
-              {row.studentSnapshot?.fullName?.charAt(0) || 'S'}
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-400 ring-1 ring-slate-200">
+              <Camera className="h-4 w-4" />
             </div>
           )}
-          <div>
-            <p className="text-sm font-bold text-slate-900">{row.studentSnapshot?.fullName || '—'}</p>
-            <p className="text-xs font-mono text-slate-500">{row.studentSnapshot?.studentId || '—'}</p>
-          </div>
         </div>
       ),
     },
     {
-      key: 'program',
-      label: 'Programme & Batch',
+      key: 'student',
+      label: 'Student Details',
       render: (row) => (
         <div>
-          <p className="text-xs font-semibold text-slate-800">{row.studentSnapshot?.programName || '—'}</p>
-          <p className="text-[11px] text-slate-500">
-            {row.studentSnapshot?.departmentName} · Batch {row.studentSnapshot?.batchCode}
-          </p>
+          <p className="text-sm font-bold text-slate-900">{row.fullName}</p>
+          <p className="text-xs font-mono text-slate-500">{row.studentId}</p>
         </div>
       ),
+    },
+    {
+      key: 'level',
+      label: 'Level / Stage',
+      render: (row) => <Badge tone="neutral">Stage / Year {row.level}</Badge>,
+    },
+    {
+      key: 'cardStatus',
+      label: 'ID Card Status',
+      render: (row) => (
+        <div>
+          {row.issueCount > 0 ? (
+            <Badge tone="success">
+              Issue #{row.issueCount} of 4
+            </Badge>
+          ) : (
+            <Badge tone="neutral">Not Issued</Badge>
+          )}
+          {row.latestCard?.issuedAt && (
+            <p className="text-[10px] text-slate-400 mt-0.5">
+              {formatEthiopian(row.latestCard.issuedAt)}
+            </p>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'photoStatus',
+      label: 'Photo Status',
+      render: (row) => (
+        <span
+          className={`inline-flex items-center gap-1 text-xs font-medium ${
+            row.hasPhoto ? 'text-emerald-700' : 'text-amber-700'
+          }`}
+        >
+          {row.hasPhoto ? (
+            <>
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> Uploaded
+            </>
+          ) : (
+            <>
+              <AlertCircle className="h-3.5 w-3.5 text-amber-600" /> Missing Photo
+            </>
+          )}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      className: 'text-right',
+      mobileFull: true,
+      render: (row) => (
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => handlePreviewStudent(row)}
+            loading={previewingId === row.id}
+            disabled={!row.hasPhoto}
+            title={row.hasPhoto ? 'Preview ID Card' : 'Photo required for preview'}
+            className="text-xs text-indigo-700 hover:bg-indigo-50"
+          >
+            <Eye className="h-3.5 w-3.5" /> Preview
+          </Button>
+
+          {row.issueCount >= 4 ? (
+            <span className="rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800 border border-amber-200">
+              Limit (4/4)
+            </span>
+          ) : (
+            <Button
+              size="sm"
+              variant={row.issueCount > 0 ? 'secondary' : 'primary'}
+              onClick={() => issueMutation.mutate({ studentId: row.id })}
+              loading={issueMutation.isPending && issueMutation.variables?.studentId === row.id}
+              disabled={!row.hasPhoto}
+              className="gap-1 text-xs font-bold"
+            >
+              <CreditCard className="h-3.5 w-3.5" />
+              {row.issueCount > 0 ? `Reissue (${row.issueCount + 1}/4)` : 'Issue ID'}
+            </Button>
+          )}
+
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => handleDownloadStudent(row)}
+            loading={downloadingId === row.id}
+            disabled={!row.hasPhoto}
+            className="gap-1 text-xs"
+          >
+            <Download className="h-3.5 w-3.5 text-slate-600" /> PDF
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  // Columns for History Table in Cohort Slug View
+  const historyColumns = [
+    {
+      key: 'studentId',
+      label: 'Student ID',
+      render: (row) => <span className="font-mono text-xs font-bold text-slate-800">{row.studentId}</span>,
+    },
+    {
+      key: 'fullName',
+      label: 'Student Name',
+      render: (row) => <span className="text-xs font-bold text-slate-900">{row.fullName}</span>,
     },
     {
       key: 'issueNumber',
       label: 'Issuance Counter',
-      render: (row) => (
-        <Badge tone={row.issueNumber >= 4 ? 'danger' : row.issueNumber >= 2 ? 'warning' : 'brand'}>
-          Issue #{row.issueNumber} of 4
-        </Badge>
-      ),
+      render: (row) => <Badge tone="brand">Issue #{row.issueNumber} of 4</Badge>,
     },
     {
       key: 'promotions',
-      label: 'Promotion Record',
+      label: 'Promoted Stages',
       render: (row) => {
         const stages = row.promotedStages || [];
         return (
-          <div className="flex flex-wrap items-center gap-1">
+          <div className="flex flex-wrap gap-1">
             {stages.length > 0 ? (
               stages.map((st) => (
                 <span
                   key={st}
-                  className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 border border-emerald-200"
+                  className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 border border-emerald-200"
                 >
-                  <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                  Stage {st}
+                  ✓ Year {st}
                 </span>
               ))
             ) : (
-              <span className="text-xs text-slate-400">Initial Admission (Stage 1)</span>
+              <span className="text-xs text-slate-400">Year 1</span>
             )}
           </div>
         );
@@ -294,11 +397,11 @@ export default function RegistrarIdCards() {
     },
     {
       key: 'issuedAt',
-      label: 'Issued At',
+      label: 'Issued Date',
       render: (row) => (
         <div>
           <p className="text-xs text-slate-800">{displayDateTime(row.issuedAt)}</p>
-          <p className="text-[11px] text-slate-500">{formatEthiopian(row.issuedAt)}</p>
+          <p className="text-[10px] text-slate-400">{formatEthiopian(row.issuedAt)}</p>
         </div>
       ),
     },
@@ -308,26 +411,16 @@ export default function RegistrarIdCards() {
       className: 'text-right',
       mobileFull: true,
       render: (row) => (
-        <div className="flex items-center justify-end gap-1.5">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => handleViewHistoryCard(row)}
-            loading={downloadingId === row.id}
-            title="Preview ID Card PDF"
-          >
-            <Eye className="h-3.5 w-3.5 text-slate-600" />
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => handleDownloadHistoryCard(row)}
-            loading={downloadingId === row.id}
-            className="gap-1 text-xs"
-          >
-            <Download className="h-3.5 w-3.5" /> PDF
-          </Button>
-        </div>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => {
+            handleDownloadStudent({ id: row.student, latestCard: { id: row.id }, studentId: row.studentId, fullName: row.fullName, hasPhoto: true });
+          }}
+          className="gap-1 text-xs"
+        >
+          <Download className="h-3.5 w-3.5" /> Download PDF
+        </Button>
       ),
     },
   ];
@@ -336,407 +429,45 @@ export default function RegistrarIdCards() {
     <div className="space-y-6">
       <RegistrarPageHeader
         title="Student ID Cards Management"
-        subtitle="Prepare, preview and issue official 2-sided PVC student identity cards with verified academic promotion seals. Strictly requires an uploaded portrait photo; limited to a maximum of 4 issuances per student."
+        subtitle="Select batch, department, and programme to enter the Programme ID Hub. Issue individual ID cards, preview official 2-sided CR80 cards, and print all student IDs in one bulk landscape PDF."
       />
 
-      {/* Main Mode Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
-        <button
-          type="button"
-          onClick={() => setActiveTab('issue')}
-          className={`focus-ring inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition ${
-            activeTab === 'issue'
-              ? 'bg-brand-600 text-white shadow-sm ring-2 ring-brand-400'
-              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-          }`}
-        >
-          <CreditCard className="h-4 w-4" />
-          <span>Issue Student ID Card</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('history')}
-          className={`focus-ring inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition ${
-            activeTab === 'history'
-              ? 'bg-slate-800 text-white shadow-sm ring-2 ring-slate-600'
-              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-          }`}
-        >
-          <History className="h-4 w-4" />
-          <span>Issued ID Cards History</span>
-        </button>
-      </div>
-
       {/* =========================================================================
-          TAB 1: ISSUE STUDENT ID CARD
+          VIEW 1: ROOT SELECTION & PROGRAMME COHORT CARDS (When no cohort opened)
           ========================================================================= */}
-      {activeTab === 'issue' && (
-        <div className="grid gap-6 lg:grid-cols-12">
-          {/* Left Column: Cascaded Selector (5 Cols) */}
-          <div className="space-y-5 lg:col-span-5">
-            <Card>
-              <CardHeader
-                title="1. Select Student"
-                subtitle="Choose the department, programme, batch, and target student."
-                icon={Search}
-              />
-              <CardBody className="space-y-4">
-                {/* Department Select */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Department
-                  </label>
-                  <select
-                    value={selectedDeptId}
-                    onChange={(e) => {
-                      setSelectedDeptId(e.target.value);
-                      setSelectedProgId('');
-                      setSelectedBatchId('');
-                      setSelectedStudentId('');
-                    }}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                  >
-                    <option value="">-- Choose Department --</option>
-                    {departments.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name} ({d.code})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Programme Select */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Programme
-                  </label>
-                  <select
-                    value={selectedProgId}
-                    onChange={(e) => {
-                      setSelectedProgId(e.target.value);
-                      setSelectedBatchId('');
-                      setSelectedStudentId('');
-                    }}
-                    disabled={!selectedDeptId && filteredPrograms.length === 0}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:bg-slate-50 disabled:text-slate-400"
-                  >
-                    <option value="">-- Choose Programme --</option>
-                    {filteredPrograms.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.qualificationType?.toUpperCase()})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Batch Select */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Batch
-                  </label>
-                  <select
-                    value={selectedBatchId}
-                    onChange={(e) => {
-                      setSelectedBatchId(e.target.value);
-                      setSelectedStudentId('');
-                    }}
-                    disabled={!selectedProgId && filteredBatches.length === 0}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:bg-slate-50 disabled:text-slate-400"
-                  >
-                    <option value="">-- Choose Batch --</option>
-                    {filteredBatches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name} ({b.code})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Student Select */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Student
-                  </label>
-                  <select
-                    value={selectedStudentId}
-                    onChange={(e) => setSelectedStudentId(e.target.value)}
-                    disabled={studentsList.length === 0}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:bg-slate-50 disabled:text-slate-400"
-                  >
-                    <option value="">
-                      {studentsList.length === 0
-                        ? '-- No students loaded --'
-                        : `-- Choose Student (${studentsList.length} found) --`}
-                    </option>
-                    {studentsList.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.fullName} · {s.studentId} {s.photo?.url ? '✓ Photo' : '⚠️ No Photo'}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Optional Registrar Notes */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Issuance Reason / Notes (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Regular first issuance, Replacement of lost card..."
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                  />
-                </div>
-              </CardBody>
-            </Card>
-
-            {/* Policy Reminder Card */}
-            <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4 text-xs leading-relaxed text-blue-900 shadow-sm">
-              <p className="flex items-center gap-2 font-bold text-blue-950">
-                <ShieldCheck className="h-4 w-4 text-brand-600" /> ID Card Issuance Safeguards
-              </p>
-              <ul className="mt-2 list-inside list-disc space-y-1 text-blue-800">
-                <li>
-                  <strong>Portrait Photo Mandatory:</strong> An ID card cannot be prepared or issued without an official portrait photograph.
-                </li>
-                <li>
-                  <strong>Strict 4-Issue Limit:</strong> Each student is limited to at most 4 ID card issuances throughout their institutional enrollment.
-                </li>
-                <li>
-                  <strong>Academic Promotion Slots:</strong> The back of the card features official Registrar stamps for verified promotions, or blank lines for uncompleted stages.
-                </li>
-              </ul>
+      {!openedCohort ? (
+        <div className="space-y-5">
+          {/* Cascaded Filter Bar */}
+          <div className="grid gap-3 sm:grid-cols-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                Batch
+              </label>
+              <select
+                value={filterBatch}
+                onChange={(e) => setFilterBatch(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              >
+                <option value="">All Batches</option>
+                {batches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} ({b.code})
+                  </option>
+                ))}
+              </select>
             </div>
-          </div>
 
-          {/* Right Column: Live Card Preview & Issuance Controls (7 Cols) */}
-          <div className="space-y-5 lg:col-span-7">
-            {!selectedStudentId ? (
-              <Card>
-                <CardBody className="py-20 text-center">
-                  <CreditCard className="mx-auto h-16 w-16 text-slate-300" />
-                  <h3 className="mt-4 text-base font-bold text-slate-800">
-                    No Student Selected
-                  </h3>
-                  <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
-                    Select a department, programme, batch, and student from the left panel to inspect eligibility, preview the ID card, and issue it.
-                  </p>
-                </CardBody>
-              </Card>
-            ) : eligibilityQuery.isLoading ? (
-              <Card>
-                <CardBody className="py-20 text-center">
-                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
-                  <p className="mt-3 text-xs text-slate-500">Checking student eligibility...</p>
-                </CardBody>
-              </Card>
-            ) : (
-              <div className="space-y-5">
-                {/* Eligibility Status Banner */}
-                <div
-                  className={`rounded-2xl border p-5 shadow-sm transition ${
-                    !hasPhoto
-                      ? 'border-rose-300 bg-rose-50/70 text-rose-900'
-                      : issueCount >= 4
-                      ? 'border-amber-300 bg-amber-50/70 text-amber-900'
-                      : 'border-emerald-300 bg-emerald-50/70 text-emerald-900'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3">
-                      {!hasPhoto ? (
-                        <AlertCircle className="h-6 w-6 text-rose-600 shrink-0 mt-0.5" />
-                      ) : issueCount >= 4 ? (
-                        <Ban className="h-6 w-6 text-amber-600 shrink-0 mt-0.5" />
-                      ) : (
-                        <CheckCircle2 className="h-6 w-6 text-emerald-600 shrink-0 mt-0.5" />
-                      )}
-                      <div>
-                        <h4 className="text-sm font-bold">
-                          {!hasPhoto
-                            ? 'Action Blocked: Student Photo Required'
-                            : issueCount >= 4
-                            ? 'Issuance Limit Reached (4 of 4)'
-                            : `Eligible for ID Card Issuance (Issue #${issueCount + 1} of 4)`}
-                        </h4>
-                        <p className="text-xs mt-1 leading-relaxed opacity-90">
-                          {!hasPhoto ? (
-                            <span>
-                              This student has no uploaded photo. System policy forbids preparing or issuing an ID card without a verified portrait picture.
-                            </span>
-                          ) : issueCount >= 4 ? (
-                            <span>
-                              This student has already reached the institutional maximum of 4 ID card issuances. No additional cards can be printed.
-                            </span>
-                          ) : (
-                            <span>
-                              Student photo is verified, and the student has {4 - issueCount} issuance(s) remaining. You can preview and issue the official card below.
-                            </span>
-                          )}
-                        </p>
-                      </div>
-                    </div>
-
-                    <Badge
-                      tone={
-                        !hasPhoto ? 'danger' : issueCount >= 4 ? 'warning' : 'success'
-                      }
-                    >
-                      Issue #{issueCount + 1} of 4
-                    </Badge>
-                  </div>
-
-                  {!hasPhoto && (
-                    <div className="mt-3 pt-3 border-t border-rose-200 flex items-center justify-between">
-                      <span className="text-[11px] text-rose-800">
-                        Upload a photo on the student's profile page to unblock ID issuance.
-                      </span>
-                      <Link
-                        to={`/registrar/students/${selectedStudentId}`}
-                        className="inline-flex items-center gap-1 text-xs font-bold text-rose-700 hover:text-rose-900 underline"
-                      >
-                        Open Profile <ExternalLink className="h-3 w-3" />
-                      </Link>
-                    </div>
-                  )}
-                </div>
-
-                {/* ID Card Visual Preview Card */}
-                <Card className="overflow-hidden border border-slate-200">
-                  <CardHeader
-                    title="2. Card Verification Details"
-                    subtitle="Front and Back snapshot information to be rendered onto the CR80 card."
-                    icon={CreditCard}
-                    action={
-                      <Badge tone="brand">
-                        Level/Year {currentStudent?.level || 1}
-                      </Badge>
-                    }
-                  />
-                  <CardBody className="space-y-5">
-                    {/* Front-of-card preview representation */}
-                    <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-900 to-indigo-950 p-5 text-white shadow-md">
-                      <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                        <div className="flex items-center gap-2">
-                          <Building2 className="h-4 w-4 text-indigo-400" />
-                          <span className="text-xs font-bold tracking-wider uppercase text-indigo-200">
-                            Higher Education Institution · Student ID
-                          </span>
-                        </div>
-                        <span className="rounded bg-white/20 px-2 py-0.5 text-[10px] font-bold">
-                          Issue #{issueCount + 1} of 4
-                        </span>
-                      </div>
-
-                      <div className="mt-4 flex items-center gap-4">
-                        {currentStudent?.photo?.url ? (
-                          <img
-                            src={currentStudent.photo.url}
-                            alt=""
-                            className="h-20 w-16 rounded-lg object-cover ring-2 ring-white/30 shadow"
-                          />
-                        ) : (
-                          <div className="flex h-20 w-16 items-center justify-center rounded-lg bg-white/10 text-white/40 ring-1 ring-white/20">
-                            <Camera className="h-8 w-8" />
-                          </div>
-                        )}
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <p className="text-base font-extrabold text-white truncate">
-                            {currentStudent?.fullName}
-                          </p>
-                          <p className="text-xs font-mono text-indigo-300">
-                            ID: {currentStudent?.studentId}
-                          </p>
-                          <p className="text-xs text-slate-300">
-                            {currentStudent?.program?.name || 'Programme'}
-                          </p>
-                          <p className="text-[11px] text-slate-400">
-                            Dept: {currentStudent?.department?.name || 'Department'} · Batch: {currentStudent?.batch?.code || '2019'}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Back-of-card Promotion Records */}
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5 mb-3">
-                        <GraduationCap className="h-4 w-4 text-brand-600" />
-                        Academic Promotion Endorsements (Back of Card)
-                      </p>
-                      <div className="space-y-2">
-                        {[1, 2, 3, 4].map((stageNum) => {
-                          const isPromoted = stageNum < (currentStudent?.level || 1);
-                          return (
-                            <div
-                              key={stageNum}
-                              className="flex items-center justify-between rounded-xl bg-white p-2.5 border border-slate-200 text-xs"
-                            >
-                              <span className="font-bold text-slate-800">
-                                Stage / Year {stageNum}
-                              </span>
-                              {isPromoted ? (
-                                <span className="inline-flex items-center gap-1 font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                                  [ ✓ PROMOTED · REGISTRAR APPROVED ]
-                                </span>
-                              ) : (
-                                <span className="font-mono text-slate-400 tracking-widest">
-                                  ______________________
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
-                      <Button
-                        variant="secondary"
-                        onClick={handlePreviewCurrent}
-                        loading={previewing}
-                        disabled={!hasPhoto}
-                        className="gap-1.5 text-xs font-bold"
-                      >
-                        <Eye className="h-4 w-4 text-indigo-600" /> Preview ID Card PDF
-                      </Button>
-
-                      <Button
-                        onClick={() => issueMutation.mutate()}
-                        loading={issueMutation.isPending}
-                        disabled={!canIssue}
-                        className="gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs shadow-sm"
-                      >
-                        <CreditCard className="h-4 w-4" /> Issue Official ID Card (#{issueCount + 1} of 4)
-                      </Button>
-                    </div>
-                  </CardBody>
-                </Card>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* =========================================================================
-          TAB 2: ISSUED ID CARDS HISTORY
-          ========================================================================= */}
-      {activeTab === 'history' && (
-        <div className="space-y-4">
-          {/* Filters Bar with "Show Cards" Button */}
-          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="w-full sm:w-48">
+            <div>
               <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
                 Department
               </label>
               <select
-                value={historyDept}
-                onChange={(e) => setHistoryDept(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                value={filterDept}
+                onChange={(e) => {
+                  setFilterDept(e.target.value);
+                  setFilterProg('');
+                }}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
               >
                 <option value="">All Departments</option>
                 {departments.map((d) => (
@@ -747,17 +478,18 @@ export default function RegistrarIdCards() {
               </select>
             </div>
 
-            <div className="w-full sm:w-48">
+            <div>
               <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
                 Programme
               </label>
               <select
-                value={historyProg}
-                onChange={(e) => setHistoryProg(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                value={filterProg}
+                onChange={(e) => setFilterProg(e.target.value)}
+                disabled={!filterDept && filteredPrograms.length === 0}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:bg-slate-50 disabled:text-slate-400"
               >
                 <option value="">All Programmes</option>
-                {allPrograms.map((p) => (
+                {filteredPrograms.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
                   </option>
@@ -765,91 +497,262 @@ export default function RegistrarIdCards() {
               </select>
             </div>
 
-            <div className="w-full sm:w-48">
-              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                Batch
-              </label>
-              <select
-                value={historyBatch}
-                onChange={(e) => setHistoryBatch(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              >
-                <option value="">All Batches</option>
-                {allBatches.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name} ({b.code})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="ml-auto mt-auto flex items-center gap-2 pt-4 sm:pt-0">
+            <div className="flex items-end justify-end">
               <Button
                 variant="secondary"
                 size="sm"
                 onClick={() => {
-                  setHistoryDept('');
-                  setHistoryProg('');
-                  setHistoryBatch('');
-                  setAppliedHistoryFilters({});
-                  setHistoryPage(1);
+                  setFilterBatch('');
+                  setFilterDept('');
+                  setFilterProg('');
                 }}
-                className="text-xs"
+                className="w-full text-xs"
               >
-                Reset
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => {
-                  setHistoryPage(1);
-                  setAppliedHistoryFilters({
-                    ...(historyDept ? { department: historyDept } : {}),
-                    ...(historyProg ? { program: historyProg } : {}),
-                    ...(historyBatch ? { batch: historyBatch } : {}),
-                  });
-                }}
-                className="gap-1.5 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs"
-              >
-                <Search className="h-3.5 w-3.5" /> Show Cards
+                Reset Filters
               </Button>
             </div>
           </div>
 
-          {/* Issued ID Cards Table */}
-          <Card>
-            <CardHeader
-              title="Official Issued Student ID Cards"
-              subtitle={`${historyTotal} ID card record(s) issued and recorded in the audit trail.`}
-              icon={History}
-            />
-            <RegistrarTable
-              columns={historyColumns}
-              rows={historyRows}
-              loading={historyQuery.isFetching}
-              rowKey={(row) => row.id}
-              emptyTitle="No ID Cards Issued"
-              emptyMessage="No student ID cards have been issued yet with the current filter criteria."
-            />
-            {historyPages > 1 && (
-              <div className="border-t border-slate-100 p-4">
-                <Pagination
-                  page={historyPage}
-                  pages={historyPages}
-                  onPageChange={setHistoryPage}
-                />
+          {/* Programme Cohorts Grid */}
+          <div>
+            <h2 className="text-base font-bold text-slate-900 mb-1">
+              Select Programme to Open ID Hub
+            </h2>
+            <p className="text-xs text-slate-500 mb-4">
+              Click on any programme cohort below to open its dedicated slug workbench, list students, and manage ID cards.
+            </p>
+
+            {cohortCards.length === 0 ? (
+              <Card>
+                <CardBody className="py-12 text-center">
+                  <CreditCard className="mx-auto h-12 w-12 text-slate-300" />
+                  <h3 className="mt-3 text-sm font-semibold text-slate-800">
+                    No Programme Cohorts Found
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
+                    Adjust the filter selections above to find active programme and batch cohorts.
+                  </p>
+                </CardBody>
+              </Card>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {cohortCards.map((cohort) => (
+                  <Card
+                    key={cohort.id}
+                    className="group flex flex-col justify-between overflow-hidden border border-slate-200 transition hover:border-brand-400 hover:shadow-md"
+                  >
+                    <div className="p-5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-2.5 py-1 text-xs font-bold text-brand-800">
+                          <Building2 className="h-3.5 w-3.5 text-brand-600" />
+                          {cohort.departmentName}
+                        </span>
+                        <Badge tone={cohort.category === 'extension' ? 'warning' : 'neutral'}>
+                          {cohort.batchCode}
+                        </Badge>
+                      </div>
+
+                      <h3 className="mt-3 text-base font-bold text-slate-900 group-hover:text-brand-700 transition">
+                        {cohort.programName}
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {cohort.qualificationType?.toUpperCase()} · Batch: {cohort.batchName}
+                      </p>
+                    </div>
+
+                    <div className="border-t border-slate-100 bg-slate-50/80 p-4">
+                      <Button
+                        onClick={() => {
+                          setOpenedCohort(cohort);
+                          setSlugSubTab('students');
+                        }}
+                        className="w-full gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs"
+                      >
+                        <CreditCard className="h-4 w-4" /> Open Programme ID Hub
+                        <ChevronRight className="h-4 w-4 ml-auto" />
+                      </Button>
+                    </div>
+                  </Card>
+                ))}
               </div>
             )}
-          </Card>
+          </div>
+        </div>
+      ) : (
+        /* =========================================================================
+            VIEW 2: PROGRAMME SLUG HUB (When a programme cohort is opened)
+            ========================================================================= */
+        <div className="space-y-5">
+          {/* Top Bar with Back Button */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setOpenedCohort(null)}
+              className="gap-1.5 text-xs font-semibold"
+            >
+              <ArrowLeft className="h-4 w-4" /> Back to Programme Selection
+            </Button>
+            <div className="flex items-center gap-2">
+              <Badge tone="brand">
+                {openedCohort.departmentName} · {openedCohort.programName}
+              </Badge>
+              <Badge tone="neutral">
+                Batch: {openedCohort.batchCode} ({openedCohort.category})
+              </Badge>
+            </div>
+          </div>
+
+          {/* Top Information / Notification Banners */}
+          {allIssued && totalStudents > 0 && (
+            <div className="flex items-center gap-3 rounded-2xl border border-emerald-300 bg-emerald-50/80 p-4 text-xs font-semibold text-emerald-900 shadow-sm">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+              <span>
+                ✓ All <strong>{totalStudents}</strong> students in this programme have active official ID cards issued!
+              </span>
+            </div>
+          )}
+
+          {allHavePhotos && totalStudents > 0 ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-teal-300 bg-gradient-to-r from-teal-50 to-blue-50 p-4 text-xs text-teal-950 shadow-sm">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-white shadow-sm">
+                  <Printer className="h-5 w-5" />
+                </span>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">
+                    Bulk Print Ready: All Students Have Verified Photos!
+                  </h4>
+                  <p className="text-slate-600 mt-0.5">
+                    Generate all {totalStudents} students' 2-sided CR80 ID cards onto A4 Landscape sheets ready for immediate mass printing.
+                  </p>
+                </div>
+              </div>
+
+              <Button
+                onClick={handleBulkDownload}
+                loading={bulkDownloading}
+                className="gap-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-sm"
+              >
+                <Download className="h-4 w-4" /> Generate All Student IDs in 1 PDF (Landscape View)
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50/70 p-4 text-xs text-amber-900 shadow-sm">
+              <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
+              <span>
+                <strong>{photoCount} of {totalStudents}</strong> students have uploaded photos.{' '}
+                {totalStudents - photoCount} student(s) still require a portrait photo before bulk landscape generation is unlocked.
+              </span>
+            </div>
+          )}
+
+          {/* Counter Summary Stats Cards */}
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Enrolled</p>
+              <p className="text-2xl font-black text-slate-900 mt-1">{totalStudents}</p>
+              <p className="text-[11px] text-slate-500">Students in this cohort</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">IDs Issued</p>
+              <p className="text-2xl font-black text-emerald-700 mt-1">
+                {issuedCount} / {totalStudents}
+              </p>
+              <p className="text-[11px] text-slate-500">
+                {allIssued ? '100% Issued' : `${totalStudents - issuedCount} remaining`}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Photos Uploaded</p>
+              <p className="text-2xl font-black text-teal-700 mt-1">
+                {photoCount} / {totalStudents}
+              </p>
+              <p className="text-[11px] text-slate-500">
+                {allHavePhotos ? 'All photos verified' : 'Some photos missing'}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Max Replacements</p>
+              <p className="text-2xl font-black text-indigo-700 mt-1">4 Max</p>
+              <p className="text-[11px] text-slate-500">Institutional limit per student</p>
+            </div>
+          </div>
+
+          {/* Sub-Tabs: Students vs Programme History */}
+          <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+            <button
+              type="button"
+              onClick={() => setSlugSubTab('students')}
+              className={`px-4 py-2 text-xs font-bold rounded-xl transition ${
+                slugSubTab === 'students'
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              Programme Students List ({students.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSlugSubTab('history')}
+              className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl transition ${
+                slugSubTab === 'history'
+                  ? 'bg-slate-800 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <History className="h-3.5 w-3.5" />
+              <span>Programme ID Cards History ({history.length})</span>
+            </button>
+          </div>
+
+          {/* Tab Content 1: Programme Students List */}
+          {slugSubTab === 'students' && (
+            <Card>
+              <CardHeader
+                title={`Students in ${openedCohort.programName}`}
+                subtitle="Preview, issue or reissue individual official student ID cards. Maximum 4 issuances per student."
+                icon={CreditCard}
+              />
+              <RegistrarTable
+                columns={studentColumns}
+                rows={students}
+                loading={cohortSummaryQuery.isFetching}
+                rowKey={(row) => row.id}
+                emptyTitle="No Students Found"
+                emptyMessage="No enrolled students found in this programme and batch."
+              />
+            </Card>
+          )}
+
+          {/* Tab Content 2: Programme ID Cards History */}
+          {slugSubTab === 'history' && (
+            <Card>
+              <CardHeader
+                title={`Issued ID Cards Audit Trail · ${openedCohort.programName}`}
+                subtitle={`${history.length} ID card issuance record(s) recorded in institutional audit.`}
+                icon={History}
+              />
+              <RegistrarTable
+                columns={historyColumns}
+                rows={history}
+                loading={cohortSummaryQuery.isFetching}
+                rowKey={(row) => row.id}
+                emptyTitle="No History Recorded"
+                emptyMessage="No ID cards have been issued yet for this programme."
+              />
+            </Card>
+          )}
         </div>
       )}
 
-      {/* In-App ID Card Preview Modal */}
+      {/* In-App ID Card Modal Preview (Does NOT trigger auto-download) */}
       {previewOpen && previewUrl && (
         <Modal
           open={previewOpen}
           onClose={closePreview}
           title={previewTitle}
-          subtitle="Two-sided PVC Student ID Card preview with institutional branding, barcode, and promotion endorsements."
+          subtitle="Official two-sided horizontal CR80 Student ID card with verified academic progression record."
           size="xl"
           footer={
             <div className="flex items-center justify-between w-full">
@@ -859,12 +762,12 @@ export default function RegistrarIdCards() {
                   downloadBlob(previewBlob, 'Student_ID_Card.pdf');
                   toast.success('ID Card PDF downloaded.');
                 }}
-                className="gap-1.5 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs"
+                className="gap-1.5 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs shadow-sm"
               >
                 <Download className="h-4 w-4" /> Download ID Card PDF
               </Button>
               <Button variant="secondary" onClick={closePreview}>
-                Close
+                Close Preview
               </Button>
             </div>
           }

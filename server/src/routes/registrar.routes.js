@@ -110,6 +110,8 @@ import {
   issueIdCard,
   downloadIdCardPdf,
   previewIdCardPdf,
+  getProgrammeCardCohortSummary,
+  downloadBulkIdCardsPdf,
 } from '../controllers/registrar.id-cards.controller.js';
 import { dashboard, analytics, search } from '../controllers/registrar.dashboard.controller.js';
 import { reportOverview, exportReport } from '../controllers/registrar.reports.controller.js';
@@ -338,6 +340,8 @@ r.post('/certificates/:id/reissue', requirePermission('certificates:issue'), val
 
 // ---- Student ID Cards ---------------------------------------------------
 r.get('/id-cards', listIdCards);
+r.get('/id-cards/cohort-summary', getProgrammeCardCohortSummary);
+r.get('/id-cards/bulk-pdf', downloadBulkIdCardsPdf);
 r.get('/id-cards/student/:studentId', getStudentCardEligibility);
 r.post('/id-cards/issue', issueIdCard);
 r.get('/id-cards/:id/pdf', downloadIdCardPdf);
