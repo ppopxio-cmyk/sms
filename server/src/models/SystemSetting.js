@@ -19,7 +19,7 @@ const institutionSchema = new mongoose.Schema(
 
 const securitySchema = new mongoose.Schema(
   {
-    idleMinutes: { type: Number, min: 5, max: 1440, default: 30 },
+    idleMinutes: { type: Number, min: 5, max: 2880, default: 2880 },
     absoluteDays: { type: Number, min: 1, max: 365, default: 30 },
     lockoutAttempts: { type: Number, min: 3, max: 20, default: 3 },
     lockoutMinutes: { type: Number, min: 1, max: 1440, default: 15 },

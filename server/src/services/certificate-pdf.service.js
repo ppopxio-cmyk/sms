@@ -23,6 +23,7 @@ const ETHIOPIC = /[\u1200-\u137f]/;
 const TEMPLATE = { width: 1200, height: 896, cropHeight: 836 };
 const TEMPLATE_SCALE = CERT_PAGE.height / TEMPLATE.cropHeight;
 const TEMPLATE_X = (CERT_PAGE.width - TEMPLATE.width * TEMPLATE_SCALE) / 2;
+const TEMPLATE_PATH_FORMAL = path.resolve(HERE, '../assets/Formal Training Completion Certificate.png');
 const TEMPLATE_PATH_JPG = path.resolve(HERE, '../assets/Graduation_certificate_template.jpg');
 const TEMPLATE_PATH_PNG = path.resolve(HERE, '../assets/certificate-template-clean.png');
 // A plain patch of the same paper, used to erase the sample fields without
@@ -38,7 +39,9 @@ let templateCache;
 function templateBackground() {
   if (templateCache !== undefined) return templateCache;
   try {
-    if (fs.existsSync(TEMPLATE_PATH_JPG)) {
+    if (fs.existsSync(TEMPLATE_PATH_FORMAL)) {
+      templateCache = TEMPLATE_PATH_FORMAL;
+    } else if (fs.existsSync(TEMPLATE_PATH_JPG)) {
       templateCache = TEMPLATE_PATH_JPG;
     } else if (fs.existsSync(TEMPLATE_PATH_PNG)) {
       templateCache = TEMPLATE_PATH_PNG;
@@ -294,10 +297,15 @@ function drawTemplateCertificatePage(doc, { certificate, template, photoBuffer, 
   doc.rect(0, 0, CERT_PAGE.width, CERT_PAGE.height).fill('#fdfcf1');
   doc.save();
   doc.rect(0, 0, CERT_PAGE.width, CERT_PAGE.height).clip();
-  doc.image(background, TEMPLATE_X, 0, {
-    width: TEMPLATE.width * TEMPLATE_SCALE,
-    height: TEMPLATE.height * TEMPLATE_SCALE,
-  });
+  const isFormal = Boolean(background && background.includes('Formal Training Completion Certificate'));
+  if (isFormal) {
+    doc.image(background, 0, 0, { width: CERT_PAGE.width, height: CERT_PAGE.height });
+  } else {
+    doc.image(background, TEMPLATE_X, 0, {
+      width: TEMPLATE.width * TEMPLATE_SCALE,
+      height: TEMPLATE.height * TEMPLATE_SCALE,
+    });
+  }
   doc.restore();
 
   const snapshot = certificate.studentSnapshot || {};

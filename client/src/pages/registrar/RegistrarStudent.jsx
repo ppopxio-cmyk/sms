@@ -7,6 +7,7 @@ import {
   BookOpen,
   CalendarDays,
   Camera,
+  Download,
   GraduationCap,
   MapPin,
   Pencil,
@@ -22,6 +23,8 @@ import {
   qualificationLabel,
   toJpegFile,
   toneForStatus,
+  downloadFile,
+  fileErrorMessage,
 } from '../../lib/registrar';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
 import RegistrarTable from '../../components/registrar/RegistrarTable';
@@ -34,7 +37,6 @@ import { ErrorState } from '../../components/ui/StatePanel';
 import { SkeletonCard } from '../../components/ui/Skeleton';
 import CodeInput from '../../components/ui/CodeInput';
 import Modal from '../../components/ui/Modal';
-import ExportMenu from '../../components/ui/ExportMenu';
 
 const MAX_PHOTO = 5 * 1024 * 1024;
 const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp'];
@@ -180,13 +182,21 @@ export default function RegistrarStudent() {
             <Button variant="secondary" onClick={() => navigate('/registrar/students')}>
               <ArrowLeft className="h-4 w-4" /> Students
             </Button>
-            <ExportMenu
-              basePath={`${REGISTRAR}/students/${studentId}/export`}
-              filenamePrefix={`${record?.studentId || 'student'}-record`}
-              formats={['docx', 'pdf']}
-              label="Export profile"
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                try {
+                  await downloadFile(`${REGISTRAR}/students/${studentId}/export?format=pdf`, `${record?.studentId || 'student'}-record.pdf`);
+                  toast.success('Student profile exported as PDF.');
+                } catch (err) {
+                  toast.error(await fileErrorMessage(err, 'Could not export profile PDF.'));
+                }
+              }}
               disabled={!record}
-            />
+              className="gap-2"
+            >
+              <Download className="h-4 w-4" /> Export PDF
+            </Button>
             <Button onClick={() => setEditing(true)} disabled={!record} className="gap-2">
               <Pencil className="h-4 w-4" /> Edit record
             </Button>

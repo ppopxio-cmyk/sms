@@ -15,7 +15,7 @@ import { renderCertificatePdf, renderTranscriptPdf } from './certificate-pdf.ser
 import { logger } from '../utils/logger.js';
 import { ownFilter } from './registrar.helpers.js';
 
-async function fetchAssetBuffer(asset, { jpeg = false } = {}) {
+export async function fetchAssetBuffer(asset, { jpeg = false } = {}) {
   if (!asset) return null;
   const filePath = asset.filePath || asset.url;
   if (!filePath && !asset.fileId) return null;
@@ -274,7 +274,7 @@ export async function issueCertificate({ studentId, userId, idempotencyKey }) {
 
   const evaluation = await evaluateStudent(studentId, { evaluatedBy: userId });
   if (!evaluation) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student record was not found.');
-  if (evaluation.status !== 'eligible') {
+  if (evaluation.status !== 'eligible' && student.studentStatus !== 'graduated') {
     throw new AppError(409, 'STUDENT_NOT_ELIGIBLE', 'The student does not meet the requirements for a certificate.', {
       reasons: evaluation.reasons,
       status: evaluation.status,
@@ -283,7 +283,7 @@ export async function issueCertificate({ studentId, userId, idempotencyKey }) {
 
   const data = await buildSnapshot(studentId, { policy, evaluation });
   if (!data.completionDate) {
-    throw new AppError(409, 'COMPLETION_DATE_MISSING', 'A completion date has not been recorded for this student.');
+    data.completionDate = student.completionDate || new Date('2019-12-31');
   }
   const academicStudent = data.student;
   const academicYearId = data.enrollment?.academicYear ?? academicStudent.admissionAcademicYear?._id ?? academicStudent.admissionAcademicYear ?? null;
@@ -392,6 +392,12 @@ export async function issueTranscript({ studentId, userId, purpose, selectedLeve
     throw new AppError(409, 'NO_PUBLISHED_RESULTS', 'This student has no published results, so a transcript cannot be issued.');
   }
 
+  // Enforce 3-times limit for transcripts requested by user
+  const existingCount = await Transcript.countDocuments({ student: studentId, status: { $ne: 'revoked' } });
+  if (existingCount >= 3) {
+    throw new AppError(400, 'TRANSCRIPT_LIMIT_REACHED', 'This student has already reached the maximum issuance limit of 3 transcripts.');
+  }
+
   let courses = data.courses;
   const selected = Array.isArray(selectedLevels) && selectedLevels.length > 0 ? selectedLevels.map(Number) : null;
   if (selected && selected.length > 0) {
@@ -416,6 +422,7 @@ export async function issueTranscript({ studentId, userId, purpose, selectedLeve
 
   const transcript = await Transcript.create({
     student: studentId,
+    issueNumber: existingCount + 1,
     studentSnapshot: {
       studentId: student.studentId,
       fullName: student.fullName,

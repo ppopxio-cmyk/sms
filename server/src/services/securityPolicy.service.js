@@ -6,7 +6,7 @@ import { getSettings } from './settings.service.js';
 // database blip; the portal must not become impossible to sign in to because a policy
 // lookup failed.
 const DEFAULTS = {
-  idleMinutes: 30,
+  idleMinutes: 2880,
   absoluteDays: 30,
   lockoutAttempts: 3,
   lockoutMinutes: 15,
@@ -26,7 +26,7 @@ export async function securityPolicy() {
     const settings = await getSettings();
     const security = settings?.security ?? {};
     return {
-      idleMinutes: whole(security.idleMinutes, 5, 1440, DEFAULTS.idleMinutes),
+      idleMinutes: whole(security.idleMinutes, 5, 2880, DEFAULTS.idleMinutes),
       absoluteDays: whole(security.absoluteDays, 1, 365, DEFAULTS.absoluteDays),
       lockoutAttempts: whole(security.lockoutAttempts, 3, 20, DEFAULTS.lockoutAttempts),
       lockoutMinutes: whole(security.lockoutMinutes, 1, 1440, DEFAULTS.lockoutMinutes),

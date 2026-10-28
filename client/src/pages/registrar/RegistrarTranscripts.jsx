@@ -14,7 +14,6 @@ import {
 import { useDebounced } from '../../lib/useDebounced';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
 import RegistrarTable from '../../components/registrar/RegistrarTable';
-import ConfirmDialog from '../../components/registrar/ConfirmDialog';
 import StudentPicker from '../../components/registrar/StudentPicker';
 import { TextAreaField, SelectField } from '../../components/registrar/Fields';
 import Card from '../../components/ui/Card';
@@ -23,7 +22,6 @@ import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
 import SearchInput from '../../components/ui/SearchInput';
-import ExportMenu from '../../components/ui/ExportMenu';
 
 export default function RegistrarTranscripts() {
   const queryClient = useQueryClient();
@@ -36,7 +34,6 @@ export default function RegistrarTranscripts() {
   const [limit, setLimit] = useState(20);
   const [issuing, setIssuing] = useState(false);
   const [viewing, setViewing] = useState(null);
-  const [revoking, setRevoking] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
 
   const options = useQuery({
@@ -45,18 +42,28 @@ export default function RegistrarTranscripts() {
     staleTime: 5 * 60_000,
   });
 
+  const structure = useQuery({
+    queryKey: ['registrar', 'structure'],
+    queryFn: async () => (await api.get(`${REGISTRAR}/academic-structure`)).data,
+    staleTime: 5 * 60_000,
+  });
+
   const availableBatches = useMemo(() => {
-    const raw = !program
-      ? options.data?.batches || []
-      : (options.data?.batches || []).filter((b) => b.program === program);
+    // Include all batches across previous and active years
+    const optBatches = options.data?.batches || [];
+    const structBatches = structure.data?.batches || [];
+    const combined = [...optBatches, ...structBatches];
+    const filtered = !program
+      ? combined
+      : combined.filter((b) => String(b.program?.id || b.program) === String(program));
     const seen = new Set();
-    return raw.filter((row) => {
+    return filtered.filter((row) => {
       const key = `${row.code}::${row.category || 'regular'}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
-  }, [options.data?.batches, program]);
+  }, [options.data?.batches, structure.data?.batches, program]);
 
   const params = useMemo(
     () => ({
@@ -81,16 +88,6 @@ export default function RegistrarTranscripts() {
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['registrar', 'transcripts'] });
 
-  const revoke = useMutation({
-    mutationFn: async (reason) => (await api.post(`${REGISTRAR}/transcripts/${revoking.id}/revoke`, { reason })).data,
-    onSuccess: () => {
-      toast.success('Transcript revoked. The history remains available.');
-      setRevoking(null);
-      invalidate();
-    },
-    onError: (err) => toast.error(errorMessage(err, 'The transcript could not be revoked.')),
-  });
-
   const downloadPdf = async (row) => {
     setDownloadingId(row.id);
     try {
@@ -114,6 +111,15 @@ export default function RegistrarTranscripts() {
         </div>
       ),
     },
+    {
+      key: 'issueNumber',
+      label: 'Issue #',
+      render: (row) => (
+        <span className="inline-flex items-center rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
+          Issue {row.issueNumber || 1} of 3
+        </span>
+      ),
+    },
     { key: 'program', label: 'Programme', render: (row) => row.program?.name || '—' },
     { key: 'credits', label: 'Total Credits', render: (row) => row.totalCredits ?? '—' },
     {
@@ -134,20 +140,14 @@ export default function RegistrarTranscripts() {
           <Button size="sm" variant="secondary" onClick={() => setViewing(row)}>
             <Eye className="h-3.5 w-3.5" /> View
           </Button>
-          <Button size="sm" variant="secondary" onClick={() => downloadPdf(row)} loading={downloadingId === row.id}>
+          <Button
+            size="sm"
+            className="gap-1.5 bg-brand-600 hover:bg-brand-700 text-white font-medium"
+            onClick={() => downloadPdf(row)}
+            loading={downloadingId === row.id}
+          >
             <Download className="h-3.5 w-3.5" /> PDF
           </Button>
-          <ExportMenu
-            basePath={`${REGISTRAR}/transcripts/${row.id}/export`}
-            filenamePrefix={`Transcript_${row.student?.studentId || row.id}`}
-            label="Export"
-            formats={['docx', 'xlsx']}
-          />
-          {row.status === 'issued' ? (
-            <Button size="sm" variant="ghost" onClick={() => setRevoking(row)}>
-              Revoke
-            </Button>
-          ) : null}
         </div>
       ),
     },
@@ -267,22 +267,6 @@ export default function RegistrarTranscripts() {
       {viewing && (
         <TranscriptDetailModal transcript={viewing} onClose={() => setViewing(null)} onDownload={downloadPdf} />
       )}
-
-      <ConfirmDialog
-        open={Boolean(revoking)}
-        title="Revoke this transcript?"
-        message={
-          revoking
-            ? `${revoking.student?.fullName} · issued ${displayDateTime(revoking.issuedAt)}. The document remains on file as revoked.`
-            : ''
-        }
-        confirmLabel="Revoke transcript"
-        tone="danger"
-        loading={revoke.isPending}
-        reason={{ label: 'Reason', minLength: 5, placeholder: 'Why is this transcript being revoked?' }}
-        onClose={() => setRevoking(null)}
-        onConfirm={(reason) => revoke.mutate(reason)}
-      />
     </div>
   );
 }
@@ -292,6 +276,12 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
   const [purpose, setPurpose] = useState('');
   const [selectedLevels, setSelectedLevels] = useState([]);
   const [error, setError] = useState('');
+
+  const countQuery = useQuery({
+    queryKey: ['registrar', 'transcript-count', student?.id],
+    queryFn: async () => (await api.get(`${REGISTRAR}/transcripts/student/${student.id}/count`)).data,
+    enabled: Boolean(student?.id && open),
+  });
 
   const gpaQuery = useQuery({
     queryKey: ['registrar', 'gpa-preview', student?.id],
@@ -338,6 +328,9 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
   const issue = useMutation({
     mutationFn: async () => {
       if (!student) throw new Error('Choose a student.');
+      if (countQuery.data && !countQuery.data.canIssue) {
+        throw new Error('This student has already reached the maximum issuance limit of 3 transcripts.');
+      }
       if (!selectedLevels.length) throw new Error('Select at least one Year/Level to include in the transcript.');
       return (
         await api.post(`${REGISTRAR}/transcripts`, {
@@ -360,12 +353,13 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
   });
 
   const studentHasResults = Boolean(gpaQuery.data?.courses?.length);
+  const canIssueByCount = countQuery.data ? countQuery.data.canIssue : true;
 
   return (
     <Modal
       open={open}
       title="Issue official transcript"
-      subtitle="Select the years or levels to include, or issue for all completed stages."
+      subtitle="Select the years or levels to include, or issue for all completed stages. Maximum 3 issuances per student."
       onClose={issue.isPending ? undefined : onClose}
       dismissible={!issue.isPending}
       footer={
@@ -376,7 +370,7 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
           <Button
             onClick={() => issue.mutate()}
             loading={issue.isPending}
-            disabled={!student || (gpaQuery.isSuccess && !studentHasResults) || !selectedLevels.length}
+            disabled={!student || (gpaQuery.isSuccess && !studentHasResults) || !selectedLevels.length || !canIssueByCount}
           >
             Issue transcript
           </Button>
@@ -393,6 +387,21 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
             setError('');
           }}
         />
+
+        {countQuery.data && (
+          <div
+            className={`rounded-xl p-3 text-xs font-semibold flex items-center justify-between ${
+              countQuery.data.canIssue
+                ? 'bg-blue-50 text-blue-800 border border-blue-200'
+                : 'bg-rose-50 text-rose-800 border border-rose-200'
+            }`}
+          >
+            <span>
+              Transcript Issuance Counter: <strong>{countQuery.data.count} of 3</strong>
+            </span>
+            <span>{countQuery.data.canIssue ? `${countQuery.data.remaining} remaining` : 'Limit reached (Max 3)'}</span>
+          </div>
+        )}
 
         {student && (
           <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">

@@ -448,11 +448,31 @@ export const submitStageComplete = asyncHandler(async (req, res) => {
 
   const allStagesFinished = isAllLevels || (totalStages > 0 && finishedStages.length >= totalStages);
   const targetBatchId = effectiveBatchId || offerings[0]?.batch || batchId;
-  if (targetBatchId) {
+  if (targetBatchId && allStagesFinished) {
     await Batch.updateOne(
       { _id: targetBatchId },
-      { $set: { readyForCgpa: true, ...(allStagesFinished ? { status: 'completed' } : {}) } }
+      { $set: { status: 'completed' } }
     );
+  }
+
+  // Advance student levels automatically when a stage is completed
+  if (!isAllLevels && levelNumber && levelNumber < totalStages) {
+    const studentFilter = {
+      program: programId,
+      ...(effectiveBatchId ? { batch: effectiveBatchId } : {}),
+      level: { $lte: levelNumber },
+    };
+    await Student.updateMany(studentFilter, { $set: { level: levelNumber + 1 } });
+    await Enrollment.updateMany(
+      { program: programId, ...(effectiveBatchId ? { batch: effectiveBatchId } : {}), level: { $lte: levelNumber } },
+      { $set: { level: levelNumber + 1 } }
+    );
+  } else if (isAllLevels || (levelNumber && levelNumber >= totalStages)) {
+    const studentFilter = {
+      program: programId,
+      ...(effectiveBatchId ? { batch: effectiveBatchId } : {}),
+    };
+    await Student.updateMany(studentFilter, { $set: { level: totalStages } });
   }
 
   audit({
@@ -1057,14 +1077,17 @@ export const gpaCgpa = asyncHandler(async (req, res) => {
       };
 
       if (query.batch) {
-        const batchDoc = await Batch.findById(query.batch).select('readyForCgpa cgpaCalculated').lean();
-        if (batchDoc) {
-          programInfo.readyForCgpa = batchDoc.readyForCgpa || allStagesFinished;
-          programInfo.cgpaCalculated = Boolean(batchDoc.cgpaCalculated);
+        const bDoc = await Batch.findById(query.batch).select('readyForCgpa cgpaCalculated calculatedStages').lean();
+        if (bDoc) {
+          programInfo.readyForCgpa = Boolean(bDoc.readyForCgpa);
+          programInfo.cgpaCalculated = Boolean(bDoc.cgpaCalculated);
+          programInfo.calculatedStages = bDoc.calculatedStages || [];
         }
       }
     }
   }
+
+  const batchDoc = query.batch ? await Batch.findById(query.batch).select('readyForCgpa cgpaCalculated calculatedStages').lean() : null;
 
   const studentFilter = mergeFilters(
     query.program ? { program: query.program } : null,
@@ -1078,6 +1101,8 @@ export const gpaCgpa = asyncHandler(async (req, res) => {
     .lean();
 
   const rows = [];
+  const isStageCalculated = Boolean(batchDoc?.calculatedStages?.includes(Number(query.level)));
+
   for (const student of students) {
     const studentResults = await publishedResultsForStudent(student._id);
     const cumResult = studentResults.length > 0
@@ -1088,7 +1113,8 @@ export const gpaCgpa = asyncHandler(async (req, res) => {
     let stageCredits = null;
     let stageCourses = 0;
 
-    if (query.level) {
+    // Only expose calculated stage GPA if the stage has officially been calculated on this page!
+    if (query.level && isStageCalculated) {
       const stageRows = studentResults.filter((r) => Number(r.offering?.level) === Number(query.level));
       if (stageRows.length > 0) {
         const sRes = calculateGpa(stageRows, policy);
@@ -1240,6 +1266,11 @@ export const calculateCgpaAndGraduate = asyncHandler(async (req, res) => {
     await student.save();
     graduatedCount++;
   }
+
+  await Enrollment.updateMany(
+    { student: { $in: students.map((s) => s._id) } },
+    { $set: { status: 'completed' } }
+  );
 
   const batchFilter = {
     program: programId,

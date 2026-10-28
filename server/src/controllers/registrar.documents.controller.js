@@ -62,6 +62,7 @@ export const listCertificates = asyncHandler(async (req, res) => {
         academicYear: row.academicYear?.label || row.academicYearLabel,
         cgpa: row.cgpa,
         status: row.status,
+        issueNumber: row.issueNumber || 1,
         issuedAt: row.issuedAt,
         pdfGeneratedAt: row.pdfGeneratedAt,
         revokedAt: row.revokedAt,
@@ -201,6 +202,7 @@ export const listTranscripts = asyncHandler(async (req, res) => {
         academicSnapshot: row.academicSnapshot,
         purpose: row.purpose,
         status: row.status,
+        issueNumber: row.issueNumber || 1,
         issuedAt: row.issuedAt,
       })),
       total,
@@ -278,6 +280,11 @@ export const exportTranscriptRecord = asyncHandler(async (req, res) => {
   res.setHeader('Content-Type', file.contentType);
   res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
   res.send(file.buffer);
+});
+
+export const getStudentTranscriptCount = asyncHandler(async (req, res) => {
+  const count = await Transcript.countDocuments({ student: req.params.studentId, status: { $ne: 'revoked' } });
+  res.json({ count, max: 3, remaining: Math.max(0, 3 - count), canIssue: count < 3 });
 });
 
 export const createTranscript = asyncHandler(async (req, res) => {

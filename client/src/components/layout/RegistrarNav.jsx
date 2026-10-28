@@ -7,6 +7,7 @@ import {
   CalendarDays,
   ChevronDown,
   ClipboardCheck,
+  Contact,
   CreditCard,
   FileBarChart,
   FileCheck2,
@@ -53,6 +54,7 @@ const GROUPS = [
       { to: '/registrar/grading-policy', label: 'Grading policy', icon: FileBarChart },
       { to: '/registrar/transcripts', label: 'Transcripts', icon: FileText },
       { to: '/registrar/certificates', label: 'Certificates', icon: GraduationCap },
+      { to: '/registrar/issue-id', label: 'Student ID Cards', icon: Contact },
     ],
   },
   {

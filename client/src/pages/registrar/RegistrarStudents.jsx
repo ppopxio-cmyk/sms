@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, Legend } from 'recharts';
-import { SlidersHorizontal, UserPlus, Users, Building2, BookOpen, GraduationCap, TrendingUp } from 'lucide-react';
+import { SlidersHorizontal, UserPlus, Users, Building2, BookOpen, GraduationCap, TrendingUp, Filter } from 'lucide-react';
 import { api } from '../../lib/api';
 import {
   REGISTRAR,
@@ -12,7 +12,7 @@ import {
   qualificationLabel,
   toneForStatus,
 } from '../../lib/registrar';
-import { useDebounced } from '../../lib/useDebounced';
+import { formatEthiopian } from '../../lib/ethiopianDate';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
 import RegistrarTable from '../../components/registrar/RegistrarTable';
 import StudentFormModal from '../../components/registrar/StudentFormModal';
@@ -20,7 +20,6 @@ import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Pagination from '../../components/ui/Pagination';
-import SearchInput from '../../components/ui/SearchInput';
 import ExportMenu from '../../components/ui/ExportMenu';
 import { SelectField } from '../../components/registrar/Fields';
 
@@ -36,13 +35,20 @@ const initials = (value) =>
 export default function RegistrarStudents() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [search, setSearch] = useState('');
-  const debounced = useDebounced(search, 300);
-  const [status, setStatus] = useState('all');
-  const [program, setProgram] = useState('');
-  const [department, setDepartment] = useState('');
-  const [batch, setBatch] = useState('');
-  const [category, setCategory] = useState('all');
+  const [draftStatus, setDraftStatus] = useState('all');
+  const [draftProgram, setDraftProgram] = useState('');
+  const [draftDepartment, setDraftDepartment] = useState('');
+  const [draftBatch, setDraftBatch] = useState('');
+  const [draftCategory, setDraftCategory] = useState('all');
+
+  const [appliedFilters, setAppliedFilters] = useState({
+    status: 'all',
+    program: '',
+    department: '',
+    batch: '',
+    category: 'all',
+  });
+
   const [sort, setSort] = useState('fullName');
   const [order, setOrder] = useState('asc');
   const [page, setPage] = useState(1);
@@ -82,16 +88,15 @@ export default function RegistrarStudents() {
     () => ({
       page,
       limit,
-      ...(debounced.trim() ? { search: debounced.trim() } : {}),
-      ...(status !== 'all' ? { status } : {}),
-      ...(program ? { program } : {}),
-      ...(department ? { department } : {}),
-      ...(batch ? { batch } : {}),
-      ...(category !== 'all' ? { category } : {}),
+      ...(appliedFilters.status !== 'all' ? { status: appliedFilters.status } : {}),
+      ...(appliedFilters.program ? { program: appliedFilters.program } : {}),
+      ...(appliedFilters.department ? { department: appliedFilters.department } : {}),
+      ...(appliedFilters.batch ? { batch: appliedFilters.batch } : {}),
+      ...(appliedFilters.category !== 'all' ? { category: appliedFilters.category } : {}),
       sort,
       order,
     }),
-    [page, limit, debounced, status, program, department, batch, category, sort, order],
+    [page, limit, appliedFilters, sort, order],
   );
 
   const students = useQuery({
@@ -103,11 +108,12 @@ export default function RegistrarStudents() {
   const rows = students.data?.rows ?? [];
   const pagination = students.data?.pagination ?? { page: 1, pages: 1, total: 0, limit };
   const counts = students.data?.counts ?? {};
-  const filtered = Boolean(debounced.trim() || status !== 'all' || program || department || batch || category !== 'all');
+  const filtered = Boolean(appliedFilters.status !== 'all' || appliedFilters.program || appliedFilters.department || appliedFilters.batch || appliedFilters.category !== 'all');
+
   const availableBatches = useMemo(() => {
     const raw = (options.data?.batches || []).filter((row) =>
-      (!program || row.program === program)
-      && (category === 'all' || (row.category || 'regular') === category),
+      (!draftProgram || row.program === draftProgram)
+      && (draftCategory === 'all' || (row.category || 'regular') === draftCategory),
     );
     const seen = new Set();
     return raw.filter((row) => {
@@ -116,14 +122,26 @@ export default function RegistrarStudents() {
       seen.add(key);
       return true;
     });
-  }, [options.data?.batches, program, category]);
+  }, [options.data?.batches, draftProgram, draftCategory]);
+
+  const handleShowStudents = () => {
+    setPage(1);
+    setAppliedFilters({
+      status: draftStatus,
+      program: draftProgram,
+      department: draftDepartment,
+      batch: draftBatch,
+      category: draftCategory,
+    });
+  };
+
   const exportParams = {
     type: 'students',
-    ...(status !== 'all' ? { status } : {}),
-    ...(program ? { program } : {}),
-    ...(department ? { department } : {}),
-    ...(batch ? { batch } : {}),
-    ...(category !== 'all' ? { category } : {}),
+    ...(appliedFilters.status !== 'all' ? { status: appliedFilters.status } : {}),
+    ...(appliedFilters.program ? { program: appliedFilters.program } : {}),
+    ...(appliedFilters.department ? { department: appliedFilters.department } : {}),
+    ...(appliedFilters.batch ? { batch: appliedFilters.batch } : {}),
+    ...(appliedFilters.category !== 'all' ? { category: appliedFilters.category } : {}),
   };
 
   const columns = [
@@ -170,18 +188,26 @@ export default function RegistrarStudents() {
       label: 'Level',
       render: (row) => (
         <div>
-          <p className="text-sm text-slate-700">{levelLabel(row.level, row.program?.qualificationType)}</p>
-          <p className="text-xs text-slate-400">{row.batch?.code || 'No batch'}</p>
+          <span className="inline-flex items-center rounded-lg bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">
+            {levelLabel(row.level, row.program?.qualificationType)}
+          </span>
+          <p className="text-xs text-slate-500 mt-0.5">{row.batch?.code || 'No batch'}</p>
         </div>
       ),
     },
     {
-      key: 'admission',
-      label: 'Admission',
+      key: 'timeline',
+      label: 'Academic Timeline',
       render: (row) => (
-        <div>
-          <p className="text-sm text-slate-700">{row.admissionAcademicYear?.label || '—'}</p>
-          <p className="text-xs text-slate-400">{displayDate(row.admissionDate)}</p>
+        <div className="text-xs space-y-0.5">
+          <p className="text-slate-700">
+            <span className="text-slate-400">Admitted:</span> {formatEthiopian(row.admissionDate) || displayDate(row.admissionDate)}
+          </p>
+          {row.completionDate ? (
+            <p className="text-emerald-700 font-bold">
+              <span className="text-slate-400 font-normal">Completed:</span> {formatEthiopian(row.completionDate)}
+            </p>
+          ) : null}
         </div>
       ),
     },
@@ -278,30 +304,11 @@ export default function RegistrarStudents() {
 
       <Card className="p-4 sm:p-5">
         <div className="flex flex-col gap-3">
-          <SearchInput
-            value={search}
-            onChange={(event) => { setSearch(event.target.value); setPage(1); }}
-            placeholder="Search by name, student ID, email or phone"
-            loading={students.isFetching}
-          />
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            <SelectField
-              label="Status"
-              value={status}
-              onChange={(event) => { setStatus(event.target.value); setPage(1); }}
-            >
-              <option value="all">All students ({counts.all ?? pagination.total})</option>
-              <option value="active">Active</option>
-              <option value="pending">Pending</option>
-              <option value="graduated">Graduated</option>
-              <option value="withdrawn">Withdrawn</option>
-              <option value="suspended">Suspended</option>
-              <option value="archived">Archived</option>
-            </SelectField>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 items-end">
             <SelectField
               label="Department"
-              value={department}
-              onChange={(event) => { setDepartment(event.target.value); setProgram(''); setBatch(''); setPage(1); }}
+              value={draftDepartment}
+              onChange={(event) => { setDraftDepartment(event.target.value); setDraftProgram(''); setDraftBatch(''); }}
             >
               <option value="">All departments</option>
               {(options.data?.departments || []).map((row) => (
@@ -309,61 +316,57 @@ export default function RegistrarStudents() {
               ))}
             </SelectField>
             <SelectField
+              label="Programme"
+              value={draftProgram}
+              onChange={(event) => { setDraftProgram(event.target.value); setDraftBatch(''); }}
+            >
+              <option value="">All programmes</option>
+              {(options.data?.programs || [])
+                .filter((row) => !draftDepartment || row.department === draftDepartment)
+                .map((row) => (
+                  <option key={row.id} value={row.id}>{row.code} · {row.name}</option>
+                ))}
+            </SelectField>
+            <SelectField
               label="Category"
-              value={category}
-              onChange={(event) => { setCategory(event.target.value); setBatch(''); setPage(1); }}
+              value={draftCategory}
+              onChange={(event) => { setDraftCategory(event.target.value); setDraftBatch(''); }}
             >
               <option value="all">All categories</option>
               <option value="regular">Regular</option>
               <option value="extension">Extension</option>
             </SelectField>
             <SelectField
-              label="Programme"
-              value={program}
-              onChange={(event) => { setProgram(event.target.value); setBatch(''); setPage(1); }}
-            >
-              <option value="">All programmes</option>
-              {(options.data?.programs || [])
-                .filter((row) => !department || row.department === department)
-                .map((row) => (
-                  <option key={row.id} value={row.id}>{row.code} · {row.name}</option>
-                ))}
-            </SelectField>
-            <SelectField
               label="Batch"
-              value={batch}
-              onChange={(event) => { setBatch(event.target.value); setPage(1); }}
+              value={draftBatch}
+              onChange={(event) => setDraftBatch(event.target.value)}
             >
               <option value="">All batches</option>
               {availableBatches.map((row) => (
                 <option key={row.id} value={row.id}>{row.code} · {row.name}</option>
               ))}
             </SelectField>
+            <SelectField
+              label="Status"
+              value={draftStatus}
+              onChange={(event) => setDraftStatus(event.target.value)}
+            >
+              <option value="all">All statuses</option>
+              <option value="active">Active</option>
+              <option value="pending">Pending</option>
+              <option value="graduated">Graduated</option>
+              <option value="withdrawn">Withdrawn</option>
+              <option value="suspended">Suspended</option>
+              <option value="archived">Archived</option>
+            </SelectField>
             <div>
-              <span className="mb-1.5 block text-sm font-medium text-slate-700">Sort</span>
-              <div className="flex gap-2">
-                <select
-                  value={sort}
-                  onChange={(event) => { setSort(event.target.value); setPage(1); }}
-                  className="focus-ring h-11 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white/85 px-3 text-sm text-slate-800"
-                  aria-label="Sort students"
-                >
-                  <option value="fullName">Name</option>
-                  <option value="studentId">Student ID</option>
-                  <option value="level">Level</option>
-                  <option value="admissionDate">Admission date</option>
-                  <option value="createdAt">Newest record</option>
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setOrder((value) => (value === 'asc' ? 'desc' : 'asc'))}
-                  className="focus-ring inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white/85 text-slate-500"
-                  aria-label={order === 'asc' ? 'Sort descending' : 'Sort ascending'}
-                  title={order === 'asc' ? 'Ascending' : 'Descending'}
-                >
-                  <SlidersHorizontal className="h-4 w-4" />
-                </button>
-              </div>
+              <span className="mb-1.5 block text-sm font-medium text-slate-700">Actions</span>
+              <Button
+                onClick={handleShowStudents}
+                className="h-11 w-full gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold shadow-sm"
+              >
+                <Filter className="h-4 w-4" /> Show Students
+              </Button>
             </div>
           </div>
         </div>

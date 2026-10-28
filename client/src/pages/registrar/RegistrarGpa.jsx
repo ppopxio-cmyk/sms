@@ -20,6 +20,10 @@ import {
   Check,
   ExternalLink,
   ChevronRight,
+  Download,
+  Eye,
+  Clock,
+  History,
 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import { REGISTRAR, humanStatus, toneForStatus } from '../../lib/registrar';
@@ -28,6 +32,18 @@ import RegistrarTable from '../../components/registrar/RegistrarTable';
 import Card, { CardBody, CardHeader } from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 import Modal from '../../components/ui/Modal';
 import ExportMenu from '../../components/ui/ExportMenu';
 import { ErrorState, EmptyState } from '../../components/ui/StatePanel';
@@ -36,6 +52,8 @@ import { SkeletonCard } from '../../components/ui/Skeleton';
 export default function RegistrarGpa() {
   const queryClient = useQueryClient();
   const [activeMainTab, setActiveMainTab] = useState('gpa'); // 'gpa' | 'cgpa'
+  const [gpaSubTab, setGpaSubTab] = useState('active'); // 'active' | 'history'
+  const [cgpaSubTab, setCgpaSubTab] = useState('active'); // 'active' | 'history'
 
   // Selected cohort for GPA tab & CGPA tab
   const [selectedGpaCohort, setSelectedGpaCohort] = useState(null);
@@ -44,19 +62,34 @@ export default function RegistrarGpa() {
   const [student, setStudent] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // In-tab Certificate Preview & Download states
+  const [certPreviewStudent, setCertPreviewStudent] = useState(null);
+  const [certPreviewBlob, setCertPreviewBlob] = useState(null);
+  const [certPreviewUrl, setCertPreviewUrl] = useState(null);
+  const [certPreviewLoading, setCertPreviewLoading] = useState(false);
+  const [downloadingCertId, setDownloadingCertId] = useState(null);
+
   // 1. Fetch all cohorts ready to calculate (departments, batches, and programs with submitted/published marks)
   const readyCohortsQuery = useQuery({
     queryKey: ['registrar', 'ready-gpa-cohorts'],
     queryFn: async () => (await api.get(`${REGISTRAR}/gpa-cgpa/ready-cohorts`)).data,
   });
 
-  const cohorts = readyCohortsQuery.data?.cohorts || [];
+  const cohorts = (readyCohortsQuery.data?.cohorts || []).filter(
+    (c) => (c.totalPublishedResults ?? 0) > 0,
+  );
 
   // Filter cohorts by search query
   const filteredGpaCohorts = useMemo(() => {
-    if (!searchQuery.trim()) return cohorts;
+    let list = cohorts;
+    if (gpaSubTab === 'active') {
+      list = cohorts.filter((c) => !c.readyForCgpa);
+    } else {
+      list = cohorts.filter((c) => Boolean(c.readyForCgpa));
+    }
+    if (!searchQuery.trim()) return list;
     const q = searchQuery.toLowerCase();
-    return cohorts.filter(
+    return list.filter(
       (c) =>
         c.department.name.toLowerCase().includes(q) ||
         c.department.code.toLowerCase().includes(q) ||
@@ -64,14 +97,17 @@ export default function RegistrarGpa() {
         c.program.code.toLowerCase().includes(q) ||
         c.batch.code.toLowerCase().includes(q),
     );
-  }, [cohorts, searchQuery]);
+  }, [cohorts, gpaSubTab, searchQuery]);
 
   // Only submitted cohorts for the CGPA tab (only cohorts sent by the GPA calculation)
   const submittedCgpaCohorts = useMemo(() => {
-    return cohorts.filter(
-      (c) => Boolean(c.readyForCgpa || c.cgpaCalculated),
-    );
-  }, [cohorts]);
+    const list = cohorts.filter((c) => Boolean(c.readyForCgpa || c.cgpaCalculated));
+    if (cgpaSubTab === 'active') {
+      return list.filter((c) => !c.cgpaCalculated);
+    } else {
+      return list.filter((c) => Boolean(c.cgpaCalculated));
+    }
+  }, [cohorts, cgpaSubTab]);
 
   // Active cohort depending on main tab
   const activeCohort = activeMainTab === 'gpa' ? selectedGpaCohort : selectedCgpaCohort;
@@ -138,6 +174,37 @@ export default function RegistrarGpa() {
     onError: (err) => toast.error(errorMessage(err, 'Failed to calculate Stage GPA.')),
   });
 
+  // In-tab Certificate Preview & Download handlers
+  const handlePreviewCert = async (row) => {
+    setCertPreviewStudent(row);
+    setCertPreviewLoading(true);
+    try {
+      const res = await api.post(`${REGISTRAR}/certificates/preview`, { student: row.id }, { responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      setCertPreviewBlob(blob);
+      setCertPreviewUrl(url);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not generate certificate preview. Ensure student is eligible and template is configured.'));
+      setCertPreviewStudent(null);
+    } finally {
+      setCertPreviewLoading(false);
+    }
+  };
+
+  const handleDownloadCert = async (row) => {
+    setDownloadingCertId(row.id);
+    try {
+      const res = await api.post(`${REGISTRAR}/certificates/preview`, { student: row.id }, { responseType: 'blob' });
+      downloadBlob(res.data, `Certificate_${row.studentId || row.fullName}.pdf`);
+      toast.success('Certificate PDF downloaded successfully.');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not download certificate PDF.'));
+    } finally {
+      setDownloadingCertId(null);
+    }
+  };
+
   // Mutation: Send to CGPA & Transcripts (NO EMAIL CODE NEEDED)
   const sendToCgpaMutation = useMutation({
     mutationFn: async () =>
@@ -152,9 +219,19 @@ export default function RegistrarGpa() {
         data.message ||
           `${activeCohort?.program.name} (${activeCohort?.department.name}) successfully sent to CGPA & Transcripts!`,
       );
+      setSelectedGpaCohort((prev) =>
+        prev
+          ? {
+              ...prev,
+              readyForCgpa: true,
+              batch: { ...prev.batch, readyForCgpa: true },
+            }
+          : prev,
+      );
       invalidate();
-      setSelectedCgpaCohort(activeCohort);
+      setSelectedCgpaCohort(activeCohort ? { ...activeCohort, readyForCgpa: true } : null);
       setActiveMainTab('cgpa');
+      setCgpaSubTab('active');
     },
     onError: (err) => toast.error(errorMessage(err, 'Could not send programme to CGPA.')),
   });
@@ -249,7 +326,7 @@ export default function RegistrarGpa() {
       className: 'text-right',
       mobileFull: true,
       render: (row) => (
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
           <Button
             size="sm"
             variant="secondary"
@@ -257,6 +334,29 @@ export default function RegistrarGpa() {
           >
             Open Record
           </Button>
+
+          {activeMainTab === 'cgpa' && activeCohort?.cgpaCalculated ? (
+            <>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => handlePreviewCert(row)}
+                loading={certPreviewLoading && certPreviewStudent?.id === row.id}
+                className="gap-1 text-xs"
+              >
+                <Eye className="h-3.5 w-3.5 text-indigo-600" /> Preview Cert
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => handleDownloadCert(row)}
+                loading={downloadingCertId === row.id}
+                className="gap-1 text-xs"
+              >
+                <Download className="h-3.5 w-3.5 text-slate-600" /> Cert PDF
+              </Button>
+            </>
+          ) : null}
         </div>
       ),
     },
@@ -307,6 +407,39 @@ export default function RegistrarGpa() {
           ========================================================================= */}
       {activeMainTab === 'gpa' && (
         <>
+          {/* Sub-tabs: Active vs History */}
+          <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+            <button
+              type="button"
+              onClick={() => {
+                setGpaSubTab('active');
+                setSelectedGpaCohort(null);
+              }}
+              className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition ${
+                gpaSubTab === 'active'
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              Active Cohorts ({cohorts.filter((c) => !c.readyForCgpa).length})
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setGpaSubTab('history');
+                setSelectedGpaCohort(null);
+              }}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg transition ${
+                gpaSubTab === 'history'
+                  ? 'bg-slate-800 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <History className="h-3.5 w-3.5" />
+              <span>Sent to CGPA History ({cohorts.filter((c) => Boolean(c.readyForCgpa)).length})</span>
+            </button>
+          </div>
+
           {/* VIEW A: OVERVIEW CARDS (When no cohort is actively opened) */}
           {!selectedGpaCohort ? (
             <div className="space-y-4">
@@ -514,7 +647,12 @@ export default function RegistrarGpa() {
                       </Button>
                     )}
 
-                    {selectedGpaCohort.totalStages > 0 &&
+                    {selectedGpaCohort.readyForCgpa ? (
+                      <div className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-800 shadow-sm">
+                        <Check className="h-4 w-4 text-emerald-600" />
+                        <span>✓ Sent to CGPA & Transcripts</span>
+                      </div>
+                    ) : selectedGpaCohort.totalStages > 0 &&
                     (selectedGpaCohort.calculatedStages || []).length >= selectedGpaCohort.totalStages ? (
                       <Button
                         onClick={() => sendToCgpaMutation.mutate()}
@@ -559,6 +697,39 @@ export default function RegistrarGpa() {
           ========================================================================= */}
       {activeMainTab === 'cgpa' && (
         <>
+          {/* Sub-tabs: Active vs History */}
+          <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+            <button
+              type="button"
+              onClick={() => {
+                setCgpaSubTab('active');
+                setSelectedCgpaCohort(null);
+              }}
+              className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition ${
+                cgpaSubTab === 'active'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              Active Cumulative CGPA ({cohorts.filter((c) => Boolean(c.readyForCgpa && !c.cgpaCalculated)).length})
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCgpaSubTab('history');
+                setSelectedCgpaCohort(null);
+              }}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg transition ${
+                cgpaSubTab === 'history'
+                  ? 'bg-slate-800 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <History className="h-3.5 w-3.5" />
+              <span>Graduated & Certified History ({cohorts.filter((c) => Boolean(c.cgpaCalculated)).length})</span>
+            </button>
+          </div>
+
           {/* VIEW A: SUBMITTED COHORTS CARDS (NO FILTER BUTTONS REQUIRED) */}
           {!selectedCgpaCohort ? (
             <div className="space-y-4">
@@ -806,6 +977,55 @@ export default function RegistrarGpa() {
                 </div>
               </div>
             )}
+          </div>
+        </Modal>
+      )}
+
+      {/* Certificate In-App Preview Modal */}
+      {certPreviewStudent && certPreviewUrl && (
+        <Modal
+          open={Boolean(certPreviewStudent && certPreviewUrl)}
+          onClose={() => {
+            if (certPreviewUrl) URL.revokeObjectURL(certPreviewUrl);
+            setCertPreviewUrl(null);
+            setCertPreviewBlob(null);
+            setCertPreviewStudent(null);
+          }}
+          title={`Official Certificate Preview · ${certPreviewStudent.fullName}`}
+          subtitle={`${certPreviewStudent.studentId} · Graduated Candidate`}
+          size="xl"
+          footer={
+            <div className="flex items-center justify-between w-full">
+              <Button
+                variant="primary"
+                onClick={() => {
+                  downloadBlob(certPreviewBlob, `Certificate_${certPreviewStudent.studentId || 'official'}.pdf`);
+                  toast.success('Certificate PDF downloaded.');
+                }}
+                className="gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs"
+              >
+                <Download className="h-4 w-4" /> Download Certificate PDF
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (certPreviewUrl) URL.revokeObjectURL(certPreviewUrl);
+                  setCertPreviewUrl(null);
+                  setCertPreviewBlob(null);
+                  setCertPreviewStudent(null);
+                }}
+              >
+                Close Preview
+              </Button>
+            </div>
+          }
+        >
+          <div className="h-[600px] w-full rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 shadow-inner">
+            <iframe
+              src={certPreviewUrl}
+              className="w-full h-full border-0"
+              title="Official Certificate Preview"
+            />
           </div>
         </Modal>
       )}

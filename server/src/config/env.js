@@ -20,7 +20,7 @@ const schema = z.object({
   MONGODB_URI: z.string().min(10),
   JWT_ACCESS_SECRET: z.string().min(32),
   CODE_HMAC_SECRET: z.string().min(32),
-  ACCESS_TOKEN_TTL: z.string().default('10m'),
+  ACCESS_TOKEN_TTL: z.string().default('2d'),
   REFRESH_TTL_DAYS: z.coerce.number().default(7),
   REFRESH_ABSOLUTE_DAYS: z.coerce.number().default(30),
   CODE_TTL_MINUTES: z.coerce.number().default(5),

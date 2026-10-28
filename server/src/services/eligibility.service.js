@@ -119,9 +119,10 @@ export async function evaluateStudent(studentId, { evaluatedBy = null } = {}) {
   const activeCertificate = await Certificate.findOne({ student: studentId, status: 'issued' }).select('_id').lean();
   let status;
   if (activeCertificate) status = 'certificate_issued';
+  else if (student.studentStatus === 'graduated' || enrollment?.status === 'completed') status = 'eligible';
   else if (reasons.length === 0) status = 'eligible';
   else if (pending.length && !missingRequiredCourses.length && earnedCredits >= requiredCredits) status = 'pending_review';
-  else if (['completed', 'withdrawn'].includes(enrollment?.status) || student.studentStatus === 'graduated') status = 'not_eligible';
+  else if (['withdrawn'].includes(enrollment?.status) || student.studentStatus === 'withdrawn') status = 'not_eligible';
   else status = 'in_progress';
 
   const evaluation = await GraduationEvaluation.create({

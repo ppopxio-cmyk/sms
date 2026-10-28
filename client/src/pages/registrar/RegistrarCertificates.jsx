@@ -30,19 +30,16 @@ function newKey() {
   return `certificate-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-async function openPdf(path, options) {
-  const response = await api.post(path, options, { responseType: 'blob' });
-  const type = response.headers?.['content-type'] || '';
-  if (!type.includes('application/pdf')) throw new Error('The server did not return a PDF document.');
-  const url = URL.createObjectURL(response.data);
-  const opened = window.open(url, '_blank', 'noopener,noreferrer');
-  if (!opened) {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'Certificate_preview.pdf';
-    link.click();
-  }
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export default function RegistrarCertificates() {
@@ -256,13 +253,16 @@ function IssueCertificateModal({ open, onClose, onSaved }) {
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState('');
   const [previewing, setPreviewing] = useState(false);
+  const [previewData, setPreviewData] = useState(null);
   const [idempotencyKey, setIdempotencyKey] = useState(newKey());
 
   useEffect(() => {
     if (open) {
+      if (previewData?.url) URL.revokeObjectURL(previewData.url);
       setStudent(null);
       setConfirmed(false);
       setError('');
+      setPreviewData(null);
       setIdempotencyKey(newKey());
     }
   }, [open]);
@@ -297,8 +297,10 @@ function IssueCertificateModal({ open, onClose, onSaved }) {
     setPreviewing(true);
     setError('');
     try {
-      await openPdf(`${REGISTRAR}/certificates/preview`, { student: student.id });
-      toast.success('Certificate preview opened in a new tab.');
+      const res = await api.post(`${REGISTRAR}/certificates/preview`, { student: student.id }, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      setPreviewData({ url, blob: res.data });
+      toast.success('Certificate preview loaded.');
     } catch (err) {
       const message = await fileErrorMessage(err, 'The preview could not be generated.');
       setError(message);
@@ -313,19 +315,67 @@ function IssueCertificateModal({ open, onClose, onSaved }) {
       open={open}
       title="Issue certificate"
       subtitle="The server recomputes eligibility from published results and the current policy. The client cannot confirm eligibility on its own."
-      size="lg"
+      size={previewData ? 'xl' : 'lg'}
       onClose={issue.isPending ? undefined : onClose}
       dismissible={!issue.isPending}
-      footer={<><Button variant="secondary" onClick={onClose} disabled={issue.isPending}>Cancel</Button><Button variant="secondary" onClick={preview} loading={previewing} disabled={!student}>Preview PDF</Button><Button onClick={() => issue.mutate()} loading={issue.isPending} disabled={!student || !confirmed}>Issue certificate</Button></>}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={issue.isPending}>
+            Cancel
+          </Button>
+          {previewData ? (
+            <Button
+              variant="secondary"
+              className="gap-2 text-brand-700"
+              onClick={() => {
+                downloadBlob(previewData.blob, `Certificate_${student?.studentId || 'preview'}.pdf`);
+                toast.success('Certificate PDF downloaded.');
+              }}
+            >
+              <Download className="h-4 w-4" /> Download PDF
+            </Button>
+          ) : (
+            <Button variant="secondary" onClick={preview} loading={previewing} disabled={!student}>
+              <Eye className="h-4 w-4" /> Preview PDF
+            </Button>
+          )}
+          <Button onClick={() => issue.mutate()} loading={issue.isPending} disabled={!student || !confirmed}>
+            Issue certificate
+          </Button>
+        </>
+      }
     >
       <div className="grid gap-4">
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
         <StudentPicker
           value={student}
-          onChange={(value) => { setStudent(value); setConfirmed(false); setError(''); }}
+          onChange={(value) => { setStudent(value); setConfirmed(false); setError(''); setPreviewData(null); }}
           status="graduated"
           hint="Only graduated students are eligible for certificate issuance"
         />
+
+        {previewData ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-700">Official Certificate Preview</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-xs text-rose-600 hover:bg-rose-50"
+                onClick={() => setPreviewData(null)}
+              >
+                Hide Preview
+              </Button>
+            </div>
+            <div className="h-[460px] w-full rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 shadow-inner">
+              <iframe
+                src={previewData.url}
+                className="w-full h-full border-0"
+                title="Certificate PDF Preview"
+              />
+            </div>
+          </div>
+        ) : null}
         <div className="rounded-2xl bg-slate-50 p-4 text-xs leading-relaxed text-slate-600">
           <p className="flex items-center gap-2 font-semibold text-slate-800"><ShieldCheck className="h-4 w-4 text-brand-600" /> Issuance checks</p>
           <ul className="mt-2 list-inside list-disc space-y-1">

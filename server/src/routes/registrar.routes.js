@@ -102,7 +102,15 @@ import {
 import {
   listCertificates, getCertificate, preview, issue, downloadCertificate, revokeCertificate,
   reissueCertificate, listTranscripts, getTranscript, createTranscript, downloadTranscript, exportTranscriptRecord, revokeTranscript, certificateMeta,
+  getStudentTranscriptCount,
 } from '../controllers/registrar.documents.controller.js';
+import {
+  listIdCards,
+  getStudentCardEligibility,
+  issueIdCard,
+  downloadIdCardPdf,
+  previewIdCardPdf,
+} from '../controllers/registrar.id-cards.controller.js';
 import { dashboard, analytics, search } from '../controllers/registrar.dashboard.controller.js';
 import { reportOverview, exportReport } from '../controllers/registrar.reports.controller.js';
 import {
@@ -310,6 +318,7 @@ r.get('/graduation-eligibility/:studentId', requirePermission('graduation:view')
 r.post('/graduation-eligibility/:studentId/evaluate', requirePermission('graduation:evaluate'), validate(studentIdParamSchema, 'params'), evaluateGraduation);
 
 // ---- Transcripts ------------------------------------------------------------
+r.get('/transcripts/student/:studentId/count', getStudentTranscriptCount);
 r.get('/transcripts', requirePermission('transcripts:view'), validate(listTranscriptsQuerySchema, 'query'), listTranscripts);
 r.post('/transcripts', requirePermission('transcripts:issue'), validate(transcriptCreateSchema), createTranscript);
 r.get('/transcripts/:id', requirePermission('transcripts:view'), validate(idParamSchema, 'params'), getTranscript);
@@ -326,6 +335,13 @@ r.post('/certificates/issue', requirePermission('certificates:issue'), validate(
 r.get('/certificates/:id/pdf', requirePermission('certificates:view'), validate(idParamSchema, 'params'), downloadCertificate);
 r.post('/certificates/:id/revoke', requirePermission('certificates:revoke'), validate(idParamSchema, 'params'), validate(revokeSchema), revokeCertificate);
 r.post('/certificates/:id/reissue', requirePermission('certificates:issue'), validate(idParamSchema, 'params'), validate(reissueSchema), reissueCertificate);
+
+// ---- Student ID Cards ---------------------------------------------------
+r.get('/id-cards', listIdCards);
+r.get('/id-cards/student/:studentId', getStudentCardEligibility);
+r.post('/id-cards/issue', issueIdCard);
+r.get('/id-cards/:id/pdf', downloadIdCardPdf);
+r.post('/id-cards/preview', previewIdCardPdf);
 
 // ---- Reports ----------------------------------------------------------------
 r.get('/reports/overview', requirePermission('reports:view'), reportOverview);

@@ -9,8 +9,10 @@ import {
   Calculator,
   CheckCircle2,
   ClipboardCheck,
+  Clock,
   Eye,
   GraduationCap,
+  History,
   Layers,
   Mail,
   Search,
@@ -46,6 +48,7 @@ export default function RegistrarResults() {
 
   // Active query applied when clicking "Show Results"
   const [activeQuery, setActiveQuery] = useState(null);
+  const [resultsTab, setResultsTab] = useState('active'); // 'active' | 'history'
 
   // Single offering modal view
   const [viewOfferingId, setViewOfferingId] = useState(null);
@@ -203,6 +206,36 @@ export default function RegistrarResults() {
     onError: (err) => toast.error(errorMessage(err, 'Could not accept and grade stage.')),
   });
 
+  const publishedStagesForSelectedProg = useMemo(() => {
+    if (!selectedProg) return new Set();
+    const progRows = (submissions.data?.rows || []).filter(
+      (r) => String(r.program?.id || r.program) === String(selectedProg)
+    );
+    const set = new Set();
+    if (selectedProgDoc?.finalizedStages) {
+      selectedProgDoc.finalizedStages.forEach((s) => set.add(s));
+    }
+    const stageMap = new Map();
+    for (const r of progRows) {
+      const lvl = Number(r.level || 1);
+      if (!stageMap.has(lvl)) stageMap.set(lvl, []);
+      stageMap.get(lvl).push(r);
+    }
+    for (const [lvl, rows] of stageMap.entries()) {
+      if (rows.length > 0 && rows.every((r) => r.status === 'published' || (r.counts?.total > 0 && r.counts?.published === r.counts?.total))) {
+        set.add(lvl);
+      }
+    }
+    return set;
+  }, [submissions.data?.rows, selectedProg, selectedProgDoc]);
+
+  const activeStageOptions = useMemo(() => {
+    if (resultsTab === 'history') {
+      return availableStages;
+    }
+    return availableStages.filter((s) => !publishedStagesForSelectedProg.has(s.stage));
+  }, [resultsTab, availableStages, publishedStagesForSelectedProg]);
+
   // Filter submissions matching active query
   const matchingCourses = useMemo(() => {
     if (!activeQuery) return [];
@@ -210,9 +243,14 @@ export default function RegistrarResults() {
     return rows.filter((r) => {
       const matchProg = String(r.program?.id || r.program) === String(activeQuery.program);
       const matchLevel = activeQuery.level === 'all' || Number(r.level || 1) === Number(activeQuery.level);
-      return matchProg && matchLevel;
+      const matchBatch = !activeQuery.batch || String(r.batch?.id || r.batch?._id || r.batch) === String(activeQuery.batch);
+      const isPub = r.status === 'published' || (r.counts?.total > 0 && r.counts?.published === r.counts?.total);
+      if (resultsTab === 'history') {
+        return matchProg && matchLevel && matchBatch && isPub;
+      }
+      return matchProg && matchLevel && matchBatch;
     });
-  }, [submissions.data?.rows, activeQuery]);
+  }, [submissions.data?.rows, activeQuery, resultsTab]);
 
   const totalStagesCount = availableStages.length || 4;
   const finalizedStages = selectedProgDoc?.finalizedStages || [];
@@ -241,7 +279,44 @@ export default function RegistrarResults() {
         subtitle="Review submitted course marks by batch, department, programme and stage. Accept & grade complete stages to send for GPA calculation."
       />
 
-      {/* Cascaded Filter Dropdowns (Strictly selects, no 'All' options) */}
+      {/* Mode Tabs: Active (Unpublished) vs History (Published) */}
+      <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+        <button
+          type="button"
+          onClick={() => {
+            setResultsTab('active');
+            setSelectedLevel('');
+            setActiveQuery(null);
+          }}
+          className={`focus-ring inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition ${
+            resultsTab === 'active'
+              ? 'bg-brand-600 text-white shadow-sm ring-2 ring-brand-400'
+              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          <Clock className="h-4 w-4" />
+          <span>Active Submissions (Unpublished)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setResultsTab('history');
+            setSelectedLevel('');
+            setActiveQuery(null);
+          }}
+          className={`focus-ring inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition ${
+            resultsTab === 'history'
+              ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-400'
+              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          <History className="h-4 w-4" />
+          <span>History (Published Results · Read-Only)</span>
+        </button>
+      </div>
+
+      {/* Cascaded Filter Dropdowns */}
       <Card>
         <CardBody className="p-4 sm:p-5">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 items-end">
@@ -315,18 +390,25 @@ export default function RegistrarResults() {
               required
             >
               <option value="">Choose stage / year...</option>
-              <option value="all">All Years / Stages (Complete Programme)</option>
-              {availableStages.map((s) => (
+              {resultsTab === 'active' && activeStageOptions.length > 1 && (
+                <option value="all">All Years / Stages (Complete Programme)</option>
+              )}
+              {activeStageOptions.map((s) => (
                 <option key={s.stage} value={s.stage}>
                   {s.label}
                 </option>
               ))}
+              {resultsTab === 'active' && activeStageOptions.length === 0 && (
+                <option disabled value="">All stages published (see History tab)</option>
+              )}
             </SelectField>
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
             <p className="text-xs text-slate-500">
-              Select all 4 filters above to view and submit that stage's courses.
+              {resultsTab === 'active'
+                ? 'Select all 4 filters above to view and submit unpublished stage courses.'
+                : 'Select all 4 filters above to inspect published course results.'}
             </p>
             <Button
               onClick={handleShowResults}

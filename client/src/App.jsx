@@ -6,7 +6,7 @@ import { GuestRoute, ProtectedRoute, RequireRole } from './components/guards';
 import AppShell from './components/layout/AppShell';
 import SplashScreen from './components/layout/SplashScreen';
 import { SkeletonPage } from './components/ui/Skeleton';
-import FullScreenBackButton from './components/ui/FullScreenBackButton';
+
 
 // The first screens stay eager so they appear instantly. Everything behind the
 // login — including anything chart-heavy later — is split out of the first
@@ -70,6 +70,7 @@ const RegistrarGraduation = lazy(() => import('./pages/registrar/RegistrarGradua
 const RegistrarGradingPolicy = lazy(() => import('./pages/registrar/RegistrarGradingPolicy.jsx'));
 const RegistrarTranscripts = lazy(() => import('./pages/registrar/RegistrarTranscripts.jsx'));
 const RegistrarCertificates = lazy(() => import('./pages/registrar/RegistrarCertificates.jsx'));
+const RegistrarIdCards = lazy(() => import('./pages/registrar/RegistrarIdCards.jsx'));
 const RegistrarReports = lazy(() => import('./pages/registrar/RegistrarReports.jsx'));
 const RegistrarAnnouncements = lazy(() => import('./pages/registrar/RegistrarAnnouncements.jsx'));
 const RegistrarNotifications = lazy(() => import('./pages/registrar/RegistrarNotifications.jsx'));
@@ -236,6 +237,8 @@ export default function App() {
               <Route path="/registrar/graduation-eligibility" element={<RegistrarGraduation />} />
               <Route path="/registrar/transcripts" element={<RegistrarTranscripts />} />
               <Route path="/registrar/certificates" element={<RegistrarCertificates />} />
+              <Route path="/registrar/issue-id" element={<RegistrarIdCards />} />
+              <Route path="/registrar/id-cards" element={<Navigate to="/registrar/issue-id" replace />} />
               <Route path="/registrar/reports" element={<RegistrarReports />} />
               <Route path="/registrar/announcements" element={<RegistrarAnnouncements />} />
               <Route path="/registrar/notifications" element={<RegistrarNotifications />} />
