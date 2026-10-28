@@ -145,7 +145,6 @@ export default function App() {
         </div>
       }
     >
-      <FullScreenBackButton />
       <Routes>
         {/* There is no sign-up page on purpose: an administrator creates every account. */}
         <Route element={<GuestRoute />}>
