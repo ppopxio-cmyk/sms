@@ -115,25 +115,25 @@ function GradeDistribution({ rows = [] }) {
 
 function TopStudents({ rows = [] }) {
   if (!rows.length) {
-    return <p className="py-10 text-sm text-white/70">No published marks yet.</p>;
+    return <p className="py-10 text-sm text-white/80">No published marks yet.</p>;
   }
   const [first, ...rest] = rows;
 
   return (
     <div>
-      <div className="border-b border-white/15 pb-5">
-        <p className="text-sm text-white/65">Highest average</p>
-        <p className="mt-2 font-serif text-2xl leading-tight">{first.name}</p>
-        <p className="mt-1 text-sm text-white/65">{first.studentNumber} · {first.programme}</p>
-        <p className="mt-5 text-6xl font-semibold tabular-nums tracking-[-0.06em]">{mark(first.averageMark)}</p>
-        <p className="mt-1 text-sm text-white/65">{first.resultCount} published result{first.resultCount === 1 ? '' : 's'}</p>
+      <div className="border-b border-white/20 pb-5">
+        <p className="text-xs font-semibold uppercase tracking-wider text-blue-200">Highest average</p>
+        <p className="mt-2 font-serif text-2xl font-bold leading-tight text-white">{first.name}</p>
+        <p className="mt-1 text-sm text-blue-100">{first.studentNumber} · {first.programme}</p>
+        <p className="mt-4 text-6xl font-bold tabular-nums tracking-[-0.06em] text-white">{mark(first.averageMark)}</p>
+        <p className="mt-1 text-xs text-blue-200">{first.resultCount} published result{first.resultCount === 1 ? '' : 's'}</p>
       </div>
-      <div className="mt-2 divide-y divide-white/10">
+      <div className="mt-2 divide-y divide-white/15">
         {rest.map((row, index) => (
           <div key={row.id} className="flex items-center gap-3 py-3">
-            <span className="w-4 text-xs tabular-nums text-white/45">{index + 2}</span>
-            <span className="min-w-0 flex-1 truncate text-sm">{row.name}</span>
-            <span className="text-sm font-semibold tabular-nums">{mark(row.averageMark)}</span>
+            <span className="w-5 text-xs font-bold tabular-nums text-blue-200">{index + 2}</span>
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-white">{row.name}</span>
+            <span className="text-sm font-bold tabular-nums text-white">{mark(row.averageMark)}</span>
           </div>
         ))}
       </div>
@@ -291,9 +291,9 @@ export default function RegistrarAnalytics() {
               <SectionHeading title="Grade distribution" note="How final letter grades are spread across the filtered results." />
               <GradeDistribution rows={data.byGrade} />
             </section>
-            <section className="-mx-4 px-5 py-6 lg:mx-0 lg:px-7" style={{ backgroundColor: INK }}>
-              <p className="font-serif text-xl text-white">Leading students</p>
-              <p className="mt-1 text-sm text-white/60">Ranked by average published mark.</p>
+            <section className="-mx-4 px-5 py-6 lg:mx-0 lg:px-7 rounded-2xl bg-gradient-to-br from-blue-700/85 via-blue-800/90 to-indigo-900/95 shadow-xl border border-blue-400/25 backdrop-blur-md text-white">
+              <p className="font-serif text-xl font-bold text-white">Leading students</p>
+              <p className="mt-1 text-sm text-blue-100/80">Ranked by average published mark.</p>
               <div className="mt-6">
                 <TopStudents rows={data.topStudents} />
               </div>

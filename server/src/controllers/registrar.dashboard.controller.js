@@ -78,6 +78,85 @@ export const dashboard = asyncHandler(async (req, res) => {
   const pipeline = { eligible: 0, in_progress: 0, pending_review: 0, not_eligible: 0, certificate_issued: 0 };
   for (const row of evaluationStatuses) pipeline[row._id] = row.count;
 
+  const [
+    deptPerformance,
+    gradeDistribution,
+    offeringVelocity,
+    componentPerformance,
+  ] = await Promise.all([
+    Result.aggregate([
+      { $match: { totalMark: { $ne: null } } },
+      { $lookup: { from: 'courses', localField: 'course', foreignField: '_id', as: 'crs' } },
+      { $unwind: '$crs' },
+      { $lookup: { from: 'departments', localField: 'crs.department', foreignField: '_id', as: 'dept' } },
+      { $unwind: '$dept' },
+      {
+        $group: {
+          _id: '$dept._id',
+          code: { $first: '$dept.code' },
+          name: { $first: '$dept.name' },
+          avgMark: { $avg: '$totalMark' },
+          passCount: { $sum: { $cond: ['$passed', 1, 0] } },
+          total: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          code: 1,
+          name: 1,
+          avgMark: { $round: ['$avgMark', 1] },
+          passRate: {
+            $round: [{ $multiply: [{ $divide: ['$passCount', { $cond: [{ $gt: ['$total', 0] }, '$total', 1] }] }, 100] }, 1],
+          },
+          total: 1,
+        },
+      },
+      { $sort: { avgMark: -1 } },
+      { $limit: 8 },
+    ]),
+    Result.aggregate([
+      { $match: { letterGrade: { $ne: null } } },
+      { $group: { _id: '$letterGrade', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]),
+    CourseOffering.aggregate([
+      { $lookup: { from: 'departments', localField: 'department', foreignField: '_id', as: 'dept' } },
+      { $unwind: '$dept' },
+      {
+        $group: {
+          _id: '$dept.code',
+          name: { $first: '$dept.name' },
+          openCount: { $sum: { $cond: [{ $eq: ['$status', 'open'] }, 1, 0] } },
+          completedCount: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
+          totalCount: { $sum: 1 },
+        },
+      },
+      { $sort: { totalCount: -1 } },
+      { $limit: 8 },
+    ]),
+    Result.aggregate([
+      { $unwind: '$components' },
+      {
+        $group: {
+          _id: '$components.name',
+          avgScore: { $avg: '$components.score' },
+          avgMax: { $avg: '$components.max' },
+          count: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          name: '$_id',
+          pct: { $round: [{ $multiply: [{ $divide: ['$avgScore', '$avgMax'] }, 100] }, 1] },
+          avgScore: { $round: ['$avgScore', 1] },
+          avgMax: { $round: ['$avgMax', 1] },
+        },
+      },
+      { $sort: { pct: -1 } },
+    ]),
+  ]);
+
   const recent = await Promise.all(
     recentActivity.map(async (row) => ({
       id: String(row._id),
@@ -121,6 +200,31 @@ export const dashboard = asyncHandler(async (req, res) => {
       byLevel: byLevel.map((row) => ({ level: row._id, count: row.count })),
       byQualification: byQualification.map((row) => ({ type: row._id, count: row.count })),
       graduation: pipeline,
+      deptPerformance: deptPerformance.map((row) => ({
+        id: String(row._id),
+        code: row.code,
+        name: row.name,
+        avgMark: row.avgMark,
+        passRate: row.passRate,
+        total: row.total,
+      })),
+      gradeDistribution: gradeDistribution.map((row) => ({
+        grade: row._id,
+        count: row.count,
+      })),
+      offeringVelocity: offeringVelocity.map((row) => ({
+        code: row._id,
+        name: row.name,
+        open: row.openCount,
+        completed: row.completedCount,
+        total: row.totalCount,
+      })),
+      componentPerformance: componentPerformance.map((row) => ({
+        name: row.name,
+        pct: row.pct,
+        avgScore: row.avgScore,
+        avgMax: row.avgMax,
+      })),
     },
     recentActivity: recent,
   });

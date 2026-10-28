@@ -351,6 +351,37 @@ export const submitStageComplete = asyncHandler(async (req, res) => {
     { $set: { status: 'completed' } },
   );
 
+  await Program.updateOne(
+    { _id: programId },
+    { $addToSet: { finalizedStages: Number(level) } }
+  );
+
+  const prog = await Program.findById(programId).lean();
+  let totalStages = 4;
+  if (prog) {
+    if (prog.qualificationType === 'degree') totalStages = prog.durationYears || 4;
+    else if (prog.qualificationType === 'diploma') totalStages = prog.levels?.length ? Math.max(...prog.levels) : 4;
+    else if (prog.shortTerm?.duration) totalStages = prog.shortTerm.duration;
+  }
+
+  const allOfferings = await CourseOffering.find({
+    program: programId,
+    ...(batchId ? { batch: batchId } : {}),
+  }).select('level status').lean();
+
+  const finishedStages = [];
+  for (let s = 1; s <= totalStages; s++) {
+    const lvlOffs = allOfferings.filter((o) => o.level === s);
+    if (lvlOffs.length > 0 && lvlOffs.every((o) => o.status === 'completed')) {
+      finishedStages.push(s);
+    }
+  }
+
+  const allStagesFinished = totalStages > 0 && finishedStages.length >= totalStages;
+  if (batchId && allStagesFinished) {
+    await Batch.updateOne({ _id: batchId }, { $set: { status: 'completed', readyForCgpa: true } });
+  }
+
   audit({
     req,
     action: 'registrar.results.stage_submitted',
@@ -396,12 +427,25 @@ export const submitProgramFinished = asyncHandler(async (req, res) => {
   }
 
   if (batchId) {
-    await Batch.updateOne({ _id: batchId }, { $set: { status: 'completed' } });
+    await Batch.updateOne({ _id: batchId }, { $set: { status: 'completed', readyForCgpa: true } });
   }
 
   await CourseOffering.updateMany(
     { _id: { $in: offeringIds } },
     { $set: { status: 'completed' } },
+  );
+
+  let totalStages = 4;
+  if (program) {
+    if (program.qualificationType === 'degree') totalStages = program.durationYears || 4;
+    else if (program.qualificationType === 'diploma') totalStages = program.levels?.length ? Math.max(...program.levels) : 4;
+    else if (program.shortTerm?.duration) totalStages = program.shortTerm.duration;
+  }
+
+  const allStageNumbers = Array.from({ length: totalStages }, (_, i) => i + 1);
+  await Program.updateOne(
+    { _id: programId },
+    { $addToSet: { finalizedStages: { $each: allStageNumbers } } }
   );
 
   audit({

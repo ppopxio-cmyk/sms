@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowRight, BookOpen, Building2, GraduationCap, Pencil, Plus, ShieldCheck, Trash2, UserRoundCheck } from 'lucide-react';
+import { ArrowRight, BookOpen, Building2, GraduationCap, Pencil, Plus, RotateCcw, Search, ShieldCheck, Trash2, UserRoundCheck } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import { REGISTRAR, humanStatus, levelLabel, qualificationLabel } from '../../lib/registrar';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
@@ -96,6 +96,7 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
   const [selectedBatch, setSelectedBatch] = useState('');
   const [selectedDept, setSelectedDept] = useState('');
   const [selectedProg, setSelectedProg] = useState('');
+  const [appliedFilters, setAppliedFilters] = useState(null);
   const [departmentModal, setDepartmentModal] = useState(null);
   const [programModal, setProgramModal] = useState(null);
   const [assignModal, setAssignModal] = useState(null);
@@ -191,46 +192,89 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
 
   const batchProgIds = selectedBatchGroup ? selectedBatchGroup.programs : [];
 
+  const availableDepartments = useMemo(() => {
+    if (!selectedBatchGroup || batchProgIds.length === 0) return rawDepartments;
+    const progsInBatch = rawPrograms.filter((p) => batchProgIds.includes(p.id));
+    const deptIds = new Set(progsInBatch.map((p) => String(p.department?.id || p.department)));
+    return rawDepartments.filter((d) => deptIds.has(String(d.id)));
+  }, [rawDepartments, rawPrograms, batchProgIds, selectedBatchGroup]);
+
   const programsInSelectedDept = useMemo(() => {
-    if (!selectedDept) return rawPrograms;
-    return rawPrograms.filter((p) => p.department?.id === selectedDept || p.department === selectedDept);
-  }, [rawPrograms, selectedDept]);
+    if (!selectedDept) return [];
+    return rawPrograms.filter((p) => {
+      const matchDept = String(p.department?.id || p.department) === String(selectedDept);
+      const matchBatch = batchProgIds.length === 0 || batchProgIds.includes(p.id);
+      return matchDept && matchBatch;
+    });
+  }, [rawPrograms, selectedDept, batchProgIds]);
 
-  const departments = rawDepartments.filter((row) => {
-    if (selectedDept && row.id !== selectedDept) return false;
-    if (batchProgIds.length > 0) {
-      const progsInBatch = rawPrograms.filter((p) => batchProgIds.includes(p.id));
-      const hasDept = progsInBatch.some((p) => (p.department?.id || p.department) === row.id);
-      if (!hasDept) return false;
-    }
-    return matches([row.code, row.name]);
-  });
+  const activeBatchGroup = useMemo(() => {
+    if (!appliedFilters?.batch) return null;
+    return uniqueBatches.find((b) => b.key === appliedFilters.batch || b.code === appliedFilters.batch);
+  }, [uniqueBatches, appliedFilters]);
 
-  const programs = rawPrograms.filter((row) => {
-    if (selectedDept && row.department?.id !== selectedDept && row.department !== selectedDept) return false;
-    if (selectedProg && row.id !== selectedProg) return false;
-    if (batchProgIds.length > 0 && !batchProgIds.includes(row.id)) return false;
-    return matches([row.code, row.name, row.department?.name, row.qualificationType, ...(row.categories || [])]);
-  });
+  const activeBatchProgIds = activeBatchGroup ? activeBatchGroup.programs : [];
 
-  const courses = rawCourses.filter((row) => {
-    if (selectedDept && row.department?.id !== selectedDept && row.department !== selectedDept) return false;
-    if (selectedProg && row.program?.id !== selectedProg && row.program !== selectedProg) return false;
-    if (batchProgIds.length > 0 && row.program && !batchProgIds.includes(row.program?.id || row.program)) return false;
-    return matches([row.code, row.title, row.department?.name]);
-  });
+  const departments = useMemo(() => {
+    if (!appliedFilters) return [];
+    return rawDepartments.filter((row) => {
+      if (appliedFilters.department && String(row.id) !== String(appliedFilters.department)) return false;
+      if (activeBatchProgIds.length > 0) {
+        const progsInBatch = rawPrograms.filter((p) => activeBatchProgIds.includes(p.id));
+        const hasDept = progsInBatch.some((p) => String(p.department?.id || p.department) === String(row.id));
+        if (!hasDept) return false;
+      }
+      return matches([row.code, row.name]);
+    });
+  }, [rawDepartments, rawPrograms, activeBatchProgIds, appliedFilters, term]);
 
-  const plans = rawPlans.filter((row) => {
-    if (selectedProg && row.program?.id !== selectedProg && row.program !== selectedProg) return false;
-    return matches([row.program?.name, row.academicYear?.label, row.title]);
-  });
+  const programs = useMemo(() => {
+    if (!appliedFilters) return [];
+    return rawPrograms.filter((row) => {
+      if (appliedFilters.department && String(row.department?.id || row.department) !== String(appliedFilters.department)) return false;
+      if (appliedFilters.program && String(row.id) !== String(appliedFilters.program)) return false;
+      if (activeBatchProgIds.length > 0 && !activeBatchProgIds.includes(row.id)) return false;
+      return matches([row.code, row.name, row.department?.name, row.qualificationType, ...(row.categories || [])]);
+    });
+  }, [rawPrograms, activeBatchProgIds, appliedFilters, term]);
+
+  const courses = useMemo(() => {
+    if (!appliedFilters) return [];
+    return rawCourses.filter((row) => {
+      if (appliedFilters.department && String(row.department?.id || row.department) !== String(appliedFilters.department)) return false;
+      if (appliedFilters.program && String(row.program?.id || row.program) !== String(appliedFilters.program)) return false;
+      if (activeBatchProgIds.length > 0 && row.program && !activeBatchProgIds.includes(row.program?.id || row.program)) return false;
+      return matches([row.code, row.title, row.department?.name]);
+    });
+  }, [rawCourses, activeBatchProgIds, appliedFilters, term]);
+
+  const plans = useMemo(() => {
+    if (!appliedFilters) return [];
+    return rawPlans.filter((row) => {
+      if (appliedFilters.program && String(row.program?.id || row.program) !== String(appliedFilters.program)) return false;
+      return matches([row.program?.name, row.academicYear?.label, row.title]);
+    });
+  }, [rawPlans, appliedFilters, term]);
 
   const counts = useMemo(() => ({
-    departments: query.data?.departments?.length ?? 0,
-    programs: query.data?.programs?.length ?? 0,
-    courses: query.data?.courses?.length ?? 0,
-    plans: query.data?.plans?.length ?? 0,
-  }), [query.data]);
+    departments: departments.length,
+    programs: programs.length,
+    courses: courses.length,
+    plans: plans.length,
+  }), [departments.length, programs.length, courses.length, plans.length]);
+
+  const appliedBatchDoc = useMemo(
+    () => uniqueBatches.find((b) => b.key === appliedFilters?.batch),
+    [uniqueBatches, appliedFilters],
+  );
+  const appliedDeptDoc = useMemo(
+    () => rawDepartments.find((d) => String(d.id) === String(appliedFilters?.department)),
+    [rawDepartments, appliedFilters],
+  );
+  const appliedProgDoc = useMemo(
+    () => rawPrograms.find((p) => String(p.id) === String(appliedFilters?.program)),
+    [rawPrograms, appliedFilters],
+  );
 
   const courseColumns = [
     { key: 'code', label: 'Code', render: (row) => <span className="font-semibold text-slate-800">{row.code}</span> },
@@ -259,104 +303,174 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {TABS.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            onClick={() => { setTab(item.key); setSearch(''); }}
-            aria-pressed={tab === item.key}
-            className={`focus-ring rounded-2xl border p-4 text-left transition ${
-              tab === item.key
-                ? 'border-brand-200 bg-brand-50/70 shadow-sm'
-                : 'border-slate-100 bg-white/70 hover:bg-white'
-            }`}
-          >
-            <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${tab === item.key ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500'}`}>
-              <item.icon className="h-4.5 w-4.5" />
-            </span>
-            <span className="mt-3 block text-lg font-bold text-slate-900">{query.isLoading ? '—' : counts[item.key]}</span>
-            <span className="text-xs text-slate-500">{item.label}</span>
-          </button>
-        ))}
-      </div>
-
+      {/* Cascaded Filter Dropdowns (Strictly Batch, Department, Programme, matching Results page) */}
       <Card>
-        <CardHeader
-          title={TABS.find((item) => item.key === tab)?.label}
-          subtitle={tab === 'departments' ? 'Edit a department, or add a programme directly from its card.' : tab === 'programs' ? 'Programmes belong to a department, track durations & levels, and assign teachers with workload checks.' : tab === 'courses' ? 'Catalogue of courses offered across programmes.' : 'Master records supplied by the college owner.'}
-          icon={TABS.find((item) => item.key === tab)?.icon}
-          action={tab === 'courses' ? <Button size="sm" onClick={() => setCourseModal(true)} className="gap-1.5"><Plus className="h-4 w-4" /> Add course</Button> : null}
-        />
-        <CardBody className="space-y-4">
-          {/* Batches, Dept and Prog Filter Tabs */}
-          <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3 space-y-2.5">
-            {/* Batches filter */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">Batch:</span>
-              <button
-                type="button"
-                onClick={() => setSelectedBatch('')}
-                className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${!selectedBatch ? 'bg-slate-900 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
-              >
-                All batches
-              </button>
+        <CardBody className="p-4 sm:p-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 items-end">
+            <SelectField
+              label="1. Batch"
+              value={selectedBatch}
+              onChange={(e) => {
+                setSelectedBatch(e.target.value);
+                setSelectedDept('');
+                setSelectedProg('');
+                setAppliedFilters(null);
+              }}
+              required
+            >
+              <option value="">Choose batch...</option>
               {uniqueBatches.map((b) => (
-                <button
-                  key={b.key}
-                  type="button"
-                  onClick={() => setSelectedBatch(selectedBatch === b.key ? '' : b.key)}
-                  className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${selectedBatch === b.key ? 'bg-slate-900 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
-                >
-                  {b.code} ({b.category})
-                </button>
+                <option key={b.key} value={b.key}>
+                  {b.code} ({b.category || 'regular'})
+                </option>
               ))}
-            </div>
+            </SelectField>
 
-            {/* Department tabs */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">Dept:</span>
-              <button
-                type="button"
-                onClick={() => { setSelectedDept(''); setSelectedProg(''); }}
-                className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${!selectedDept ? 'bg-brand-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
-              >
-                All departments
-              </button>
-              {rawDepartments.map((d) => (
-                <button
-                  key={d.id}
-                  type="button"
-                  onClick={() => { setSelectedDept(d.id); setSelectedProg(''); }}
-                  className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${selectedDept === d.id ? 'bg-brand-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
-                >
+            <SelectField
+              label="2. Department"
+              value={selectedDept}
+              onChange={(e) => {
+                setSelectedDept(e.target.value);
+                setSelectedProg('');
+                setAppliedFilters(null);
+              }}
+              disabled={!selectedBatch}
+              required
+            >
+              <option value="">Choose department...</option>
+              {availableDepartments.map((d) => (
+                <option key={d.id} value={d.id}>
                   {d.code} · {d.name}
-                </button>
+                </option>
               ))}
-            </div>
+            </SelectField>
 
-            {/* Programme tabs */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">Prog:</span>
-              <button
-                type="button"
-                onClick={() => setSelectedProg('')}
-                className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${!selectedProg ? 'border border-brand-300 bg-brand-50 text-brand-800 font-semibold' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
-              >
-                All programmes ({programsInSelectedDept.length})
-              </button>
+            <SelectField
+              label="3. Programme"
+              value={selectedProg}
+              onChange={(e) => {
+                setSelectedProg(e.target.value);
+                setAppliedFilters(null);
+              }}
+              disabled={!selectedDept}
+              required
+            >
+              <option value="">Choose programme...</option>
               {programsInSelectedDept.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setSelectedProg(p.id)}
-                  className={`focus-ring shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${selectedProg === p.id ? 'border border-brand-300 bg-brand-50 text-brand-800 font-semibold' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
-                >
-                  {p.code}
-                </button>
+                <option key={p.id} value={p.id}>
+                  {p.code} · {p.name}
+                </option>
               ))}
+            </SelectField>
+          </div>
+
+          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+            <p className="text-xs text-slate-500">
+              Select Batch, Department, and Programme above, then click Show to display academic records.
+            </p>
+            <div className="flex items-center gap-2">
+              {(selectedBatch || selectedDept || selectedProg || appliedFilters) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedBatch('');
+                    setSelectedDept('');
+                    setSelectedProg('');
+                    setAppliedFilters(null);
+                  }}
+                  className="gap-1.5 text-xs text-slate-600"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" /> Reset
+                </Button>
+              )}
+              <Button
+                onClick={() => {
+                  if (!selectedBatch || !selectedDept || !selectedProg) {
+                    toast.error('Please choose Batch, Department, and Programme.');
+                    return;
+                  }
+                  setAppliedFilters({
+                    batch: selectedBatch,
+                    department: selectedDept,
+                    program: selectedProg,
+                  });
+                }}
+                disabled={!selectedBatch || !selectedDept || !selectedProg}
+                className="gap-2 bg-brand-600 hover:bg-brand-700 text-white"
+              >
+                <Search className="h-4 w-4" /> Show
+              </Button>
             </div>
           </div>
+        </CardBody>
+      </Card>
+
+      {!appliedFilters ? (
+        <Card>
+          <CardBody className="py-12 text-center">
+            <GraduationCap className="mx-auto h-12 w-12 text-slate-300" />
+            <h3 className="mt-3 text-sm font-semibold text-slate-800">Select Batch, Department &amp; Programme</h3>
+            <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
+              Choose an active batch, department, and programme above, then click <strong>Show</strong> to display academic structure records.
+            </p>
+          </CardBody>
+        </Card>
+      ) : (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {TABS.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => { setTab(item.key); setSearch(''); }}
+                aria-pressed={tab === item.key}
+                className={`focus-ring rounded-2xl border p-4 text-left transition ${
+                  tab === item.key
+                    ? 'border-brand-200 bg-brand-50/70 shadow-sm'
+                    : 'border-slate-100 bg-white/70 hover:bg-white'
+                }`}
+              >
+                <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${tab === item.key ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500'}`}>
+                  <item.icon className="h-4.5 w-4.5" />
+                </span>
+                <span className="mt-3 block text-lg font-bold text-slate-900">{query.isLoading ? '—' : counts[item.key]}</span>
+                <span className="text-xs text-slate-500">{item.label}</span>
+              </button>
+            ))}
+          </div>
+
+          <Card>
+            <CardHeader
+              title={TABS.find((item) => item.key === tab)?.label}
+              subtitle={tab === 'departments' ? 'Edit a department, or add a programme directly from its card.' : tab === 'programs' ? 'Programmes belong to a department, track durations & levels, and assign teachers with workload checks.' : tab === 'courses' ? 'Catalogue of courses offered across programmes.' : 'Master records supplied by the college owner.'}
+              icon={TABS.find((item) => item.key === tab)?.icon}
+              action={tab === 'courses' ? <Button size="sm" onClick={() => setCourseModal(true)} className="gap-1.5"><Plus className="h-4 w-4" /> Add course</Button> : null}
+            />
+            <CardBody className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-slate-50 border border-slate-200/60 rounded-xl px-3 py-2">
+                <div className="flex flex-wrap items-center gap-2 text-slate-700">
+                  <span className="font-semibold text-slate-500">Filtered by:</span>
+                  <Badge tone="indigo">{appliedBatchDoc ? `${appliedBatchDoc.code} (${appliedBatchDoc.category})` : 'Batch'}</Badge>
+                  <span className="text-slate-300">/</span>
+                  <Badge tone="brand">{appliedDeptDoc ? `${appliedDeptDoc.code} · ${appliedDeptDoc.name}` : 'Department'}</Badge>
+                  <span className="text-slate-300">/</span>
+                  <Badge tone="success">{appliedProgDoc ? `${appliedProgDoc.code} · ${appliedProgDoc.name}` : 'Programme'}</Badge>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedBatch('');
+                    setSelectedDept('');
+                    setSelectedProg('');
+                    setAppliedFilters(null);
+                  }}
+                  className="h-7 text-xs gap-1 text-slate-600"
+                >
+                  <RotateCcw className="h-3 w-3" /> Change Filter
+                </Button>
+              </div>
 
           <SearchInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by code, title or department..." />
           {query.isLoading ? (
@@ -509,6 +623,8 @@ export default function RegistrarAcademicStructure({ defaultTab = 'departments' 
           )}
         </CardBody>
       </Card>
+    </>
+  )}
 
       <DepartmentModal
         open={Boolean(departmentModal)}
