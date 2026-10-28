@@ -1,6 +1,7 @@
 import { api } from './api';
 import { formatEthiopian } from './ethiopianDate';
 
+export { formatEthiopian };
 export const REGISTRAR = '/registrar';
 export const registrarPath = (path) => `/registrar${path}`;
 

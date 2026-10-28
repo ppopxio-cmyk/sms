@@ -350,8 +350,7 @@ function IssueCertificateModal({ open, onClose, onSaved }) {
         <StudentPicker
           value={student}
           onChange={(value) => { setStudent(value); setConfirmed(false); setError(''); setPreviewData(null); }}
-          status="graduated"
-          hint="Only graduated students are eligible for certificate issuance"
+          hint="Select a student to evaluate and issue their official certificate"
         />
 
         {previewData ? (
@@ -461,9 +460,49 @@ function CertificateDetail({ certificateId, onClose }) {
             <div className="sm:col-span-2"><dt className="text-xs text-slate-400">Verification reference</dt><dd className="break-all text-slate-700">{row.verificationId}</dd></div>
             {row.revokeReason ? <div className="sm:col-span-2"><dt className="text-xs text-slate-400">Revocation reason</dt><dd className="text-rose-700">{row.revokeReason}</dd></div> : null}
           </dl>
-          <div className="rounded-2xl border border-slate-100 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Academic snapshot</p>
-            <p className="mt-1 text-sm text-slate-600">{row.academicSnapshot?.length ?? 0} course entries stored with this certificate. The PDF is generated from this snapshot, not from the live student record.</p>
+          <div className="rounded-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Courses & Marks Breakdown ({row.academicSnapshot?.length ?? 0} Courses)
+              </span>
+              <span className="text-xs text-slate-500 font-medium">All Programme Years / Levels</span>
+            </div>
+            {row.academicSnapshot?.length ? (
+              <div className="overflow-x-auto max-h-72">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100 text-slate-600 font-semibold sticky top-0 border-b border-slate-200">
+                    <tr>
+                      <th className="px-3 py-2">Code</th>
+                      <th className="px-3 py-2">Course Title</th>
+                      <th className="px-3 py-2 text-center">Year/Level</th>
+                      <th className="px-3 py-2 text-center">Credits</th>
+                      <th className="px-3 py-2 text-right">Mark</th>
+                      <th className="px-3 py-2 text-center">Grade</th>
+                      <th className="px-3 py-2 text-right">Points</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {row.academicSnapshot.map((c, i) => (
+                      <tr key={c.code || i} className="hover:bg-slate-50">
+                        <td className="px-3 py-2 font-mono font-bold text-brand-700">{c.code}</td>
+                        <td className="px-3 py-2 font-medium text-slate-800">{c.title}</td>
+                        <td className="px-3 py-2 text-center text-slate-600">Year {c.level || 1}</td>
+                        <td className="px-3 py-2 text-center text-slate-700">{c.credits ?? c.creditHours ?? '—'}</td>
+                        <td className="px-3 py-2 text-right font-bold text-slate-900">{c.mark ?? c.totalMark ?? '—'}</td>
+                        <td className="px-3 py-2 text-center">
+                          <span className="rounded bg-indigo-50 px-1.5 py-0.5 font-bold text-indigo-700">
+                            {c.letterGrade || '—'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-slate-700">{c.gradePoint != null ? Number(c.gradePoint).toFixed(2) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="p-4 text-xs text-slate-500">No course entries recorded.</p>
+            )}
           </div>
           {row.pdfGeneratedAt ? <p className="text-xs text-slate-400">PDF generated {displayDateTime(row.pdfGeneratedAt)}.</p> : (
             <p className="rounded-xl bg-amber-50 px-3.5 py-3 text-xs text-amber-900">This record has no generated PDF yet. Downloading or reissuing will generate it from the stored snapshot.</p>

@@ -487,6 +487,19 @@ export const registrarReportQuerySchema = z.object({
   status: text(40).optional().default(''),
 });
 
+export const academicAnalyticsQuerySchema = z.object({
+  academicYear: objectId.optional(),
+  reportType: z.enum(['monthly', 'yearly', 'departments', 'programs', 'courses', 'workflow']).optional().default('yearly'),
+  month: z.coerce.number().min(1).max(12).optional(),
+  batch: objectId.optional(),
+  studyMode: z.enum(['all', 'regular', 'extension']).optional().default('all'),
+  department: objectId.optional(),
+  program: objectId.optional(),
+  qualification: z.enum(['all', 'degree', 'diploma', 'short-term']).optional().default('all'),
+  level: z.coerce.number().min(1).max(10).optional(),
+  format: z.enum(['xlsx', 'docx', 'pdf']).optional().default('xlsx'),
+});
+
 export const announcementListSchema = paginationSchema.extend({
   status: z.enum(['all', 'draft', 'scheduled', 'published', 'expired', 'archived']).optional().default('all'),
   kind: z.enum(['announcement', 'notification']).optional().default('announcement'),

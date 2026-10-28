@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CheckCircle2, GraduationCap, RefreshCw, ShieldAlert } from 'lucide-react';
+import { CheckCircle2, GraduationCap, RefreshCw, ShieldAlert, Filter } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import {
   REGISTRAR,
@@ -28,8 +28,13 @@ const STATUSES = ['all', 'eligible', 'in_progress', 'pending_review', 'not_eligi
 export default function RegistrarGraduation() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
+  const [draftSearch, setDraftSearch] = useState('');
+  const [draftStatus, setDraftStatus] = useState('all');
+  const [draftProgram, setDraftProgram] = useState('');
+  const [draftAcademicYear, setDraftAcademicYear] = useState('');
+  const [hasClickedShow, setHasClickedShow] = useState(false);
+
   const [search, setSearch] = useState('');
-  const debounced = useDebounced(search, 300);
   const [status, setStatus] = useState('all');
   const [program, setProgram] = useState('');
   const [academicYear, setAcademicYear] = useState('');
@@ -47,17 +52,27 @@ export default function RegistrarGraduation() {
   const params = useMemo(() => ({
     page,
     limit,
-    ...(debounced.trim() ? { search: debounced.trim() } : {}),
+    ...(search.trim() ? { search: search.trim() } : {}),
     ...(status !== 'all' ? { status } : {}),
     ...(program ? { program } : {}),
     ...(academicYear ? { academicYear } : {}),
-  }), [page, limit, debounced, status, program, academicYear]);
+  }), [page, limit, search, status, program, academicYear]);
 
   const query = useQuery({
     queryKey: ['registrar', 'graduation', params],
     queryFn: async () => (await api.get(`${REGISTRAR}/graduation-eligibility`, { params })).data,
+    enabled: hasClickedShow,
     placeholderData: (previous) => previous,
   });
+
+  const handleShowStudents = () => {
+    setHasClickedShow(true);
+    setPage(1);
+    setSearch(draftSearch);
+    setStatus(draftStatus);
+    setProgram(draftProgram);
+    setAcademicYear(draftAcademicYear);
+  };
 
   const rows = query.data?.rows ?? [];
   const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0, limit };
@@ -127,19 +142,30 @@ export default function RegistrarGraduation() {
 
       <Card className="p-4 sm:p-5">
         <div className="flex flex-col gap-3">
-          <SearchInput value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search student name or ID" loading={query.isFetching} />
-          <div className="grid gap-3 sm:grid-cols-3">
-            <SelectField label="Programme" value={program} onChange={(event) => { setProgram(event.target.value); setPage(1); }}>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 items-end">
+            <div className="sm:col-span-2">
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">Search</label>
+              <SearchInput value={draftSearch} onChange={(event) => setDraftSearch(event.target.value)} placeholder="Search student name or ID" />
+            </div>
+            <SelectField label="Programme" value={draftProgram} onChange={(event) => setDraftProgram(event.target.value)}>
               <option value="">All programmes</option>
               {(options.data?.programs || []).map((row) => <option key={row.id} value={row.id}>{row.code} · {row.name}</option>)}
             </SelectField>
-            <SelectField label="Academic year" value={academicYear} onChange={(event) => { setAcademicYear(event.target.value); setPage(1); }}>
+            <SelectField label="Academic year" value={draftAcademicYear} onChange={(event) => setDraftAcademicYear(event.target.value)}>
               <option value="">All years</option>
               {(options.data?.academicYears || []).map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}
             </SelectField>
-            <SelectField label="Status" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
+            <SelectField label="Status" value={draftStatus} onChange={(event) => setDraftStatus(event.target.value)}>
               {STATUSES.map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
             </SelectField>
+          </div>
+          <div className="flex justify-end pt-2">
+            <Button
+              onClick={handleShowStudents}
+              className="h-11 px-6 gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold shadow-sm"
+            >
+              <Filter className="h-4 w-4" /> Show Students
+            </Button>
           </div>
         </div>
       </Card>
@@ -148,25 +174,51 @@ export default function RegistrarGraduation() {
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Latest evaluations</h2>
-            <p className="mt-0.5 text-xs text-slate-500">{pagination.total ?? 0} student{pagination.total === 1 ? '' : 's'} evaluated</p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {!hasClickedShow
+                ? 'Click "Show Students" to view records'
+                : query.isFetching
+                  ? 'Updating…'
+                  : `${pagination.total ?? 0} student${pagination.total === 1 ? '' : 's'} evaluated`}
+            </p>
           </div>
           <GraduationCap className="h-4 w-4 text-slate-300" />
         </div>
-        <RegistrarTable
-          columns={columns}
-          rows={rows}
-          loading={query.isLoading}
-          error={query.error ? query.error?.response?.data?.message || 'Graduation evaluations could not be loaded.' : null}
-          onRetry={query.refetch}
-          rowKey={(row) => row.id}
-          onRowClick={(row) => setDetailStudent(row.student?.id)}
-          noResults={filtered}
-          emptyTitle="No graduation evaluation yet"
-          emptyMessage="Evaluate a student to calculate eligibility from the official record."
-        />
-        <div className="px-5 pb-4">
-          <Pagination page={pagination.page} pages={pagination.pages} total={pagination.total} limit={pagination.limit} onPage={setPage} onLimit={(value) => { setLimit(value); setPage(1); }} />
-        </div>
+
+        {!hasClickedShow ? (
+          <div className="py-16 text-center px-4">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 mb-4 ring-8 ring-indigo-50/50">
+              <Filter className="h-7 w-7" />
+            </div>
+            <h3 className="text-base font-bold text-slate-800">Ready to View Graduation Eligibility</h3>
+            <p className="mt-1 text-xs text-slate-500 max-w-md mx-auto">
+              Select your filters above (Programme, Academic Year, Eligibility Status) and click <span className="font-semibold text-brand-600">"Show Students"</span> to display evaluation records.
+            </p>
+            <div className="mt-5">
+              <Button onClick={handleShowStudents} className="gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold shadow-sm">
+                <Filter className="h-4 w-4" /> Show Students
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <RegistrarTable
+              columns={columns}
+              rows={rows}
+              loading={query.isLoading}
+              error={query.error ? query.error?.response?.data?.message || 'Graduation evaluations could not be loaded.' : null}
+              onRetry={query.refetch}
+              rowKey={(row) => row.id}
+              onRowClick={(row) => setDetailStudent(row.student?.id)}
+              noResults={filtered}
+              emptyTitle="No graduation evaluation yet"
+              emptyMessage="Evaluate a student to calculate eligibility from the official record."
+            />
+            <div className="px-5 pb-4">
+              <Pagination page={pagination.page} pages={pagination.pages} total={pagination.total} limit={pagination.limit} onPage={setPage} onLimit={(value) => { setLimit(value); setPage(1); }} />
+            </div>
+          </>
+        )}
       </Card>
 
       <EvaluateModal open={evaluating} onClose={() => setEvaluating(false)} onSaved={(studentId) => { invalidate(); setDetailStudent(studentId); }} />

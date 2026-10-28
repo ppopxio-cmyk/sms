@@ -203,7 +203,7 @@ async function assertPhoneAvailable(phone, excludeId) {
 export const listStudents = asyncHandler(async (req, res) => {
   const query = req.valid.query;
   const { page, limit, skip } = pageOf(query);
-  const statusFilter = query.status && query.status !== 'all' && query.status !== 'graduated'
+  const statusFilter = query.status && query.status !== 'all'
     ? { studentStatus: query.status }
     : { studentStatus: { $ne: 'graduated' } };
 

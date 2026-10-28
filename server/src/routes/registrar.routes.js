@@ -58,6 +58,7 @@ import {
   revokeSchema,
   reissueSchema,
   registrarReportQuerySchema,
+  academicAnalyticsQuerySchema,
   noticeListSchema,
   registrarAnnouncementSchema,
   audiencePreviewSchema,
@@ -114,7 +115,7 @@ import {
   downloadBulkIdCardsPdf,
 } from '../controllers/registrar.id-cards.controller.js';
 import { dashboard, analytics, search } from '../controllers/registrar.dashboard.controller.js';
-import { reportOverview, exportReport } from '../controllers/registrar.reports.controller.js';
+import { reportOverview, exportReport, getAcademicAnalyticsReport, exportAcademicReport } from '../controllers/registrar.reports.controller.js';
 import {
   previewAudience, listNotices, getNotice, createNotice, updateNotice, publishNotice,
   archiveNotice, notificationSummary,
@@ -350,6 +351,8 @@ r.post('/id-cards/preview', previewIdCardPdf);
 // ---- Reports ----------------------------------------------------------------
 r.get('/reports/overview', requirePermission('reports:view'), reportOverview);
 r.get('/reports/export', exportLimiter, requirePermission('reports:export'), validate(registrarReportQuerySchema, 'query'), exportReport);
+r.get('/reports/academic-analytics', requirePermission('reports:view'), validate(academicAnalyticsQuerySchema, 'query'), getAcademicAnalyticsReport);
+r.get('/reports/academic-export', exportLimiter, requirePermission('reports:export'), validate(academicAnalyticsQuerySchema, 'query'), exportAcademicReport);
 
 // ---- Registrar announcements and notifications ------------------------------
 r.post('/announcements/audience', requirePermission('registrar:announcements'), validate(audiencePreviewSchema), previewAudience);

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
@@ -27,7 +27,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
-import { REGISTRAR, displayDateTime } from '../../lib/registrar';
+import { REGISTRAR, displayDateTime, toJpegFile } from '../../lib/registrar';
 import { formatEthiopian } from '../../lib/ethiopianDate';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
 import RegistrarTable from '../../components/registrar/RegistrarTable';
@@ -69,6 +69,48 @@ export default function RegistrarIdCards() {
   const [previewingId, setPreviewingId] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
   const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [uploadingStudent, setUploadingStudent] = useState(null);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const handleTriggerUpload = (student) => {
+    setUploadingStudent(student);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileSelected = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !uploadingStudent) return;
+    const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!ACCEPTED.includes(file.type)) {
+      toast.error('Choose a JPEG, PNG or WebP image.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('The photo must be smaller than 5 MB.');
+      return;
+    }
+
+    setUploadLoading(true);
+    try {
+      const jpeg = await toJpegFile(file);
+      const buffer = await jpeg.arrayBuffer();
+      await api.post(`${REGISTRAR}/students/${uploadingStudent.id}/photo`, buffer, {
+        headers: { 'Content-Type': 'image/jpeg' },
+      });
+      toast.success(`Photo uploaded for ${uploadingStudent.fullName}! ID card is now unlocked.`);
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'id-cards-cohort-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'students'] });
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to upload student photo.'));
+    } finally {
+      setUploadLoading(false);
+      setUploadingStudent(null);
+    }
+  };
 
   // Fetch all options (batches, departments, programs)
   const optionsQuery = useQuery({
@@ -335,6 +377,18 @@ export default function RegistrarIdCards() {
       mobileFull: true,
       render: (row) => (
         <div className="flex flex-wrap items-center justify-end gap-1.5">
+          {!row.hasPhoto ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => handleTriggerUpload(row)}
+              loading={uploadLoading && uploadingStudent?.id === row.id}
+              className="gap-1 text-xs text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 font-semibold"
+            >
+              <Camera className="h-3.5 w-3.5 text-amber-700" /> Add Photo
+            </Button>
+          ) : null}
+
           <Button
             size="sm"
             variant="ghost"
@@ -806,6 +860,15 @@ export default function RegistrarIdCards() {
           </div>
         </Modal>
       )}
+
+      {/* Hidden file input for uploading student photos directly */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={handleFileSelected}
+      />
     </div>
   );
 }

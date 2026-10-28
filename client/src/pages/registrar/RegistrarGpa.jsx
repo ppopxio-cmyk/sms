@@ -24,6 +24,7 @@ import {
   Eye,
   Clock,
   History,
+  ShieldCheck,
 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import { REGISTRAR, humanStatus, toneForStatus } from '../../lib/registrar';
@@ -68,6 +69,7 @@ export default function RegistrarGpa() {
   const [certPreviewUrl, setCertPreviewUrl] = useState(null);
   const [certPreviewLoading, setCertPreviewLoading] = useState(false);
   const [downloadingCertId, setDownloadingCertId] = useState(null);
+  const [issuingCertStudent, setIssuingCertStudent] = useState(null);
 
   // 1. Fetch all cohorts ready to calculate (departments, batches, and programs with submitted/published marks)
   const readyCohortsQuery = useQuery({
@@ -339,12 +341,20 @@ export default function RegistrarGpa() {
             <>
               <Button
                 size="sm"
+                variant="primary"
+                onClick={() => setIssuingCertStudent(row)}
+                className="gap-1 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                <Award className="h-3.5 w-3.5" /> Issue Certificate
+              </Button>
+              <Button
+                size="sm"
                 variant="secondary"
                 onClick={() => handlePreviewCert(row)}
                 loading={certPreviewLoading && certPreviewStudent?.id === row.id}
                 className="gap-1 text-xs"
               >
-                <Eye className="h-3.5 w-3.5 text-indigo-600" /> Preview Cert
+                <Eye className="h-3.5 w-3.5 text-indigo-600" /> Preview
               </Button>
               <Button
                 size="sm"
@@ -353,7 +363,7 @@ export default function RegistrarGpa() {
                 loading={downloadingCertId === row.id}
                 className="gap-1 text-xs"
               >
-                <Download className="h-3.5 w-3.5 text-slate-600" /> Cert PDF
+                <Download className="h-3.5 w-3.5 text-slate-600" /> PDF
               </Button>
             </>
           ) : null}
@@ -1029,6 +1039,167 @@ export default function RegistrarGpa() {
           </div>
         </Modal>
       )}
+
+      {issuingCertStudent && (
+        <GpaIssueCertificateModal
+          student={issuingCertStudent}
+          onClose={() => setIssuingCertStudent(null)}
+          onSaved={() => {
+            invalidate();
+            queryClient.invalidateQueries({ queryKey: ['registrar', 'certificates'] });
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function GpaIssueCertificateModal({ student, onClose, onSaved }) {
+  const [confirmed, setConfirmed] = useState(false);
+  const [error, setError] = useState('');
+  const [previewing, setPreviewing] = useState(false);
+  const [previewData, setPreviewData] = useState(null);
+  const [idempotencyKey, setIdempotencyKey] = useState(`cert-${Date.now()}`);
+
+  useEffect(() => {
+    if (student) {
+      if (previewData?.url) URL.revokeObjectURL(previewData.url);
+      setConfirmed(false);
+      setError('');
+      setPreviewData(null);
+      setIdempotencyKey(`cert-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    }
+  }, [student]);
+
+  const issue = useMutation({
+    mutationFn: async () =>
+      (await api.post(`${REGISTRAR}/certificates/issue`, {
+        student: student.id,
+        idempotencyKey,
+      })).data,
+    onSuccess: (data) => {
+      toast.success(`Certificate issued successfully! Serial: ${data.certificate?.certificateNumber || 'record created'}.`);
+      onSaved?.();
+      onClose?.();
+    },
+    onError: (err) => {
+      const message = errorMessage(err, 'The certificate could not be issued.');
+      setError(message);
+      toast.error(message);
+    },
+  });
+
+  const preview = async () => {
+    if (!student) return;
+    setPreviewing(true);
+    setError('');
+    try {
+      const res = await api.post(`${REGISTRAR}/certificates/preview`, { student: student.id }, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      setPreviewData({ url, blob: res.data });
+      toast.success('Certificate preview generated.');
+    } catch (err) {
+      const message = errorMessage(err, 'The preview could not be generated.');
+      setError(message);
+      toast.error(message);
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  if (!student) return null;
+
+  return (
+    <Modal
+      open={Boolean(student)}
+      title="Issue Official Certificate"
+      subtitle={`Issue the verified graduation certificate for ${student.fullName} (${student.studentId || ''}).`}
+      size={previewData ? 'xl' : 'lg'}
+      onClose={issue.isPending ? undefined : onClose}
+      dismissible={!issue.isPending}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={issue.isPending}>
+            Cancel
+          </Button>
+          {previewData ? (
+            <Button
+              variant="secondary"
+              className="gap-2 text-brand-700"
+              onClick={() => {
+                downloadBlob(previewData.blob, `Certificate_${student.studentId || student.fullName}.pdf`);
+                toast.success('Certificate PDF downloaded.');
+              }}
+            >
+              <Download className="h-4 w-4" /> Download PDF
+            </Button>
+          ) : (
+            <Button variant="secondary" onClick={preview} loading={previewing}>
+              <Eye className="h-4 w-4" /> Preview PDF
+            </Button>
+          )}
+          <Button
+            onClick={() => issue.mutate()}
+            loading={issue.isPending}
+            disabled={!confirmed}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-1"
+          >
+            <Award className="h-4 w-4" /> Issue Certificate
+          </Button>
+        </>
+      }
+    >
+      <div className="grid gap-4">
+        {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
+
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-base font-bold text-slate-900">{student.fullName}</p>
+              <p className="text-xs font-mono text-slate-500 mt-0.5">Student ID: {student.studentId}</p>
+            </div>
+            <div className="text-right">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cumulative CGPA</span>
+              <p className="text-xl font-black text-emerald-700">{student.cgpa != null ? Number(student.cgpa).toFixed(2) : '—'}</p>
+            </div>
+          </div>
+        </div>
+
+        {previewData ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-700">Official Certificate Preview</span>
+              <Button size="sm" variant="ghost" className="text-xs text-rose-600 hover:bg-rose-50" onClick={() => setPreviewData(null)}>
+                Hide Preview
+              </Button>
+            </div>
+            <div className="h-[460px] w-full rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 shadow-inner">
+              <iframe src={previewData.url} className="w-full h-full border-0" title="Certificate PDF Preview" />
+            </div>
+          </div>
+        ) : null}
+
+        <div className="rounded-2xl bg-slate-50 p-4 text-xs leading-relaxed text-slate-600">
+          <p className="flex items-center gap-2 font-semibold text-slate-800">
+            <ShieldCheck className="h-4 w-4 text-brand-600" /> Official Certificate Issuance
+          </p>
+          <ul className="mt-2 list-inside list-disc space-y-1">
+            <li>Recomputes eligibility from published marks and cumulative CGPA.</li>
+            <li>Assigns a unique institutional Certificate Number and Verification Reference ID.</li>
+            <li>Saves the permanent record to the official Certificate register and history.</li>
+          </ul>
+        </div>
+
+        <label className="flex items-start gap-3 rounded-2xl border border-brand-200 bg-brand-50/60 px-4 py-3 text-sm text-brand-900">
+          <input
+            type="checkbox"
+            checked={confirmed}
+            onChange={(event) => setConfirmed(event.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-brand-300 text-brand-600"
+          />
+          <span>I have verified the student record and want to issue the official certificate and academic record.</span>
+        </label>
+      </div>
+    </Modal>
   );
 }
