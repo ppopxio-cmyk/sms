@@ -1,4 +1,4 @@
-﻿import { Student, Enrollment } from '../models/Student.js';
+import { Student, Enrollment } from '../models/Student.js';
 import { Program, Department, Course, AcademicYear } from '../models/AcademicStructure.js';
 import { CurriculumPlan } from '../models/Curriculum.js';
 import { CourseOffering, CourseRegistration } from '../models/Offering.js';
@@ -372,7 +372,7 @@ async function buildReport({ type, academicYear, program, department, batch, cat
     };
   }
 
-  if (type === 'attendance') {
+  if (type === 'attendance' || type.includes('attend') || type.includes('absence')) {
     const offeringFilter = mergeFilters(
       academicYear ? { academicYear } : null,
       program ? { program } : null,
@@ -388,7 +388,7 @@ async function buildReport({ type, academicYear, program, department, batch, cat
       .limit(EXPORT_LIMIT)
       .lean();
     return {
-      title: 'Attendance register',
+      title: type.includes('monthly') ? 'Monthly Attendance Summary' : type.includes('absence') ? 'Student Absence Report' : 'Attendance register',
       subtitle: scope,
       summary: [{ label: 'Records', value: rows.length }],
       columns: [
@@ -412,5 +412,146 @@ async function buildReport({ type, academicYear, program, department, batch, cat
     };
   }
 
-  throw new AppError(400, 'REPORT_TYPE_INVALID', 'Choose a report to export.');
+  // Teacher reports handler
+  if (type.includes('teacher') || type.includes('workload') || type.includes('teaching')) {
+    const offerings = await CourseOffering.find(mergeFilters(
+      academicYear ? { academicYear } : null,
+      program ? { program } : null,
+      department ? { department } : null,
+    ))
+      .populate('teacher', 'name email role')
+      .populate('course', 'code title creditHours')
+      .populate('program', 'code name')
+      .populate('department', 'code name')
+      .populate('batch', 'code')
+      .limit(EXPORT_LIMIT)
+      .lean();
+
+    return {
+      title: 'Teacher Workload & Assignment Report',
+      subtitle: scope,
+      summary: [{ label: 'Course Assignments', value: offerings.length }],
+      columns: [
+        { header: 'Teacher Name', key: 'teacher', width: 26 },
+        { header: 'Department', key: 'department', width: 22 },
+        { header: 'Programme', key: 'program', width: 22 },
+        { header: 'Course Code', key: 'code', width: 14 },
+        { header: 'Course Title', key: 'title', width: 30 },
+        { header: 'Credit Hours', key: 'credits', width: 12 },
+        { header: 'Batch', key: 'batch', width: 16 },
+        { header: 'Status', key: 'status', width: 14 },
+      ],
+      rows: offerings.map((o) => ({
+        teacher: o.teacher?.name || 'Unassigned',
+        department: o.department?.name || '',
+        program: o.program?.name || '',
+        code: o.course?.code || '',
+        title: o.course?.title || '',
+        credits: o.creditHours || o.course?.creditHours || 3,
+        batch: o.batch?.code || '',
+        status: o.status,
+      })),
+    };
+  }
+
+  // Department / Programme Summary Report
+  if (type.includes('dept') || type.includes('programme') || type.includes('coverage') || type.includes('ratio')) {
+    const programs = await Program.find(department ? { department } : {})
+      .populate('department', 'code name')
+      .limit(EXPORT_LIMIT)
+      .lean();
+
+    return {
+      title: 'Department and Programme Summary Report',
+      subtitle: scope,
+      summary: [{ label: 'Active Programmes', value: programs.length }],
+      columns: [
+        { header: 'Department Code', key: 'deptCode', width: 16 },
+        { header: 'Department Name', key: 'deptName', width: 28 },
+        { header: 'Programme Code', key: 'progCode', width: 16 },
+        { header: 'Programme Name', key: 'progName', width: 30 },
+        { header: 'Qualification', key: 'type', width: 16 },
+        { header: 'Status', key: 'status', width: 12 },
+      ],
+      rows: programs.map((p) => ({
+        deptCode: p.department?.code || '',
+        deptName: p.department?.name || '',
+        progCode: p.code,
+        progName: p.name,
+        type: p.qualificationType,
+        status: p.active ? 'Active' : 'Inactive',
+      })),
+    };
+  }
+
+  // Results & Examination fallback
+  if (type.includes('result') || type.includes('mark') || type.includes('exam') || type.includes('grade') || type.includes('gpa') || type.includes('pass')) {
+    const rows = await Result.find(mergeFilters(academicYear ? { academicYear } : null))
+      .populate('student', 'studentId fullName')
+      .populate('course', 'code title')
+      .sort({ createdAt: -1 })
+      .limit(EXPORT_LIMIT)
+      .lean();
+    return {
+      title: 'Examination and Results Performance Report',
+      subtitle: scope,
+      summary: [{ label: 'Results Count', value: rows.length }],
+      columns: [
+        { header: 'Student ID', key: 'studentId', width: 18 },
+        { header: 'Student', key: 'student', width: 30 },
+        { header: 'Course code', key: 'code', width: 14 },
+        { header: 'Course', key: 'course', width: 30 },
+        { header: 'Total Mark', key: 'mark', width: 12 },
+        { header: 'Grade', key: 'grade', width: 10 },
+        { header: 'Points', key: 'points', width: 10 },
+        { header: 'Status', key: 'status', width: 14 },
+      ],
+      rows: rows.map((row) => ({
+        studentId: row.student?.studentId || '',
+        student: row.student?.fullName || '',
+        code: row.course?.code || '',
+        course: row.course?.title || '',
+        mark: row.totalMark ?? '',
+        grade: row.letterGrade || '',
+        points: row.gradePoint ?? '',
+        status: row.status,
+      })),
+    };
+  }
+
+  // Fallback to Student records
+  const fallbackStudents = await Student.find(studentFilter)
+    .populate('program', 'code name')
+    .populate('department', 'code name')
+    .populate('batch', 'code')
+    .populate('admissionAcademicYear', 'label')
+    .sort({ fullName: 1 })
+    .limit(EXPORT_LIMIT)
+    .lean();
+
+  return {
+    title: 'Student and Academic Report',
+    subtitle: scope,
+    summary: [{ label: 'Records', value: fallbackStudents.length }],
+    columns: [
+      { header: 'Student ID', key: 'studentId', width: 18 },
+      { header: 'Full name', key: 'fullName', width: 30 },
+      { header: 'Sex', key: 'sex', width: 12 },
+      { header: 'Programme', key: 'programme', width: 28 },
+      { header: 'Department', key: 'department', width: 24 },
+      { header: 'Stream', key: 'category', width: 12 },
+      { header: 'Level', key: 'level', width: 10 },
+      { header: 'Status', key: 'status', width: 14 },
+    ],
+    rows: fallbackStudents.map((row) => ({
+      studentId: row.studentId,
+      fullName: row.fullName,
+      sex: row.sex,
+      programme: row.program?.name || '',
+      department: row.department?.name || '',
+      category: row.studentCategory || 'regular',
+      level: row.level,
+      status: row.studentStatus,
+    })),
+  };
 }

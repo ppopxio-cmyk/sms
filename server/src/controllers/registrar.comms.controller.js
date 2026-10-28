@@ -1,4 +1,4 @@
-﻿import { Announcement } from '../models/Announcement.js';
+import { Announcement } from '../models/Announcement.js';
 import { Notification } from '../models/Notification.js';
 import { User } from '../models/User.js';
 import { publishAnnouncement, audiencePreview, registrarAudienceAllowed } from '../services/announcement.service.js';
@@ -29,7 +29,8 @@ async function resolveRegistrarAudience(input) {
   throw new AppError(400, 'AUDIENCE_NOT_ALLOWED', 'Choose all teachers, all accountants, or one eligible account.');
 }
 
-function announcementView(row) {
+function announcementView(row, currentUserId = null) {
+  const isMine = currentUserId ? String(row.createdBy?._id ?? row.createdBy) === String(currentUserId) : false;
   return {
     id: String(row._id),
     kind: row.kind,
@@ -48,6 +49,10 @@ function announcementView(row) {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     audiencePolicy: row.audiencePolicy,
+    author: row.createdBy && typeof row.createdBy === 'object'
+      ? { id: String(row.createdBy._id), name: row.createdBy.name, role: row.createdBy.role }
+      : null,
+    isMine,
   };
 }
 
@@ -88,7 +93,7 @@ export const listNotices = asyncHandler(async (req, res) => {
     query.kind ? { kind: query.kind } : null,
     query.status && query.status !== 'all' ? { status: query.status } : null,
     searchFilter(query.search, ['title', 'body']),
-    query.author === 'mine' ? { createdBy: userId } : null,
+    query.author === 'mine' ? { createdBy: userId } : query.author === 'received' ? { createdBy: { $ne: userId } } : null,
     query.audienceRole ? { audienceRole: query.audienceRole } : null,
     query.from || query.to
       ? {
@@ -104,6 +109,7 @@ export const listNotices = asyncHandler(async (req, res) => {
 
   const [rows, total] = await Promise.all([
     Announcement.find(filter)
+      .populate('createdBy', 'name email role')
       .sort(sortOf(query, ['createdAt', 'updatedAt', 'publishAt', 'status'], 'createdAt'))
       .skip(skip)
       .limit(limit)
@@ -111,7 +117,7 @@ export const listNotices = asyncHandler(async (req, res) => {
     Announcement.countDocuments(filter),
   ]);
 
-  res.json({ ...paged(rows.map(announcementView), total, page, limit) });
+  res.json({ ...paged(rows.map((r) => announcementView(r, userId)), total, page, limit) });
 });
 
 export const getNotice = asyncHandler(async (req, res) => {

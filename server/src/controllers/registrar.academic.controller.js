@@ -960,17 +960,78 @@ export const getBatch = asyncHandler(async (req, res) => {
     .lean();
   if (!batch) throw new AppError(404, 'BATCH_NOT_FOUND', 'That batch was not found.');
 
-  const [students, statusCounts, total] = await Promise.all([
-    Student.find({ batch: batch._id })
-      .select('studentId fullName sex email phone level studentStatus studentCategory admissionDate')
+  // Find all batches sharing this code and category (the full batch group across all programmes)
+  const groupBatches = await Batch.find({
+    code: batch.code,
+    category: batch.category,
+  })
+    .populate('program', 'code name qualificationType durationYears')
+    .populate('department', 'code name')
+    .lean();
+
+  const allBatchIds = groupBatches.map((b) => b._id);
+
+  // Extract distinct departments and programmes in this batch group
+  const deptMap = new Map();
+  const progMap = new Map();
+  for (const b of groupBatches) {
+    if (b.department && !deptMap.has(String(b.department._id))) {
+      deptMap.set(String(b.department._id), { id: String(b.department._id), code: b.department.code, name: b.department.name });
+    }
+    if (b.program && !progMap.has(String(b.program._id))) {
+      progMap.set(String(b.program._id), { id: String(b.program._id), code: b.program.code, name: b.program.name, qualificationType: b.program.qualificationType });
+    }
+  }
+
+  const [students, statusCounts, total, deptAgg, progAgg, genderAgg] = await Promise.all([
+    Student.find({ batch: { $in: allBatchIds } })
+      .populate('department', 'code name')
+      .populate('program', 'code name')
+      .select('studentId fullName sex email phone level studentStatus studentCategory admissionDate department program')
       .sort({ fullName: 1 })
       .limit(EXPORT_LIMIT)
       .lean(),
-    Student.aggregate([{ $match: { batch: batch._id } }, { $group: { _id: '$studentStatus', count: { $sum: 1 } } }]),
-    Student.countDocuments({ batch: batch._id }),
+    Student.aggregate([{ $match: { batch: { $in: allBatchIds } } }, { $group: { _id: '$studentStatus', count: { $sum: 1 } } }]),
+    Student.countDocuments({ batch: { $in: allBatchIds } }),
+    Student.aggregate([
+      { $match: { batch: { $in: allBatchIds } } },
+      { $group: { _id: '$department', count: { $sum: 1 }, male: { $sum: { $cond: [{ $eq: ['$sex', 'male'] }, 1, 0] } }, female: { $sum: { $cond: [{ $eq: ['$sex', 'female'] }, 1, 0] } } } },
+      { $lookup: { from: 'departments', localField: '_id', foreignField: '_id', as: 'dept' } },
+      { $unwind: { path: '$dept', preserveNullAndEmptyArrays: true } },
+    ]),
+    Student.aggregate([
+      { $match: { batch: { $in: allBatchIds } } },
+      { $group: { _id: '$program', count: { $sum: 1 } } },
+      { $lookup: { from: 'programs', localField: '_id', foreignField: '_id', as: 'prog' } },
+      { $unwind: { path: '$prog', preserveNullAndEmptyArrays: true } },
+    ]),
+    Student.aggregate([
+      { $match: { batch: { $in: allBatchIds } } },
+      { $group: { _id: '$sex', count: { $sum: 1 } } },
+    ]),
   ]);
+
   const counts = { all: total };
   for (const row of statusCounts) counts[row._id] = row.count;
+
+  const chartData = {
+    deptBreakdown: deptAgg.map((row) => ({
+      name: row.dept?.name || 'Unknown',
+      code: row.dept?.code || 'N/A',
+      count: row.count,
+      male: row.male || 0,
+      female: row.female || 0,
+    })),
+    progBreakdown: progAgg.map((row) => ({
+      name: row.prog?.name || 'Unknown',
+      code: row.prog?.code || 'N/A',
+      count: row.count,
+    })),
+    genderBreakdown: genderAgg.map((row) => ({
+      name: row._id === 'female' ? 'Female' : row._id === 'male' ? 'Male' : 'Other',
+      count: row.count,
+    })),
+  };
 
   res.json({
     batch: {
@@ -987,6 +1048,9 @@ export const getBatch = asyncHandler(async (req, res) => {
         : null,
       _id: undefined,
     },
+    departments: [...deptMap.values()],
+    programs: [...progMap.values()],
+    chartData,
     students: students.map((student) => ({ ...student, id: String(student._id), _id: undefined })),
     counts,
     total,
@@ -1001,7 +1065,13 @@ export const exportBatch = asyncHandler(async (req, res) => {
     .populate('admissionAcademicYear', 'label')
     .lean();
   if (!batch) throw new AppError(404, 'BATCH_NOT_FOUND', 'That batch was not found.');
-  const students = await Student.find({ batch: batch._id })
+
+  const groupBatches = await Batch.find({ code: batch.code, category: batch.category }).select('_id').lean();
+  const allBatchIds = groupBatches.map((b) => b._id);
+
+  const students = await Student.find({ batch: { $in: allBatchIds } })
+    .populate('department', 'code name')
+    .populate('program', 'code name')
     .select('studentId fullName sex email phone level studentStatus studentCategory admissionDate')
     .sort({ fullName: 1 })
     .limit(EXPORT_LIMIT)

@@ -506,7 +506,7 @@ export default function TeacherAssessments() {
                 <label className="block text-sm font-medium text-slate-700" htmlFor="assessment-max">
                   Maximum score
                 </label>
-                {policyMaxScore !== null ? (
+                {hasMarkPolicy && totalPolicyMark > 0 ? (
                   <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
                     From policy
                   </span>

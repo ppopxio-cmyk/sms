@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { BookOpen, Download, ExternalLink, FileText, GraduationCap, Layers } from 'lucide-react';
@@ -12,7 +12,6 @@ import Card, { CardBody } from '../../components/ui/Card';
 import SearchInput from '../../components/ui/SearchInput';
 import { EmptyState, ErrorState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';
-import FilterTabs from '../../components/ui/FilterTabs';
 
 const formatBytes = (bytes) => {
   const value = Number(bytes) || 0;
@@ -25,6 +24,7 @@ export default function TeacherMaterials() {
   const [params, setParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState('documents'); // 'documents' | 'curriculum'
   const [search, setSearch] = useState('');
+  const [selectedDeptId, setSelectedDeptId] = useState('');
   const [selectedProgram, setSelectedProgram] = useState(params.get('program') || '');
   const debounced = useDebounced(search);
 
@@ -33,6 +33,40 @@ export default function TeacherMaterials() {
     queryKey: ['teacher', 'classes', 'options'],
     queryFn: async () => (await api.get('/teacher/courses', { params: { status: 'all', limit: 100 } })).data,
   });
+
+  const departments = useMemo(() => {
+    const list = classes.data?.programs || [];
+    const map = new Map();
+    for (const p of list) {
+      if (p.department?.id) {
+        map.set(p.department.id, p.department);
+      }
+    }
+    return [...map.values()];
+  }, [classes.data?.programs]);
+
+  const departmentPrograms = useMemo(() => {
+    if (!selectedDeptId) return [];
+    const list = classes.data?.programs || [];
+    return list.filter((p) => p.department?.id === selectedDeptId);
+  }, [classes.data?.programs, selectedDeptId]);
+
+  useEffect(() => {
+    if (departments.length > 0 && (!selectedDeptId || !departments.some((d) => d.id === selectedDeptId))) {
+      setSelectedDeptId(departments[0].id);
+    }
+  }, [departments, selectedDeptId]);
+
+  useEffect(() => {
+    if (departmentPrograms.length > 0) {
+      if (!selectedProgram || !departmentPrograms.some((p) => p.id === selectedProgram)) {
+        setSelectedProgram(departmentPrograms[0].id);
+        setParams({ program: departmentPrograms[0].id });
+      }
+    } else {
+      setSelectedProgram('');
+    }
+  }, [departmentPrograms, selectedProgram, setParams]);
 
   // Fetch course resources uploaded by registrar
   const courseResources = useQuery({
@@ -50,10 +84,6 @@ export default function TeacherMaterials() {
     queryKey: ['teacher', 'materials-curriculum'],
     queryFn: async () => (await api.get('/teacher/materials/curriculum')).data,
   });
-
-  const teacherPrograms = useMemo(() => {
-    return classes.data?.programs ?? [];
-  }, [classes.data?.programs]);
 
   const sharedFiles = courseResources.data?.resources ?? [];
   const curriculumPlans = curriculumQuery.data?.plans ?? [];
@@ -80,13 +110,6 @@ export default function TeacherMaterials() {
     return list;
   }, [curriculumPlans, selectedProgram, debounced]);
 
-  const programTabs = useMemo(() => {
-    return [
-      { key: '', label: 'All programmes' },
-      ...teacherPrograms.map((p) => ({ key: p.id, label: `${p.code} · ${p.name}` })),
-    ];
-  }, [teacherPrograms]);
-
   return (
     <div className="space-y-6">
       <TeacherPageHeader
@@ -95,18 +118,42 @@ export default function TeacherMaterials() {
         subtitle="Access official documents sent by the registrar and review approved curriculum plans for your programmes."
       />
 
-      {/* Programme Filter Tabs */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        <FilterTabs
-          label="Programme"
-          value={selectedProgram}
-          onChange={(next) => {
-            setSelectedProgram(next);
-            if (next) setParams({ program: next });
-            else setParams({});
-          }}
-          tabs={programTabs}
-        />
+      {/* Department & Programme Filter */}
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+          Department:
+          <select
+            value={selectedDeptId}
+            onChange={(e) => setSelectedDeptId(e.target.value)}
+            className="focus-ring h-9 rounded-xl border border-slate-200 bg-white/85 px-3 text-xs font-medium text-slate-800"
+          >
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+          Programme:
+          <select
+            value={selectedProgram}
+            onChange={(e) => {
+              setSelectedProgram(e.target.value);
+              if (e.target.value) setParams({ program: e.target.value });
+              else setParams({});
+            }}
+            disabled={!departmentPrograms.length}
+            className="focus-ring h-9 rounded-xl border border-slate-200 bg-white/85 px-3 text-xs font-medium text-slate-800 disabled:opacity-50"
+          >
+            {departmentPrograms.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.code})
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {/* Section Switcher Tabs: Documents vs Curriculum */}

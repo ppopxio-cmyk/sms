@@ -112,31 +112,18 @@ export default function RegistrarBatches() {
       key: 'batch',
       label: 'Batch',
       render: (row) => (
-        <div className="flex items-start gap-2">
-          {row.programs.length > 1 ? (
-            <button
-              type="button"
-              onClick={() => setExpanded((current) => ({ ...current, [row.id]: !current[row.id] }))}
-              className="focus-ring mt-0.5 rounded p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-700"
-              aria-label={expanded[row.id] ? 'Collapse programmes' : 'Expand programmes'}
-            >
-              {expanded[row.id] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            </button>
-          ) : (
-            <span className="w-6" />
-          )}
-          <div>
-            <p className="text-sm font-semibold text-slate-900">{row.code}</p>
-            <p className="text-xs text-slate-500">{row.name}</p>
-            {expanded[row.id] ? (
-              <ul className="mt-2 space-y-1">
-                {row.programs.map((programRow) => (
-                  <li key={programRow.id} className="text-xs text-slate-600">
-                    <span className="font-mono">{programRow.code}</span> · {programRow.name}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
+        <div>
+          <p className="text-sm font-semibold text-slate-900">{row.code}</p>
+          <p className="text-xs text-slate-500">{row.name}</p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {row.programs.map((programRow) => (
+              <span
+                key={programRow.id}
+                className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-slate-700"
+              >
+                {programRow.code}
+              </span>
+            ))}
           </div>
         </div>
       ),

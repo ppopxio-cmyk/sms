@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Calculator, SlidersHorizontal } from 'lucide-react';
@@ -29,7 +29,8 @@ const inputClass =
 
 export default function TeacherCourseMarkPolicy() {
   const queryClient = useQueryClient();
-  const [program, setProgram] = useState('all');
+  const [selectedDeptId, setSelectedDeptId] = useState('');
+  const [selectedProgramId, setSelectedProgramId] = useState('');
   const [editing, setEditing] = useState(null);
   const [weights, setWeights] = useState(emptyWeights);
 
@@ -39,16 +40,56 @@ export default function TeacherCourseMarkPolicy() {
   });
 
   const courses = useMemo(() => query.data?.courses ?? [], [query.data?.courses]);
-  const programs = useMemo(() => {
+
+  const departments = useMemo(() => {
     const map = new Map();
     for (const row of courses) {
-      if (row.assignment.programId) {
-        map.set(row.assignment.programId, row.assignment.programName || row.assignment.program);
+      const deptId = row.assignment.departmentId || row.assignment.department;
+      const deptName = row.assignment.department || 'Department';
+      if (deptId && !map.has(deptId)) {
+        map.set(deptId, { id: deptId, name: deptName });
       }
     }
-    return [...map.entries()];
+    return [...map.values()];
   }, [courses]);
-  const visible = courses.filter((row) => program === 'all' || row.assignment.programId === program);
+
+  const filteredPrograms = useMemo(() => {
+    if (!selectedDeptId) return [];
+    const map = new Map();
+    for (const row of courses) {
+      const deptId = row.assignment.departmentId || row.assignment.department;
+      if (deptId === selectedDeptId && row.assignment.programId) {
+        if (!map.has(row.assignment.programId)) {
+          map.set(row.assignment.programId, {
+            id: row.assignment.programId,
+            name: row.assignment.programName || row.assignment.program || row.assignment.programCode,
+          });
+        }
+      }
+    }
+    return [...map.values()];
+  }, [courses, selectedDeptId]);
+
+  useEffect(() => {
+    if (departments.length > 0 && (!selectedDeptId || !departments.some((d) => d.id === selectedDeptId))) {
+      setSelectedDeptId(departments[0].id);
+    }
+  }, [departments, selectedDeptId]);
+
+  useEffect(() => {
+    if (filteredPrograms.length > 0) {
+      if (!selectedProgramId || !filteredPrograms.some((p) => p.id === selectedProgramId)) {
+        setSelectedProgramId(filteredPrograms[0].id);
+      }
+    } else {
+      setSelectedProgramId('');
+    }
+  }, [filteredPrograms, selectedProgramId]);
+
+  const visible = courses.filter((row) => {
+    const deptId = row.assignment.departmentId || row.assignment.department;
+    return deptId === selectedDeptId && row.assignment.programId === selectedProgramId;
+  });
   const total = COMPONENTS.reduce((sum, component) => sum + Number(weights[component.key] || 0), 0);
   const valid = Math.abs(total - 100) < 0.001;
 
@@ -105,21 +146,38 @@ export default function TeacherCourseMarkPolicy() {
               <p className="text-sm font-semibold text-slate-800">My assigned courses</p>
               <p className="text-xs text-slate-500">Only courses assigned to you by the registrar appear here.</p>
             </div>
-            <label className="flex items-center gap-2 text-xs text-slate-500">
-              Programme
-              <select
-                value={program}
-                onChange={(event) => setProgram(event.target.value)}
-                className="focus-ring h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700"
-              >
-                <option value="all">All programmes</option>
-                {programs.map(([id, name]) => (
-                  <option key={id} value={id}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                Department
+                <select
+                  value={selectedDeptId}
+                  onChange={(event) => setSelectedDeptId(event.target.value)}
+                  className="focus-ring h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700"
+                >
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                Programme
+                <select
+                  value={selectedProgramId}
+                  onChange={(event) => setSelectedProgramId(event.target.value)}
+                  disabled={!filteredPrograms.length}
+                  className="focus-ring h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 disabled:opacity-50"
+                >
+                  {filteredPrograms.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
 
           {query.isError ? (

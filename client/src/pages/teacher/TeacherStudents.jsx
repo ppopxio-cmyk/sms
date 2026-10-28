@@ -37,6 +37,7 @@ export default function TeacherStudents() {
   const [params, setParams] = useSearchParams();
   const [search, setSearch] = useState('');
   const [status] = useState('active');
+  const [selectedDepartment, setSelectedDepartment] = useState('');
   const [program, setProgram] = useState('');
   const [category, setCategory] = useState('');
   const [batch, setBatch] = useState('');
@@ -49,6 +50,41 @@ export default function TeacherStudents() {
     queryKey: ['teacher', 'classes', 'options'],
     queryFn: async () => (await api.get('/teacher/courses', { params: { status: 'all', limit: 100 } })).data,
   });
+
+  const departments = useMemo(() => {
+    const list = classes.data?.programs || [];
+    const map = new Map();
+    for (const p of list) {
+      if (p.department?.id) {
+        map.set(p.department.id, p.department);
+      }
+    }
+    return [...map.values()];
+  }, [classes.data?.programs]);
+
+  const departmentPrograms = useMemo(() => {
+    if (!selectedDepartment) return [];
+    const list = classes.data?.programs || [];
+    return list.filter((p) => p.department?.id === selectedDepartment);
+  }, [classes.data?.programs, selectedDepartment]);
+
+  useEffect(() => {
+    if (departments.length > 0 && (!selectedDepartment || !departments.some((d) => d.id === selectedDepartment))) {
+      setSelectedDepartment(departments[0].id);
+    }
+  }, [departments, selectedDepartment]);
+
+  useEffect(() => {
+    if (departmentPrograms.length > 0) {
+      if (!program || !departmentPrograms.some((p) => p.id === program)) {
+        setProgram(departmentPrograms[0].id);
+        setBatch('');
+        setPage(1);
+      }
+    } else {
+      setProgram('');
+    }
+  }, [departmentPrograms, program]);
 
   const query = useQuery({
     queryKey: ['teacher', 'students', { search: debounced, status, program, batch, category, assignmentId, page, limit }],
@@ -91,20 +127,6 @@ export default function TeacherStudents() {
     });
   }, [allBatches, program, category]);
 
-  // When no CourseOfferings exist yet, derive programme tabs from the
-  // teacher's programme assignments so the page never shows "no students"
-  // just because the registrar hasn't created course offerings.
-  const allProgramTabs = useMemo(() => {
-    const progList = classes.data?.programs ?? [];
-    const assignedIds = new Set(classes.data?.assignments?.map((a) => a.programId).filter(Boolean));
-    return progList.map((p) => ({
-      ...p,
-      label: p.code,
-      value: p.id,
-      _fromAssignment: assignedIds.has(p.id),
-    }));
-  }, [classes.data?.programs, classes.data?.assignments]);
-
   return (
     <div className="space-y-6">
       <TeacherPageHeader
@@ -116,19 +138,42 @@ export default function TeacherStudents() {
       <Card>
         <CardBody className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <FilterTabs
-              label="Programme"
-              value={program}
-              onChange={(next) => {
-                setProgram(next);
-                setBatch('');
-                setPage(1);
-              }}
-              tabs={[
-                { key: '', label: 'All programmes' },
-                ...allProgramTabs.map((p) => ({ key: p.value, label: p.label })),
-              ]}
-            />
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                Department:
+                <select
+                  value={selectedDepartment}
+                  onChange={(e) => setSelectedDepartment(e.target.value)}
+                  className="focus-ring h-9 rounded-xl border border-slate-200 bg-white/85 px-3 text-xs font-medium text-slate-800"
+                >
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                Programme:
+                <select
+                  value={program}
+                  onChange={(e) => {
+                    setProgram(e.target.value);
+                    setBatch('');
+                    setPage(1);
+                  }}
+                  disabled={!departmentPrograms.length}
+                  className="focus-ring h-9 rounded-xl border border-slate-200 bg-white/85 px-3 text-xs font-medium text-slate-800 disabled:opacity-50"
+                >
+                  {departmentPrograms.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.code})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
 
             <div className="flex items-center gap-1.5">
               <span className="text-xs font-semibold text-slate-500">Stream:</span>

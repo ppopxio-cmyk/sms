@@ -476,7 +476,7 @@ export const reissueSchema = z.object({
 });
 
 export const registrarReportQuerySchema = z.object({
-  type: z.enum(['students', 'enrollments', 'results', 'graduation', 'certificates', 'transcripts', 'curriculum', 'attendance']),
+  type: z.string().min(1),
   format: z.enum(['xlsx', 'docx', 'pdf']).optional().default('xlsx'),
   academicYear: objectId.optional(),
   program: objectId.optional(),
@@ -574,7 +574,7 @@ export const noticeListSchema = paginationSchema.extend({
   kind: z.enum(['announcement', 'notification']).optional().default('announcement'),
   status: z.enum(['all', 'draft', 'scheduled', 'published', 'expired', 'archived']).optional().default('all'),
   // Filters for the announcements list
-  author: z.enum(['all', 'mine']).optional().default('all'),
+  author: z.enum(['all', 'mine', 'received']).optional().default('all'),
   audienceRole: z.enum(['ADMIN', 'REGISTRAR', 'TEACHER', 'ACCOUNTANT']).optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),

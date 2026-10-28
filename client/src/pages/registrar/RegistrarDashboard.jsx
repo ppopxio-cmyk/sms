@@ -162,46 +162,19 @@ export default function RegistrarDashboard() {
     <div className="space-y-8">
       <RegistrarPageHeader
         eyebrow="Registrar office"
-        title="Academic records at a glance"
-        subtitle="Enrolment, curriculum, result review and official documents — all resolved from the records held by the college."
+        title="Institutional Performance & Telemetry"
+        subtitle="Live hybrid telemetry aggregated from active student records, submitted course results, and curriculum progression."
         actions={
-          <Link
-            to="/registrar/students"
-            className="focus-ring brand-gradient inline-flex h-11 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white shadow-lg shadow-brand-600/25 transition hover:brightness-110"
-          >
-            Open student register <ArrowRight className="h-4 w-4" />
-          </Link>
-        }
-      />
-
-      {/* Top Metric Cards */}
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {stats.map((stat) => (
-          <StatCard key={stat.label} {...stat} loading={isLoading} />
-        ))}
-      </section>
-
-      {/* SECTION: 6 HYBRID ANIMATED PERFORMANCE CHARTS */}
-      <section className="space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-100 text-brand-700">
-                <TrendingUp className="h-4 w-4" />
-              </span>
-              <h2 className="text-lg font-bold text-slate-900">Institutional Performance & Telemetry</h2>
-            </div>
-            <p className="mt-0.5 text-xs text-slate-500">
-              Live hybrid analytics aggregated from active student records, submitted course results, and curriculum progression.
-            </p>
-          </div>
           <Badge tone="success" className="gap-1.5 py-1 px-3 text-xs font-semibold">
             <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" /> Live DB Synchronized
           </Badge>
-        </div>
+        }
+      />
 
-        {/* 6 Types of Animated Hybrid Charts Grid */}
-        <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
+      {/* SECTION: 6 HYBRID ANIMATED PERFORMANCE CHARTS (2 GRAPHS PER ROW) */}
+      <section className="space-y-5">
+        {/* 6 Types of Animated Hybrid Charts Grid - 2 per row */}
+        <div className="grid gap-5 lg:grid-cols-2">
 
           {/* CHART 1: Hybrid Composed Bar + Spline Line Chart (Department Performance & Pass Rate) */}
           <Card className="flex flex-col">
@@ -475,6 +448,31 @@ export default function RegistrarDashboard() {
             </CardBody>
           </Card>
 
+        </div>
+      </section>
+
+      {/* SECTION: ACADEMIC RECORDS AT A GLANCE */}
+      <section className="space-y-4 border-t border-slate-200/80 pt-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">Academic records at a glance</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Enrolment, curriculum, result review and official documents — all resolved from the records held by the college.
+            </p>
+          </div>
+          <Link
+            to="/registrar/students"
+            className="focus-ring brand-gradient inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-xs font-semibold text-white shadow-md shadow-brand-600/20 transition hover:brightness-110"
+          >
+            Open student register <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+
+        {/* Top Metric Cards */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {stats.map((stat) => (
+            <StatCard key={stat.label} {...stat} loading={isLoading} />
+          ))}
         </div>
       </section>
 

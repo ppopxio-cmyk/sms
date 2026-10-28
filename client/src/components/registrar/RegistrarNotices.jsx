@@ -154,8 +154,9 @@ export default function RegistrarNotices({ kind = 'announcement' }) {
               {['draft', 'scheduled', 'published', 'expired', 'archived'].map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
             </SelectField>
             <SelectField label="Author" value={author} onChange={(event) => { setAuthor(event.target.value); setPage(1); }}>
-              <option value="all">All authors</option>
-              <option value="mine">My announcements</option>
+              <option value="all">All (Sent & Received)</option>
+              <option value="mine">Sent by me</option>
+              <option value="received">Received from others</option>
             </SelectField>
             <SelectField label="Audience role" value={audienceRole} onChange={(event) => { setAudienceRole(event.target.value); setPage(1); }}>
               <option value="">All audiences</option>
@@ -204,6 +205,13 @@ export default function RegistrarNotices({ kind = 'announcement' }) {
                     <h3 className="text-sm font-semibold text-slate-900">{row.title}</h3>
                     <Badge tone={toneForStatus(row.status)}>{humanStatus(row.status)}</Badge>
                     {row.priority !== 'normal' ? <Badge tone={row.priority === 'critical' ? 'danger' : 'warning'}>{humanStatus(row.priority)}</Badge> : null}
+                    {row.isMine ? (
+                      <Badge tone="neutral">Sent by me</Badge>
+                    ) : (
+                      <Badge tone="brand">
+                        From {row.author?.name || 'Staff'} ({humanStatus(row.author?.role || 'User')})
+                      </Badge>
+                    )}
                   </div>
                   <p className="mt-1 text-xs text-slate-500">
                     To {audienceLabel(row)} · {row.recipientCount ?? 0} recipient{(row.recipientCount ?? 0) === 1 ? '' : 's'}
