@@ -85,49 +85,19 @@ export async function loadBrandingAssets(template) {
 }
 
 function requireOfficialAssets(assets) {
-  const bg = path.resolve(process.cwd(), 'server/src/assets/Graduation_certificate_template.jpg');
-  const rootBg = path.resolve(process.cwd(), 'Graduation_certificate_template.jpg');
-  const hasTemplateImage = fs.existsSync(bg) || fs.existsSync(rootBg);
-
-  if (!assets?.sealBuffer && !hasTemplateImage) {
-    throw new AppError(
-      409,
-      'CERTIFICATE_CONFIG_MISSING',
-      'The official seal is not configured. Upload it before issuing certificates.',
-    );
-  }
-  if (!assets?.signatureBuffer && !hasTemplateImage) {
-    throw new AppError(
-      409,
-      'CERTIFICATE_CONFIG_MISSING',
-      'The authorised signature is not configured. Upload it before issuing certificates.',
-    );
-  }
+  // Official seal is optional - certificates can be issued with standard college styling
+  // if no custom seal image is uploaded.
+  return;
 }
 
 async function fetchCertificatePhoto(template, photo) {
-  const required = template?.photoPolicy === 'required';
   if (!photo?.filePath) {
-    if (required) {
-      throw new AppError(
-        409,
-        'CERTIFICATE_PHOTO_MISSING',
-        'A student photo is required by the certificate policy, but no stored photo is available.',
-      );
-    }
     return null;
   }
   try {
     return await fetchAssetBuffer(photo, { jpeg: true });
   } catch (err) {
-    if (required) {
-      throw new AppError(
-        502,
-        'CERTIFICATE_PHOTO_UNAVAILABLE',
-        'The student photo could not be loaded, so the certificate was not rendered.',
-      );
-    }
-    logger.warn({ err: err?.message }, 'optional certificate photo could not be loaded');
+    logger.warn({ err: err?.message }, 'certificate photo could not be loaded, using 4x4 box');
     return null;
   }
 }

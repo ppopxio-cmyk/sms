@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { REGISTRAR, displayDateTime } from '../../lib/registrar';
+import { formatEthiopian } from '../../lib/ethiopianDate';
 import { useDebounced } from '../../lib/useDebounced';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
 import RegistrarTable from '../../components/registrar/RegistrarTable';
@@ -125,10 +126,10 @@ export default function RegistrarGraduated() {
     },
     {
       key: 'completed',
-      label: 'Completion Date',
+      label: 'Completion Date (Eth)',
       render: (row) => (
-        <span className="text-xs text-slate-600">
-          {row.completionDate ? new Date(row.completionDate).toLocaleDateString() : 'Completed'}
+        <span className="text-xs font-medium text-slate-700">
+          {row.completionDate ? formatEthiopian(row.completionDate) : 'Completed'}
         </span>
       ),
     },

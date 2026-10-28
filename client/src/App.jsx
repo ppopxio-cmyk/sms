@@ -6,6 +6,7 @@ import { GuestRoute, ProtectedRoute, RequireRole } from './components/guards';
 import AppShell from './components/layout/AppShell';
 import SplashScreen from './components/layout/SplashScreen';
 import { SkeletonPage } from './components/ui/Skeleton';
+import FullScreenBackButton from './components/ui/FullScreenBackButton';
 
 // The first screens stay eager so they appear instantly. Everything behind the
 // login — including anything chart-heavy later — is split out of the first
@@ -143,6 +144,7 @@ export default function App() {
         </div>
       }
     >
+      <FullScreenBackButton />
       <Routes>
         {/* There is no sign-up page on purpose: an administrator creates every account. */}
         <Route element={<GuestRoute />}>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Menu, Wrench } from 'lucide-react';
+import { ArrowLeft, Menu, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../lib/api';
 import { useAuth } from '../../store/auth';
@@ -112,6 +112,23 @@ export default function AppShell() {
               className="focus-ring rounded-xl p-2.5 text-slate-500 transition hover:bg-white/80 lg:hidden"
             >
               <Menu className="h-5 w-5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (window.history.length > 1) {
+                  navigate(-1);
+                } else {
+                  navigate('/registrar/dashboard');
+                }
+              }}
+              aria-label="Go back"
+              title="Go back to previous page"
+              className="focus-ring inline-flex items-center gap-1.5 rounded-xl border border-slate-200/80 bg-white/70 px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:bg-white hover:text-slate-900"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="hidden sm:inline">Back</span>
             </button>
 
             <GlobalSearch />

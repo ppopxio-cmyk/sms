@@ -66,10 +66,10 @@ export default function RegistrarGpa() {
     );
   }, [cohorts, searchQuery]);
 
-  // Only submitted cohorts for the CGPA tab (readyForCgpa === true or cgpaCalculated === true or allStagesPublished)
+  // Only submitted cohorts for the CGPA tab (only cohorts sent by the GPA calculation)
   const submittedCgpaCohorts = useMemo(() => {
     return cohorts.filter(
-      (c) => c.readyForCgpa || c.cgpaCalculated || c.allStagesPublished,
+      (c) => Boolean(c.readyForCgpa || c.cgpaCalculated),
     );
   }, [cohorts]);
 
@@ -110,13 +110,29 @@ export default function RegistrarGpa() {
   // Mutation: Calculate Stage GPA
   const calculateGpaMutation = useMutation({
     mutationFn: async () => {
+      const res = await api.post(`${REGISTRAR}/gpa-cgpa/calculate-stage-gpa`, {
+        programId: selectedGpaCohort?.program.id,
+        batchId: selectedGpaCohort?.batch.id,
+        level: selectedLevel,
+      });
       await list.refetch();
-      return list.data?.rows?.length ?? 0;
+      return res.data;
     },
-    onSuccess: (count) => {
+    onSuccess: (data) => {
       toast.success(
-        `${durationUnit} ${selectedLevel} GPA calculated for all ${count} student(s) of ${activeCohort?.program.name}!`,
+        data.message ||
+          `${durationUnit} ${selectedLevel} GPA calculated successfully for ${selectedGpaCohort?.program.name}!`,
       );
+      setSelectedGpaCohort((prev) => {
+        if (!prev) return prev;
+        const updated = Array.from(new Set([...(prev.calculatedStages || []), Number(selectedLevel)]));
+        return {
+          ...prev,
+          calculatedStages: updated,
+          allStagesCalculated: updated.length >= prev.totalStages,
+          batch: { ...prev.batch, calculatedStages: updated },
+        };
+      });
       invalidate();
     },
     onError: (err) => toast.error(errorMessage(err, 'Failed to calculate Stage GPA.')),
@@ -150,7 +166,16 @@ export default function RegistrarGpa() {
     onSuccess: (data) => {
       toast.success(
         data.message ||
-          `Cumulative CGPA calculated for all students! Students marked as Graduated.`,
+          `Cumulative CGPA calculated for all students! Students marked as Graduated & Ready for Certification.`,
+      );
+      setSelectedCgpaCohort((prev) =>
+        prev
+          ? {
+              ...prev,
+              cgpaCalculated: true,
+              batch: { ...prev.batch, cgpaCalculated: true },
+            }
+          : prev,
       );
       invalidate();
     },
@@ -448,42 +473,61 @@ export default function RegistrarGpa() {
 
                   {/* Stage Switcher Pills */}
                   <div className="flex flex-wrap items-center gap-1.5 rounded-xl bg-slate-100 p-1">
-                    {selectedGpaCohort.stages.map((st) => (
-                      <button
-                        key={st.level}
-                        type="button"
-                        onClick={() => setSelectedLevel(st.level)}
-                        className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
-                          Number(selectedLevel) === st.level
-                            ? 'bg-white text-brand-700 shadow-sm'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        {st.label}
-                        {st.status === 'published' && (
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        )}
-                      </button>
-                    ))}
+                    {selectedGpaCohort.stages.map((st) => {
+                      const isCalculated = (selectedGpaCohort.calculatedStages || []).includes(st.level);
+                      return (
+                        <button
+                          key={st.level}
+                          type="button"
+                          onClick={() => setSelectedLevel(st.level)}
+                          className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                            Number(selectedLevel) === st.level
+                              ? 'bg-white text-brand-700 shadow-sm'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {st.label}
+                          {isCalculated ? (
+                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                          ) : st.status === 'published' ? (
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                          ) : null}
+                        </button>
+                      );
+                    })}
                   </div>
 
                   {/* Actions */}
                   <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      onClick={() => calculateGpaMutation.mutate()}
-                      loading={calculateGpaMutation.isPending || list.isFetching}
-                      className="gap-1.5 bg-brand-600 hover:bg-brand-700 text-white"
-                    >
-                      <RefreshCw className="h-4 w-4" /> Calculate {durationUnit} {selectedLevel} GPA
-                    </Button>
+                    {(selectedGpaCohort.calculatedStages || []).includes(Number(selectedLevel)) ? (
+                      <div className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-800 shadow-sm">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                        <span>{durationUnit} {selectedLevel} GPA Calculated</span>
+                      </div>
+                    ) : (
+                      <Button
+                        onClick={() => calculateGpaMutation.mutate()}
+                        loading={calculateGpaMutation.isPending || list.isFetching}
+                        className="gap-1.5 bg-brand-600 hover:bg-brand-700 text-white font-semibold"
+                      >
+                        <RefreshCw className="h-4 w-4" /> Calculate {durationUnit} {selectedLevel} GPA
+                      </Button>
+                    )}
 
-                    <Button
-                      onClick={() => sendToCgpaMutation.mutate()}
-                      loading={sendToCgpaMutation.isPending}
-                      className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
-                    >
-                      <Send className="h-4 w-4" /> Send to CGPA & Transcripts
-                    </Button>
+                    {selectedGpaCohort.totalStages > 0 &&
+                    (selectedGpaCohort.calculatedStages || []).length >= selectedGpaCohort.totalStages ? (
+                      <Button
+                        onClick={() => sendToCgpaMutation.mutate()}
+                        loading={sendToCgpaMutation.isPending}
+                        className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm"
+                      >
+                        <Send className="h-4 w-4" /> Send to CGPA & Transcripts
+                      </Button>
+                    ) : (
+                      <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-medium text-slate-500">
+                        {(selectedGpaCohort.calculatedStages || []).length} / {selectedGpaCohort.totalStages} {durationUnit}s calculated
+                      </span>
+                    )}
                   </div>
                 </div>
               </Card>
@@ -641,30 +685,47 @@ export default function RegistrarGpa() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    onClick={() =>
-                      calculateCgpaMutation.mutate({
-                        programId: selectedCgpaCohort.program.id,
-                        batchId: selectedCgpaCohort.batch.id,
-                      })
-                    }
-                    loading={calculateCgpaMutation.isPending}
-                    className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
-                  >
-                    <Award className="h-4 w-4" /> Finalize CGPA & Graduate Students
-                  </Button>
+                  {selectedCgpaCohort.cgpaCalculated ? (
+                    <>
+                      <div className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-800 shadow-sm">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                        <span>Ready for Certification & Graduated</span>
+                      </div>
 
-                  <Link to="/registrar/transcripts">
-                    <Button variant="secondary" className="gap-1.5 text-xs">
-                      <FileText className="h-4 w-4 text-slate-600" /> Transcripts Hub
-                    </Button>
-                  </Link>
+                      <Link to="/registrar/certificates">
+                        <Button className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm">
+                          <GraduationCap className="h-4 w-4" /> Issue Certificates
+                        </Button>
+                      </Link>
 
-                  <Link to="/registrar/certificates">
-                    <Button variant="secondary" className="gap-1.5 text-xs">
-                      <GraduationCap className="h-4 w-4 text-emerald-600" /> Issue Certificates
-                    </Button>
-                  </Link>
+                      <Link to="/registrar/transcripts">
+                        <Button variant="secondary" className="gap-1.5 text-xs font-medium">
+                          <FileText className="h-4 w-4 text-slate-600" /> Transcripts Hub
+                        </Button>
+                      </Link>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        onClick={() =>
+                          calculateCgpaMutation.mutate({
+                            programId: selectedCgpaCohort.program.id,
+                            batchId: selectedCgpaCohort.batch.id,
+                          })
+                        }
+                        loading={calculateCgpaMutation.isPending}
+                        className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+                      >
+                        <Award className="h-4 w-4" /> Finalize CGPA & Graduate Students
+                      </Button>
+
+                      <Link to="/registrar/transcripts">
+                        <Button variant="secondary" className="gap-1.5 text-xs">
+                          <FileText className="h-4 w-4 text-slate-600" /> Transcripts Hub
+                        </Button>
+                      </Link>
+                    </>
+                  )}
                 </div>
               </div>
 

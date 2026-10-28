@@ -93,7 +93,7 @@ import {
   reviewResult, approveResult, publishResult, rejectResult, correctResult,
   approveResultSubmission, declineResultSubmission, publishResultSubmission,
   singleOfferingResults, requestResultSubmitCode, submitStageComplete, submitProgramFinished,
-  readyGpaCohorts,
+  readyGpaCohorts, calculateStageGpa,
   gpaCgpa, sendToCgpa, calculateCgpaAndGraduate, exportStudentGpaRecord, listGraduation, evaluateGraduation, graduationStudent, resultOptions,
 } from '../controllers/registrar.records.controller.js';
 import {
@@ -294,6 +294,7 @@ r.get(
   exportStudentGpaRecord,
 );
 r.get('/gpa-cgpa', requirePermission('gpa:view'), validate(gpaQuerySchema, 'query'), gpaCgpa);
+r.post('/gpa-cgpa/calculate-stage-gpa', requirePermission('gpa:view'), calculateStageGpa);
 r.post('/gpa-cgpa/send-to-cgpa', requirePermission('gpa:view'), sendToCgpa);
 r.post('/gpa-cgpa/calculate-cgpa', requirePermission('gpa:view'), calculateCgpaAndGraduate);
 

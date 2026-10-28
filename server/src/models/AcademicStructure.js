@@ -184,6 +184,7 @@ const batchSchema = new Schema(
     expectedCompletionYear: { type: Number, min: 2000, max: 2300, default: null },
     currentLevel: { type: Number, min: 1, max: 20, default: 1 },
     status: { type: String, enum: BATCH_STATUSES, default: 'planned', index: true },
+    calculatedStages: [{ type: Number }],
     readyForCgpa: { type: Boolean, default: false },
     cgpaCalculated: { type: Boolean, default: false },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },

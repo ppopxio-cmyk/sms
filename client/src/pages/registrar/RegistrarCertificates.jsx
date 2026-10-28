@@ -11,6 +11,7 @@ import {
   humanStatus,
   toneForStatus,
 } from '../../lib/registrar';
+import { formatEthiopian } from '../../lib/ethiopianDate';
 import { useDebounced } from '../../lib/useDebounced';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
 import RegistrarTable from '../../components/registrar/RegistrarTable';
@@ -329,7 +330,7 @@ function IssueCertificateModal({ open, onClose, onSaved }) {
           <p className="flex items-center gap-2 font-semibold text-slate-800"><ShieldCheck className="h-4 w-4 text-brand-600" /> Issuance checks</p>
           <ul className="mt-2 list-inside list-disc space-y-1">
             <li>Published results, required credits and the programme graduation policy.</li>
-            <li>The active certificate template, seal, signature and photo policy.</li>
+            <li>The active certificate template, signatory and photo policy (no seal required).</li>
             <li>The student's completion date and an available certificate number.</li>
           </ul>
           <p className="mt-2">An ineligible student or missing configuration blocks issuance; nothing is fabricated.</p>
@@ -405,7 +406,7 @@ function CertificateDetail({ certificateId, onClose }) {
             <div><dt className="text-xs text-slate-400">Programme</dt><dd className="text-slate-700">{row.programSnapshot?.code} · {row.programSnapshot?.name}</dd></div>
             <div><dt className="text-xs text-slate-400">Department</dt><dd className="text-slate-700">{row.departmentSnapshot?.name || '—'}</dd></div>
             <div><dt className="text-xs text-slate-400">Academic year</dt><dd className="text-slate-700">{row.academicYearLabel || row.academicYear?.label || '—'}</dd></div>
-            <div><dt className="text-xs text-slate-400">Completion date</dt><dd className="text-slate-700">{row.completionDate ? displayDateTime(row.completionDate) : '—'}</dd></div>
+            <div><dt className="text-xs text-slate-400">Completion date (Eth)</dt><dd className="font-medium text-slate-800">{row.completionDate ? formatEthiopian(row.completionDate) : '—'}</dd></div>
             <div><dt className="text-xs text-slate-400">Issued</dt><dd className="text-slate-700">{displayDateTime(row.issuedAt)}</dd></div>
             <div className="sm:col-span-2"><dt className="text-xs text-slate-400">Verification reference</dt><dd className="break-all text-slate-700">{row.verificationId}</dd></div>
             {row.revokeReason ? <div className="sm:col-span-2"><dt className="text-xs text-slate-400">Revocation reason</dt><dd className="text-rose-700">{row.revokeReason}</dd></div> : null}

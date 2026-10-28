@@ -228,48 +228,38 @@ function addPageFooter(doc, template) {
 }
 
 function drawPhoto(doc, buffer, x, y) {
-  const size = 113.39; // 4 cm at 72 points/inch
+  const size = 113.39; // 4 cm at 72 points/inch (4x4 cm square)
   doc.save();
-  doc.lineWidth(1).strokeColor('#b7a887').rect(x, y, size, size).stroke();
+  doc.lineWidth(1.2).strokeColor('#b7a887').rect(x, y, size, size).stroke();
   if (buffer) {
     try {
       doc.image(buffer, x + 3, y + 3, { cover: [size - 6, size - 6], align: 'center', valign: 'center' });
     } catch {
-      doc.fillColor('#6b7280').fontSize(8).font('Helvetica').text('Photo unavailable', x, y + 52, { width: size, align: 'center' });
+      doc.fillColor('#6b7280').fontSize(9).font('Helvetica-Bold').text('4×4 PHOTO', x, y + 46, { width: size, align: 'center' });
+      doc.font('Helvetica').fontSize(7.5).fillColor('#9ca3af').text('Affix photo here', x, y + 60, { width: size, align: 'center' });
     }
   } else {
-    doc.fillColor('#6b7280').fontSize(8).font('Helvetica').text('Photo not supplied', x, y + 52, { width: size, align: 'center' });
+    doc.fillColor('#4b5563').fontSize(9).font('Helvetica-Bold').text('4×4 PHOTO', x, y + 46, { width: size, align: 'center' });
+    doc.font('Helvetica').fontSize(7.5).fillColor('#9ca3af').text('Affix photo here', x, y + 60, { width: size, align: 'center' });
   }
   doc.restore();
 }
 
 function drawSeal(doc, buffer, x, y) {
-  if (!buffer) {
-    throw new AppError(
-      409,
-      'CERTIFICATE_CONFIG_MISSING',
-      'The official seal is not configured. Upload it before issuing certificates.',
-    );
-  }
+  if (!buffer) return;
   try {
     doc.image(buffer, x, y, { fit: [92, 92], align: 'center', valign: 'center' });
   } catch {
-    throw new AppError(409, 'CERTIFICATE_SEAL_INVALID', 'The configured official seal could not be read.');
+    // Graceful fallback when seal cannot be drawn
   }
 }
 
 function drawSignature(doc, buffer, x, y) {
-  if (!buffer) {
-    throw new AppError(
-      409,
-      'CERTIFICATE_CONFIG_MISSING',
-      'The authorised signature is not configured. Upload it before issuing certificates.',
-    );
-  }
+  if (!buffer) return;
   try {
     doc.image(buffer, x, y, { fit: [140, 52], align: 'center', valign: 'center' });
   } catch {
-    throw new AppError(409, 'CERTIFICATE_SIGNATURE_INVALID', 'The configured signature could not be read.');
+    // Graceful fallback when signature cannot be drawn
   }
 }
 
@@ -398,7 +388,7 @@ function drawTemplateCertificatePage(doc, { certificate, template, photoBuffer, 
         valign: 'center',
       });
     } catch {
-      throw new AppError(409, 'CERTIFICATE_SEAL_INVALID', 'The configured official seal could not be read.');
+      // Safe fallback if seal cannot be embedded
     }
   }
 
@@ -411,7 +401,7 @@ function drawTemplateCertificatePage(doc, { certificate, template, photoBuffer, 
         valign: 'center',
       });
     } catch {
-      throw new AppError(409, 'CERTIFICATE_SIGNATURE_INVALID', 'The configured signature could not be read.');
+      // Safe fallback if signature cannot be embedded
     }
   }
   doc

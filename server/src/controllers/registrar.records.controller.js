@@ -863,8 +863,9 @@ export const readyGpaCohorts = asyncHandler(async (req, res) => {
       }
     }
 
-    // Only include cohort if it has published or submitted results ready
-    if (pubCount === 0 && subCount === 0) continue;
+    // Only include cohort if all marks are published and ready for GPA calculation
+    // "if its 0 Published Marks do not show that department only all marks published departments visble ready to GPA calculation"
+    if (pubCount === 0) continue;
 
     const totalStages = prog.qualificationType === 'degree'
       ? (prog.durationYears || 4)
@@ -901,7 +902,12 @@ export const readyGpaCohorts = asyncHandler(async (req, res) => {
       });
     }
 
+    // Must have all marks published across all stages to be ready for GPA calculation
+    if (!allPublished) continue;
+
     const studentCount = studentMap.get(String(b._id)) || 0;
+    const calculatedStages = b.calculatedStages || [];
+    const allStagesCalculated = totalStages > 0 && calculatedStages.length >= totalStages;
 
     cohorts.push({
       id: `${prog._id}_${b._id}`,
@@ -925,7 +931,9 @@ export const readyGpaCohorts = asyncHandler(async (req, res) => {
         name: b.name,
         category: b.category || 'regular',
         admissionAcademicYear: b.admissionAcademicYear?.label || '2019',
-        readyForCgpa: Boolean(b.readyForCgpa || allPublished),
+        calculatedStages,
+        allStagesCalculated,
+        readyForCgpa: Boolean(b.readyForCgpa),
         cgpaCalculated: Boolean(b.cgpaCalculated),
         status: b.status,
       },
@@ -933,10 +941,12 @@ export const readyGpaCohorts = asyncHandler(async (req, res) => {
       durationUnit,
       stages,
       allStagesPublished: allPublished,
+      calculatedStages,
+      allStagesCalculated,
       studentCount,
       totalPublishedResults: pubCount,
       totalSubmittedResults: subCount,
-      readyForCgpa: Boolean(b.readyForCgpa || allPublished),
+      readyForCgpa: Boolean(b.readyForCgpa),
       cgpaCalculated: Boolean(b.cgpaCalculated),
     });
   }
@@ -1116,6 +1126,66 @@ export const gpaCgpa = asyncHandler(async (req, res) => {
   });
 });
 
+export const calculateStageGpa = asyncHandler(async (req, res) => {
+  const { programId, batchId, level } = req.body;
+  if (!programId) throw new AppError(400, 'PROGRAM_REQUIRED', 'Programme is required.');
+  if (!batchId) throw new AppError(400, 'BATCH_REQUIRED', 'Batch is required.');
+  const stageNum = Number(level);
+  if (!stageNum || stageNum < 1) throw new AppError(400, 'LEVEL_REQUIRED', 'Valid Stage/Year is required.');
+
+  const policy = await requireGradingPolicy();
+  const prog = await Program.findById(programId).lean();
+  if (!prog) throw new AppError(404, 'PROGRAM_NOT_FOUND', 'Programme not found.');
+
+  const batch = await Batch.findById(batchId);
+  if (!batch) throw new AppError(404, 'BATCH_NOT_FOUND', 'Batch not found.');
+
+  // Find all students in this batch
+  const students = await Student.find({ batch: batchId, program: programId });
+  if (!students.length) throw new AppError(404, 'NO_STUDENTS', 'No students found in this batch.');
+
+  // Compute stage GPA for every student in this cohort
+  for (const student of students) {
+    const studentResults = await publishedResultsForStudent(student._id);
+    const stageRows = studentResults.filter((r) => Number(r.offering?.level) === stageNum);
+    if (stageRows.length > 0) {
+      calculateGpa(stageRows, policy);
+    }
+  }
+
+  // Record that this stage has had its GPA calculated in the database
+  if (!batch.calculatedStages) batch.calculatedStages = [];
+  if (!batch.calculatedStages.includes(stageNum)) {
+    batch.calculatedStages.push(stageNum);
+    await batch.save();
+  }
+
+  const totalStages = prog.qualificationType === 'degree'
+    ? (prog.durationYears || 4)
+    : prog.qualificationType === 'diploma'
+    ? (prog.levels?.length ? Math.max(...prog.levels) : 4)
+    : (prog.shortTerm?.duration || 1);
+
+  const allStagesCalculated = totalStages > 0 && batch.calculatedStages.length >= totalStages;
+
+  audit({
+    req,
+    action: 'registrar.gpa.calculate_stage',
+    targetType: 'Batch',
+    targetId: batch._id,
+    meta: { programId, level: stageNum, calculatedStages: batch.calculatedStages },
+  });
+
+  const durationUnit = prog.qualificationType === 'degree' ? 'Year' : prog.qualificationType === 'diploma' ? 'Level' : 'Month';
+  res.json({
+    success: true,
+    level: stageNum,
+    calculatedStages: batch.calculatedStages,
+    allStagesCalculated,
+    message: `${durationUnit} ${stageNum} GPA calculated successfully!`,
+  });
+});
+
 export const sendToCgpa = asyncHandler(async (req, res) => {
   const { programId, batchId } = req.body;
   if (!programId) throw new AppError(400, 'PROGRAM_REQUIRED', 'Programme is required.');
@@ -1124,7 +1194,13 @@ export const sendToCgpa = asyncHandler(async (req, res) => {
     program: programId,
     ...(batchId ? { _id: batchId } : {}),
   };
-  await Batch.updateMany(filter, { $set: { readyForCgpa: true, sentToTranscripts: true } });
+  await Batch.updateMany(filter, {
+    $set: {
+      readyForCgpa: true,
+      sentToTranscripts: true,
+      sentToCgpaAt: new Date(),
+    },
+  });
 
   audit({
     req,
@@ -1134,7 +1210,7 @@ export const sendToCgpa = asyncHandler(async (req, res) => {
     meta: { batchId },
   });
 
-  res.json({ success: true, message: 'Programme sent to CGPA tab successfully!' });
+  res.json({ success: true, message: 'Programme sent to CGPA & Transcripts successfully!' });
 });
 
 export const calculateCgpaAndGraduate = asyncHandler(async (req, res) => {
@@ -1151,6 +1227,7 @@ export const calculateCgpaAndGraduate = asyncHandler(async (req, res) => {
     throw new AppError(404, 'NO_STUDENTS', 'No students found for this programme and batch.');
   }
 
+  const completionDate = new Date();
   let graduatedCount = 0;
   for (const student of students) {
     const studentResults = await publishedResultsForStudent(student._id);
@@ -1158,7 +1235,8 @@ export const calculateCgpaAndGraduate = asyncHandler(async (req, res) => {
 
     student.studentStatus = 'graduated';
     student.enrollmentStatus = 'completed';
-    student.completionDate = new Date();
+    student.completionDate = completionDate;
+    student.graduationEligible = true;
     await student.save();
     graduatedCount++;
   }
@@ -1167,7 +1245,13 @@ export const calculateCgpaAndGraduate = asyncHandler(async (req, res) => {
     program: programId,
     ...(batchId ? { _id: batchId } : {}),
   };
-  await Batch.updateMany(batchFilter, { $set: { cgpaCalculated: true, status: 'completed' } });
+  await Batch.updateMany(batchFilter, {
+    $set: {
+      cgpaCalculated: true,
+      status: 'completed',
+      readyForGraduation: true,
+    },
+  });
 
   audit({
     req,
@@ -1180,7 +1264,7 @@ export const calculateCgpaAndGraduate = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     count: graduatedCount,
-    message: `Cumulative CGPA calculated for all ${graduatedCount} students. Students have been marked as Graduated!`,
+    message: `Cumulative CGPA calculated for all ${graduatedCount} students. Students have been marked as Graduated & Ready for Certification!`,
   });
 });
 
