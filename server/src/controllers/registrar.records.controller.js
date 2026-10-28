@@ -298,12 +298,44 @@ export const submitStageComplete = asyncHandler(async (req, res) => {
   const { programId, level, batchId } = req.body;
   if (!programId || level === undefined) throw new AppError(400, 'STAGE_REQUIRED', 'Program and stage level are required.');
 
-  const offeringFilter = {
-    program: programId,
-    level: Number(level),
-    ...(batchId ? { batch: batchId } : {}),
-  };
-  const offerings = await CourseOffering.find(offeringFilter).select('_id status').lean();
+  // Resolve the exact batch for this program if a batchId (or batch code) was passed
+  let effectiveBatchId = null;
+  if (batchId) {
+    let batchDoc = mongoose.isValidObjectId(batchId) ? await Batch.findById(batchId).lean() : null;
+    if (batchDoc) {
+      if (String(batchDoc.program) === String(programId)) {
+        effectiveBatchId = batchDoc._id;
+      } else {
+        const matchingBatch = await Batch.findOne({
+          program: programId,
+          code: batchDoc.code,
+          category: batchDoc.category || 'regular',
+        }).lean();
+        effectiveBatchId = matchingBatch?._id || null;
+      }
+    } else {
+      const matchingBatch = await Batch.findOne({ program: programId, code: String(batchId) }).lean();
+      effectiveBatchId = matchingBatch?._id || null;
+    }
+  }
+
+  // Try finding offerings with effectiveBatchId first; if none, fall back to program and level
+  let offerings = [];
+  if (effectiveBatchId) {
+    offerings = await CourseOffering.find({
+      program: programId,
+      level: Number(level),
+      batch: effectiveBatchId,
+    }).select('_id status batch').lean();
+  }
+
+  if (!offerings.length) {
+    offerings = await CourseOffering.find({
+      program: programId,
+      level: Number(level),
+    }).select('_id status batch').lean();
+  }
+
   if (!offerings.length) {
     throw new AppError(400, 'NO_OFFERINGS', 'No course offerings found for this programme and stage.');
   }
@@ -366,8 +398,8 @@ export const submitStageComplete = asyncHandler(async (req, res) => {
 
   const allOfferings = await CourseOffering.find({
     program: programId,
-    ...(batchId ? { batch: batchId } : {}),
-  }).select('level status').lean();
+    ...(effectiveBatchId ? { batch: effectiveBatchId } : {}),
+  }).select('level status batch').lean();
 
   const finishedStages = [];
   for (let s = 1; s <= totalStages; s++) {
@@ -378,8 +410,9 @@ export const submitStageComplete = asyncHandler(async (req, res) => {
   }
 
   const allStagesFinished = totalStages > 0 && finishedStages.length >= totalStages;
-  if (batchId && allStagesFinished) {
-    await Batch.updateOne({ _id: batchId }, { $set: { status: 'completed', readyForCgpa: true } });
+  const targetBatchId = effectiveBatchId || offerings[0]?.batch || batchId;
+  if (targetBatchId && allStagesFinished) {
+    await Batch.updateOne({ _id: targetBatchId }, { $set: { status: 'completed', readyForCgpa: true } });
   }
 
   audit({
@@ -406,7 +439,33 @@ export const submitProgramFinished = asyncHandler(async (req, res) => {
   const program = await Program.findById(programId).lean();
   if (!program) throw new AppError(404, 'PROGRAM_NOT_FOUND', 'Program not found.');
 
-  const offerings = await CourseOffering.find({ program: programId, ...(batchId ? { batch: batchId } : {}) }).select('_id').lean();
+  let effectiveBatchId = null;
+  if (batchId) {
+    let batchDoc = mongoose.isValidObjectId(batchId) ? await Batch.findById(batchId).lean() : null;
+    if (batchDoc) {
+      if (String(batchDoc.program) === String(programId)) {
+        effectiveBatchId = batchDoc._id;
+      } else {
+        const matchingBatch = await Batch.findOne({
+          program: programId,
+          code: batchDoc.code,
+          category: batchDoc.category || 'regular',
+        }).lean();
+        effectiveBatchId = matchingBatch?._id || null;
+      }
+    } else {
+      const matchingBatch = await Batch.findOne({ program: programId, code: String(batchId) }).lean();
+      effectiveBatchId = matchingBatch?._id || null;
+    }
+  }
+
+  let offerings = [];
+  if (effectiveBatchId) {
+    offerings = await CourseOffering.find({ program: programId, batch: effectiveBatchId }).select('_id batch').lean();
+  }
+  if (!offerings.length) {
+    offerings = await CourseOffering.find({ program: programId }).select('_id batch').lean();
+  }
   const offeringIds = offerings.map((o) => o._id);
 
   const policy = await requireGradingPolicy();
@@ -426,8 +485,9 @@ export const submitProgramFinished = asyncHandler(async (req, res) => {
     await r.save();
   }
 
-  if (batchId) {
-    await Batch.updateOne({ _id: batchId }, { $set: { status: 'completed', readyForCgpa: true } });
+  const targetBatchId = effectiveBatchId || offerings[0]?.batch || batchId;
+  if (targetBatchId) {
+    await Batch.updateOne({ _id: targetBatchId }, { $set: { status: 'completed', readyForCgpa: true } });
   }
 
   await CourseOffering.updateMany(

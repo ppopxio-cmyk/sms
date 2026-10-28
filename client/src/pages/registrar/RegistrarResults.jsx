@@ -140,13 +140,33 @@ export default function RegistrarResults() {
     return list;
   }, [selectedProgDoc, stageUnit]);
 
+  const selectedBatchDoc = useMemo(
+    () => uniqueBatches.find((b) => b.id === (activeQuery?.batch || selectedBatch)),
+    [uniqueBatches, activeQuery, selectedBatch],
+  );
+
+  const resolvedBatchId = useMemo(() => {
+    const progId = activeQuery?.program || selectedProg;
+    const batchKeyOrId = activeQuery?.batch || selectedBatch;
+    if (!progId || !batchKeyOrId) return batchKeyOrId;
+    const batchObj = uniqueBatches.find((b) => b.id === batchKeyOrId || b.code === batchKeyOrId);
+    if (!batchObj) return batchKeyOrId;
+    const progBatch = rawBatches.find(
+      (b) =>
+        String(b.program?.id || b.program) === String(progId) &&
+        b.code === batchObj.code &&
+        (b.category || 'regular') === (batchObj.category || 'regular'),
+    );
+    return progBatch ? (progBatch.id || progBatch._id) : batchKeyOrId;
+  }, [rawBatches, uniqueBatches, activeQuery, selectedProg, selectedBatch]);
+
   const handleShowResults = () => {
     if (!selectedBatch || !selectedDept || !selectedProg || !selectedLevel) {
       toast.error('Please choose Batch, Department, Programme, and Stage/Year.');
       return;
     }
     setActiveQuery({
-      batch: selectedBatch,
+      batch: resolvedBatchId || selectedBatch,
       department: selectedDept,
       program: selectedProg,
       level: Number(selectedLevel),
@@ -191,11 +211,6 @@ export default function RegistrarResults() {
       return matchProg && matchLevel;
     });
   }, [submissions.data?.rows, activeQuery]);
-
-  const selectedBatchDoc = useMemo(
-    () => uniqueBatches.find((b) => b.id === (activeQuery?.batch || selectedBatch)),
-    [uniqueBatches, activeQuery, selectedBatch],
-  );
 
   const selectedDeptDoc = useMemo(
     () => departments.find((d) => d.id === (activeQuery?.department || selectedDept)),
@@ -430,7 +445,7 @@ export default function RegistrarResults() {
                   programId: activeQuery.program,
                   programName: selectedProgDoc?.name,
                   level: activeQuery.level,
-                  batchId: activeQuery.batch,
+                  batchId: resolvedBatchId || activeQuery.batch,
                   coursesCount: matchingCourses.length,
                 });
                 setVerificationCode('');
