@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
@@ -26,9 +26,11 @@ import {
   History,
   ShieldCheck,
   Printer,
+  Camera,
+  Upload,
 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
-import { REGISTRAR, humanStatus, toneForStatus, printBlob } from '../../lib/registrar';
+import { REGISTRAR, humanStatus, toneForStatus, printBlob, downloadFile } from '../../lib/registrar';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
 import RegistrarTable from '../../components/registrar/RegistrarTable';
 import Card, { CardBody, CardHeader } from '../../components/ui/Card';
@@ -70,7 +72,12 @@ export default function RegistrarGpa() {
   const [certPreviewUrl, setCertPreviewUrl] = useState(null);
   const [certPreviewLoading, setCertPreviewLoading] = useState(false);
   const [downloadingCertId, setDownloadingCertId] = useState(null);
+  const [printingCertId, setPrintingCertId] = useState(null);
   const [issuingCertStudent, setIssuingCertStudent] = useState(null);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [bulkPrinting, setBulkPrinting] = useState(false);
+  const [uploadingStudent, setUploadingStudent] = useState(null);
+  const photoInputRef = useRef(null);
 
   // 1. Fetch all cohorts ready to calculate (departments, batches, and programs with submitted/published marks)
   const readyCohortsQuery = useQuery({
@@ -177,7 +184,7 @@ export default function RegistrarGpa() {
     onError: (err) => toast.error(errorMessage(err, 'Failed to calculate Stage GPA.')),
   });
 
-  // In-tab Certificate Preview & Download handlers
+  // In-tab Certificate Preview, Real Download & Print handlers
   const handlePreviewCert = async (row) => {
     setCertPreviewStudent(row);
     setCertPreviewLoading(true);
@@ -195,16 +202,127 @@ export default function RegistrarGpa() {
     }
   };
 
-  const handleDownloadCert = async (row) => {
+  const handleDownloadRealCert = async (row) => {
+    if (!row.hasPhoto) {
+      toast.error('Student photograph is missing. Photo must be uploaded before issuing or downloading official certificate.');
+      return;
+    }
     setDownloadingCertId(row.id);
     try {
-      const res = await api.post(`${REGISTRAR}/certificates/preview`, { student: row.id }, { responseType: 'blob' });
-      downloadBlob(res.data, `Certificate_${row.studentId || row.fullName}.pdf`);
-      toast.success('Certificate PDF downloaded successfully.');
+      let certId = row.certificate?.id;
+      if (!certId) {
+        // Auto-issue official certificate
+        const issueRes = await api.post(`${REGISTRAR}/certificates/issue`, {
+          student: row.id,
+          idempotencyKey: `cert-${Date.now()}-${row.id}`,
+        });
+        certId = issueRes.data?.certificate?._id || issueRes.data?.certificate?.id;
+        toast.success(`Official Certificate issued: ${issueRes.data?.certificate?.certificateNumber || 'saved'}`);
+        invalidate();
+      }
+      await downloadFile(`${REGISTRAR}/certificates/${certId}/pdf`, `Certificate_${row.studentId || row.fullName}.pdf`);
+      toast.success('Official Certificate PDF downloaded successfully.');
     } catch (err) {
       toast.error(errorMessage(err, 'Could not download certificate PDF.'));
     } finally {
       setDownloadingCertId(null);
+    }
+  };
+
+  const handlePrintRealCert = async (row) => {
+    if (!row.hasPhoto) {
+      toast.error('Student photograph is missing. Photo must be uploaded before printing official certificate.');
+      return;
+    }
+    setPrintingCertId(row.id);
+    try {
+      let certId = row.certificate?.id;
+      if (!certId) {
+        // Auto-issue official certificate
+        const issueRes = await api.post(`${REGISTRAR}/certificates/issue`, {
+          student: row.id,
+          idempotencyKey: `cert-${Date.now()}-${row.id}`,
+        });
+        certId = issueRes.data?.certificate?._id || issueRes.data?.certificate?.id;
+        toast.success(`Official Certificate issued: ${issueRes.data?.certificate?.certificateNumber || 'saved'}`);
+        invalidate();
+      }
+      const res = await api.post(`${REGISTRAR}/certificates/${certId}/print`, {}, { responseType: 'blob' });
+      printBlob(res.data);
+      toast.success('Print dialog opened. Print counter updated.');
+      invalidate();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not print certificate PDF.'));
+    } finally {
+      setPrintingCertId(null);
+    }
+  };
+
+  const handleBulkDownloadCertificates = async () => {
+    const cohort = selectedCgpaCohort || activeCohort;
+    if (!cohort) return;
+    setBulkDownloading(true);
+    try {
+      const progId = cohort.program?.id || cohort.program?._id;
+      const batchId = cohort.batch?.id || cohort.batch?._id;
+      const res = await api.post(
+        `${REGISTRAR}/certificates/bulk-pdf`,
+        { programId: progId, batchId },
+        { responseType: 'blob' }
+      );
+      downloadBlob(res.data, `All_Certificates_${cohort.program?.code || 'PROG'}_${cohort.batch?.code || '2019'}.pdf`);
+      toast.success('All department and programme certificates generated and downloaded!');
+      invalidate();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to download bulk certificates.'));
+    } finally {
+      setBulkDownloading(false);
+    }
+  };
+
+  const handleBulkPrintCertificates = async () => {
+    const cohort = selectedCgpaCohort || activeCohort;
+    if (!cohort) return;
+    setBulkPrinting(true);
+    try {
+      const progId = cohort.program?.id || cohort.program?._id;
+      const batchId = cohort.batch?.id || cohort.batch?._id;
+      const res = await api.post(
+        `${REGISTRAR}/certificates/bulk-print`,
+        { programId: progId, batchId },
+        { responseType: 'blob' }
+      );
+      printBlob(res.data);
+      toast.success('Bulk print dialog opened. Certificates issued and counters updated.');
+      invalidate();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to print bulk certificates.'));
+    } finally {
+      setBulkPrinting(false);
+    }
+  };
+
+  const handleUploadPhoto = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !uploadingStudent) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('The photo must be smaller than 5 MB.');
+      return;
+    }
+    const buffer = await file.arrayBuffer();
+    try {
+      await api.post(`${REGISTRAR}/students/${uploadingStudent.id}/photo`, buffer, {
+        headers: { 'Content-Type': file.type || 'image/jpeg' },
+      });
+      toast.success(`Photo uploaded for ${uploadingStudent.fullName}! Certificate unlocked.`);
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'students'] });
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'certificates'] });
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to upload student photo.'));
+    } finally {
+      setUploadingStudent(null);
+      if (photoInputRef.current) photoInputRef.current.value = '';
     }
   };
 
@@ -269,15 +387,28 @@ export default function RegistrarGpa() {
       key: 'student',
       label: 'Student',
       render: (row) => (
-        <div>
-          <p className="text-sm font-semibold text-slate-900">{row.fullName}</p>
-          <p className="text-xs text-slate-500 font-mono">
-            {row.studentId} ·{' '}
-            <span className="font-sans">
-              {row.program || '—'}
-              {row.batch ? ` (${row.batch})` : ''}
+        <div className="flex items-center gap-3">
+          {row.photo?.thumbnailUrl || row.photo?.url ? (
+            <img
+              src={row.photo.thumbnailUrl || row.photo.url}
+              alt=""
+              className="h-9 w-9 rounded-full object-cover ring-1 ring-slate-200 shrink-0"
+            />
+          ) : (
+            <span className="brand-gradient flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-xs">
+              {(row.fullName || '?').slice(0, 2).toUpperCase()}
             </span>
-          </p>
+          )}
+          <div>
+            <p className="text-sm font-semibold text-slate-900">{row.fullName}</p>
+            <p className="text-xs text-slate-500 font-mono">
+              {row.studentId} ·{' '}
+              <span className="font-sans">
+                {row.program || '—'}
+                {row.batch ? ` (${row.batch})` : ''}
+              </span>
+            </p>
+          </div>
         </div>
       ),
     },
@@ -311,8 +442,33 @@ export default function RegistrarGpa() {
             ),
           },
           {
+            key: 'certStatus',
+            label: 'Certificate Status',
+            render: (row) => {
+              if (row.certificateIssued) {
+                return (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-800 border border-emerald-200">
+                    <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Issued ({row.certificate?.certificateNumber})
+                  </span>
+                );
+              }
+              if (!row.hasPhoto) {
+                return (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 border border-amber-200">
+                    <AlertCircle className="h-3 w-3 text-amber-600" /> Photo Missing
+                  </span>
+                );
+              }
+              return (
+                <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 border border-blue-200">
+                  Ready to Issue
+                </span>
+              );
+            },
+          },
+          {
             key: 'status',
-            label: 'Graduation Status',
+            label: 'Graduation',
             render: () => (
               <Badge tone={activeCohort?.cgpaCalculated ? 'success' : 'brand'}>
                 {activeCohort?.cgpaCalculated ? 'Graduated' : 'Ready for CGPA'}
@@ -333,39 +489,102 @@ export default function RegistrarGpa() {
           <Button
             size="sm"
             variant="secondary"
-            onClick={() => setStudent({ id: row.id, fullName: row.fullName, studentId: row.studentId })}
+            onClick={() => setStudent({ id: row.id, fullName: row.fullName, studentId: row.studentId, photo: row.photo, hasPhoto: row.hasPhoto })}
           >
             Open Record
           </Button>
 
           {activeMainTab === 'cgpa' && activeCohort?.cgpaCalculated ? (
             <>
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={() => setIssuingCertStudent(row)}
-                className="gap-1 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white"
-              >
-                <Award className="h-3.5 w-3.5" /> Issue Certificate
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => handlePreviewCert(row)}
-                loading={certPreviewLoading && certPreviewStudent?.id === row.id}
-                className="gap-1 text-xs"
-              >
-                <Eye className="h-3.5 w-3.5 text-indigo-600" /> Preview
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => handleDownloadCert(row)}
-                loading={downloadingCertId === row.id}
-                className="gap-1 text-xs"
-              >
-                <Download className="h-3.5 w-3.5 text-slate-600" /> PDF
-              </Button>
+              {/* If photo is missing: no certificate can be issued, only preview is granted, but allow uploading photo */}
+              {!row.hasPhoto ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handlePreviewCert(row)}
+                    loading={certPreviewLoading && certPreviewStudent?.id === row.id}
+                    className="gap-1 text-xs text-indigo-700 hover:text-indigo-800"
+                    title="Preview without photo"
+                  >
+                    <Eye className="h-3.5 w-3.5" /> Preview
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setUploadingStudent(row);
+                      photoInputRef.current?.click();
+                    }}
+                    className="gap-1 text-xs bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100 font-bold"
+                  >
+                    <Camera className="h-3.5 w-3.5 text-amber-600" /> Add Photo
+                  </Button>
+                </>
+              ) : row.certificateIssued ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleDownloadRealCert(row)}
+                    loading={downloadingCertId === row.id}
+                    className="gap-1 text-xs text-brand-700 font-bold"
+                    title="Download Official Certificate"
+                  >
+                    <Download className="h-3.5 w-3.5" /> PDF
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handlePrintRealCert(row)}
+                    loading={printingCertId === row.id}
+                    className="gap-1 text-xs text-indigo-700 font-bold"
+                    title="Print Official Certificate"
+                  >
+                    <Printer className="h-3.5 w-3.5" /> Print ({row.certificate?.printCount || 0}/2)
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={() => setIssuingCertStudent(row)}
+                    className="gap-1 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white"
+                  >
+                    <Award className="h-3.5 w-3.5" /> Issue Certificate
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleDownloadRealCert(row)}
+                    loading={downloadingCertId === row.id}
+                    className="gap-1 text-xs text-brand-700"
+                    title="Issue & Download Official Certificate"
+                  >
+                    <Download className="h-3.5 w-3.5" /> PDF
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handlePrintRealCert(row)}
+                    loading={printingCertId === row.id}
+                    className="gap-1 text-xs text-indigo-700"
+                    title="Issue & Print Official Certificate"
+                  >
+                    <Printer className="h-3.5 w-3.5" /> Print
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handlePreviewCert(row)}
+                    loading={certPreviewLoading && certPreviewStudent?.id === row.id}
+                    className="gap-1 text-xs"
+                  >
+                    <Eye className="h-3.5 w-3.5 text-slate-600" /> Preview
+                  </Button>
+                </>
+              )}
             </>
           ) : null}
         </div>
@@ -874,6 +1093,28 @@ export default function RegistrarGpa() {
                         <span>Ready for Certification & Graduated</span>
                       </div>
 
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={handleBulkDownloadCertificates}
+                        loading={bulkDownloading}
+                        className="gap-1.5 text-xs font-bold text-brand-700 bg-white border border-brand-200 hover:bg-brand-50 shadow-xs"
+                        title="Bulk download official certificates for all department students in this programme"
+                      >
+                        <Download className="h-4 w-4" /> Bulk Download Certificates
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={handleBulkPrintCertificates}
+                        loading={bulkPrinting}
+                        className="gap-1.5 text-xs font-bold text-indigo-700 bg-white border border-indigo-200 hover:bg-indigo-50 shadow-xs"
+                        title="Bulk print official certificates for all department students in this programme"
+                      >
+                        <Printer className="h-4 w-4" /> Bulk Print Certificates
+                      </Button>
+
                       <Link to="/registrar/certificates">
                         <Button className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm">
                           <GraduationCap className="h-4 w-4" /> Issue Certificates
@@ -1051,33 +1292,91 @@ export default function RegistrarGpa() {
           }}
         />
       )}
+
+      {/* Hidden file input for uploading student photos directly */}
+      <input
+        type="file"
+        ref={photoInputRef}
+        onChange={handleUploadPhoto}
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+      />
     </div>
   );
 }
 
-function GpaIssueCertificateModal({ student, onClose, onSaved }) {
+function GpaIssueCertificateModal({ student: initialStudent, onClose, onSaved }) {
+  const queryClient = useQueryClient();
+  const [student, setStudent] = useState(initialStudent);
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState('');
   const [previewing, setPreviewing] = useState(false);
   const [previewData, setPreviewData] = useState(null);
   const [idempotencyKey, setIdempotencyKey] = useState(`cert-${Date.now()}`);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const modalPhotoInputRef = useRef(null);
 
   useEffect(() => {
-    if (student) {
+    if (initialStudent) {
       if (previewData?.url) URL.revokeObjectURL(previewData.url);
+      setStudent(initialStudent);
       setConfirmed(false);
       setError('');
       setPreviewData(null);
       setIdempotencyKey(`cert-${Date.now()}-${Math.random().toString(16).slice(2)}`);
     }
-  }, [student]);
+  }, [initialStudent]);
+
+  const studentHasPhoto = Boolean(
+    student?.hasPhoto ||
+    student?.photo?.url ||
+    student?.photo?.thumbnailUrl ||
+    student?.photo?.filePath ||
+    student?.photo?.fileId
+  );
+
+  const handleModalPhotoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !student) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('The photo must be smaller than 5 MB.');
+      return;
+    }
+    setUploadingPhoto(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const res = await api.post(`${REGISTRAR}/students/${student.id}/photo`, buffer, {
+        headers: { 'Content-Type': file.type || 'image/jpeg' },
+      });
+      toast.success(`Photo uploaded for ${student.fullName}! Certificate unlocked.`);
+      setStudent((prev) => ({
+        ...prev,
+        photo: res.data?.photo,
+        hasPhoto: true,
+      }));
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'gpa-cgpa'] });
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'students'] });
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'certificates'] });
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to upload student photo.'));
+    } finally {
+      setUploadingPhoto(false);
+      if (modalPhotoInputRef.current) modalPhotoInputRef.current.value = '';
+    }
+  };
 
   const issue = useMutation({
-    mutationFn: async () =>
-      (await api.post(`${REGISTRAR}/certificates/issue`, {
-        student: student.id,
-        idempotencyKey,
-      })).data,
+    mutationFn: async () => {
+      if (!studentHasPhoto) {
+        throw new Error('A verified student photo is required to issue this certificate.');
+      }
+      return (
+        await api.post(`${REGISTRAR}/certificates/issue`, {
+          student: student.id,
+          idempotencyKey,
+        })
+      ).data;
+    },
     onSuccess: (data) => {
       toast.success(`Certificate issued successfully! Serial: ${data.certificate?.certificateNumber || 'record created'}.`);
       onSaved?.();
@@ -1154,7 +1453,8 @@ function GpaIssueCertificateModal({ student, onClose, onSaved }) {
           <Button
             onClick={() => issue.mutate()}
             loading={issue.isPending}
-            disabled={!confirmed}
+            disabled={!confirmed || !studentHasPhoto}
+            title={!studentHasPhoto ? 'Verified trainee photo required to issue certificate' : ''}
             className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-1"
           >
             <Award className="h-4 w-4" /> Issue Certificate
@@ -1164,6 +1464,43 @@ function GpaIssueCertificateModal({ student, onClose, onSaved }) {
     >
       <div className="grid gap-4">
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
+
+        {!studentHasPhoto ? (
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-xs text-amber-800">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+              <span>
+                <strong>No Photo:</strong> Trainee photograph is missing. An official certificate cannot be issued without a photo (Preview is allowed).
+              </span>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => modalPhotoInputRef.current?.click()}
+              loading={uploadingPhoto}
+              className="gap-1.5 bg-white text-amber-900 border-amber-300 hover:bg-amber-100 shrink-0 font-bold"
+            >
+              <Camera className="h-3.5 w-3.5 text-amber-700" /> Upload Photo
+            </Button>
+            <input
+              type="file"
+              ref={modalPhotoInputRef}
+              onChange={handleModalPhotoUpload}
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+            />
+          </div>
+        ) : (
+          <div className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-2.5 text-xs text-emerald-800">
+            <img
+              src={student.photo?.thumbnailUrl || student.photo?.url}
+              alt=""
+              className="h-8 w-8 rounded-full object-cover ring-1 ring-emerald-300"
+            />
+            <span>Verified trainee photograph is attached and ready for certificate printing.</span>
+          </div>
+        )}
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
           <div className="flex items-center justify-between">

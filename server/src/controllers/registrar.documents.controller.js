@@ -5,12 +5,14 @@ import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { pageOf, sortOf, searchFilter, mergeFilters, paged, ownFilter } from '../services/registrar.helpers.js';
 import { buildExport } from '../services/export.service.js';
+import { photoView } from '../services/imagekit.service.js';
 import {
   certificatePreview,
   certificatePdf,
   issueCertificate,
   issueTranscript,
   transcriptPdf,
+  bulkIssueCertificatesAndPdf,
 } from '../services/document.service.js';
 
 const sendPdf = (res, { buffer, filename }) => {
@@ -82,8 +84,8 @@ export const listCertificates = asyncHandler(async (req, res) => {
         certificateNumber: row.certificateNumber,
         verificationId: row.verificationId,
         student: row.student
-          ? { id: String(row.student._id), studentId: row.student.studentId, fullName: row.student.fullName, level: row.student.level, photo: row.student.photo }
-          : { studentId: row.studentSnapshot?.studentId, fullName: row.studentSnapshot?.fullName },
+          ? { id: String(row.student._id), studentId: row.student.studentId, fullName: row.student.fullName, level: row.student.level, photo: photoView(row.student.photo) }
+          : { studentId: row.studentSnapshot?.studentId, fullName: row.studentSnapshot?.fullName, photo: photoView(row.studentSnapshot?.photo) },
         program: row.programSnapshot,
         department: row.departmentSnapshot,
         academicYear: row.academicYear?.label || row.academicYearLabel,
@@ -162,6 +164,30 @@ export const issue = asyncHandler(async (req, res) => {
 export const downloadCertificate = asyncHandler(async (req, res) => {
   const result = await certificatePdf(req.valid.params.id);
   audit({ req, action: 'registrar.certificate.download', targetType: 'Certificate', targetId: req.valid.params.id });
+  sendPdf(res, result);
+});
+
+export const downloadBulkCertificatesPdf = asyncHandler(async (req, res) => {
+  const programId = req.query.programId || req.body.programId;
+  const batchId = req.query.batchId || req.body.batchId;
+  if (!programId || !batchId) {
+    throw new AppError(400, 'PARAMS_REQUIRED', 'Programme and Batch IDs are required for bulk certificate issuance and download.');
+  }
+
+  const result = await bulkIssueCertificatesAndPdf({
+    programId,
+    batchId,
+    userId: req.user?.id,
+  });
+
+  audit({
+    req,
+    action: 'registrar.certificate.bulk_download',
+    targetType: 'Program',
+    targetId: programId,
+    meta: { batchId, issuedCount: result.issuedCount, skippedCount: result.skippedCount, total: result.total },
+  });
+
   sendPdf(res, result);
 });
 
@@ -256,22 +282,36 @@ export const listTranscripts = asyncHandler(async (req, res) => {
   ]);
   res.json({
     ...paged(
-      rows.map((row) => ({
-        id: String(row._id),
-        verificationId: row.verificationId,
-        student: row.student
-          ? { id: String(row.student._id), studentId: row.student.studentId, fullName: row.student.fullName, level: row.student.level, photo: row.student.photo }
-          : { studentId: row.studentSnapshot?.studentId, fullName: row.studentSnapshot?.fullName },
-        program: row.programSnapshot,
-        cgpa: row.cgpa,
-        totalCredits: row.totalCredits,
-        academicSnapshot: row.academicSnapshot,
-        purpose: row.purpose,
-        status: row.status,
-        issueNumber: row.issueNumber || 1,
-        printCount: row.printCount || 0,
-        issuedAt: row.issuedAt,
-      })),
+      rows.map((row) => {
+        const studentPhoto = photoView(row.student?.photo || row.studentSnapshot?.photo);
+        return {
+          id: String(row._id),
+          verificationId: row.verificationId,
+          student: row.student
+            ? {
+                id: String(row.student._id),
+                studentId: row.student.studentId,
+                fullName: row.student.fullName,
+                level: row.student.level,
+                photo: studentPhoto,
+              }
+            : {
+                studentId: row.studentSnapshot?.studentId,
+                fullName: row.studentSnapshot?.fullName,
+                photo: studentPhoto,
+              },
+          photo: studentPhoto,
+          program: row.programSnapshot,
+          cgpa: row.cgpa,
+          totalCredits: row.totalCredits,
+          academicSnapshot: row.academicSnapshot,
+          purpose: row.purpose,
+          status: row.status,
+          issueNumber: row.issueNumber || 1,
+          printCount: row.printCount || 0,
+          issuedAt: row.issuedAt,
+        };
+      }),
       total,
       page,
       limit,

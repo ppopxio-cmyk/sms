@@ -87,19 +87,6 @@ async function drawCleanTrainingCertificatePage(doc, {
     .strokeColor('#b89047')
     .lineWidth(0.8)
     .stroke();
-
-  // Corner ornamental squares: exact 1x1 mm (1 mm ≈ 2.834 pt)
-  const cornerSize = 2.83;
-  const corners = [
-    [outerMargin, outerMargin],
-    [width - outerMargin - cornerSize, outerMargin],
-    [outerMargin, height - outerMargin - cornerSize],
-    [width - outerMargin - cornerSize, height - outerMargin - cornerSize],
-  ];
-  for (const [cx, cy] of corners) {
-    doc.rect(cx, cy, cornerSize, cornerSize).fill('#0f2747');
-    doc.rect(cx, cy, cornerSize, cornerSize).strokeColor('#b89047').lineWidth(0.4).stroke();
-  }
   doc.restore();
 
   // 3. Upper-Left Corner: Institution Logo (x: 46, y: 40)
@@ -972,6 +959,67 @@ export function renderCertificatePdf({
         signatureBuffer,
         preview,
       });
+
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+export function renderBulkCertificatesPdf(items) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      fs.accessSync(ETHIOPIC_REGULAR);
+      fs.accessSync(ETHIOPIC_BOLD);
+    } catch {
+      return reject(new AppError(500, 'FONT_MISSING', 'The Amharic font is missing from the server assets.'));
+    }
+
+    if (!items || !items.length) {
+      return reject(new AppError(400, 'NO_ITEMS', 'No certificate items provided for bulk generation.'));
+    }
+
+    const firstTemplate = items[0].template || {};
+    const doc = new PDFDocument({
+      size: 'A4',
+      layout: 'landscape',
+      margin: 0,
+      bufferPages: true,
+      autoFirstPage: false,
+      info: {
+        Title: `${firstTemplate.certificateTitle || 'Training Completion Certificates'} · Bulk Official Registry`,
+        Author: firstTemplate.institutionName || 'College of Higher Education',
+        Subject: 'Official Graduation Certificates',
+        Creator: 'SMS Registrar',
+      },
+    });
+
+    const chunks = [];
+    doc.on('data', (chunk) => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+    doc.registerFont('NotoEthiopic', ETHIOPIC_REGULAR);
+    doc.registerFont('NotoEthiopicBold', ETHIOPIC_BOLD);
+
+    try {
+      for (const item of items) {
+        doc.addPage({ size: 'A4', layout: 'landscape', margin: 0 });
+        doc._certificateNumber = item.certificate?.certificateNumber || 'OFFICIAL';
+        const merged = {
+          ...(item.template || {}),
+          _logoBuffer: item.logoBuffer,
+        };
+
+        await drawCleanTrainingCertificatePage(doc, {
+          certificate: item.certificate,
+          template: merged,
+          photoBuffer: item.photoBuffer,
+          sealBuffer: item.sealBuffer,
+          signatureBuffer: item.signatureBuffer,
+          preview: false,
+        });
+      }
 
       doc.end();
     } catch (err) {

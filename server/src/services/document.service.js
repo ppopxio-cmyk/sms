@@ -11,7 +11,7 @@ import { evaluateStudent } from './eligibility.service.js';
 import { AppError } from '../utils/AppError.js';
 import { env } from '../config/env.js';
 import { signedImageUrl } from './imagekit.service.js';
-import { renderCertificatePdf, renderTranscriptPdf } from './certificate-pdf.service.js';
+import { renderCertificatePdf, renderTranscriptPdf, renderBulkCertificatesPdf } from './certificate-pdf.service.js';
 import { logger } from '../utils/logger.js';
 import { ownFilter } from './registrar.helpers.js';
 import { toEthiopian } from '../utils/ethiopianDate.js';
@@ -163,7 +163,7 @@ export async function certificatePreview(studentId, userId) {
   if (!data.completionDate) {
     data.completionDate = data.student.completionDate || data.student.graduationDate || data.student.admissionDate || new Date('2019-12-31');
   }
-  if (template.photoPolicy === 'required') assertPhoto(data.student);
+  // Preview is granted even if photo is missing (placeholder will be rendered)
   const assets = await loadBrandingAssets(template);
   requireOfficialAssets(assets);
   const photoBuffer = await fetchCertificatePhoto(template, data.student.photo);
@@ -201,21 +201,18 @@ export async function certificatePreview(studentId, userId) {
 }
 
 function assertPhoto(student) {
-  if (!student.photo?.fileId || student.photo.status !== 'active') {
+  const hasPhoto = Boolean(
+    student.photo?.fileId ||
+    student.photo?.url ||
+    student.photo?.filePath ||
+    student.photo?.thumbnailUrl
+  ) && student.photo?.status !== 'missing';
+
+  if (!hasPhoto) {
     throw new AppError(
       409,
       'CERTIFICATE_PHOTO_REQUIRED',
-      'The certificate policy requires a verified student photo. Upload one before issuing this certificate.',
-    );
-  }
-  if (
-    Number(student.photo.width || 0) < env.CERTIFICATE_PHOTO_MIN_PX ||
-    Number(student.photo.height || 0) < env.CERTIFICATE_PHOTO_MIN_PX
-  ) {
-    throw new AppError(
-      409,
-      'CERTIFICATE_PHOTO_TOO_SMALL',
-      `The certificate photo must be at least ${env.CERTIFICATE_PHOTO_MIN_PX} x ${env.CERTIFICATE_PHOTO_MIN_PX} pixels.`,
+      'A trainee photograph is strictly required before issuing an official certificate. Upload one first.',
     );
   }
 }
@@ -271,7 +268,7 @@ export async function issueCertificate({ studentId, userId, idempotencyKey }) {
   if (!policy) throw new AppError(409, 'GRADING_POLICY_MISSING', 'The grading policy is not configured yet.');
   const template = await activeTemplate();
   if (!template) throw new AppError(409, 'CERTIFICATE_TEMPLATE_MISSING', 'No active certificate template is configured.');
-  if (template.photoPolicy === 'required') assertPhoto(student);
+  assertPhoto(student);
 
   const evaluation = await evaluateStudent(studentId, { evaluatedBy: userId });
   if (!evaluation) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student record was not found.');
@@ -472,4 +469,73 @@ export async function transcriptPdf(transcriptId) {
 export async function cgpaSnapshot(studentId) {
   const policy = await getGradingPolicy();
   return cgpaForStudent(studentId, policy);
+}
+
+export async function bulkIssueCertificatesAndPdf({ programId, batchId, userId }) {
+  const students = await Student.find({
+    program: programId,
+    batch: batchId,
+    studentStatus: { $ne: 'archived' },
+  }).sort({ studentId: 1 });
+
+  if (!students.length) {
+    throw new AppError(404, 'NO_STUDENTS', 'No students found in this cohort.');
+  }
+
+  const template = await activeTemplate();
+  if (!template) throw new AppError(409, 'CERTIFICATE_TEMPLATE_MISSING', 'No active certificate template is configured.');
+  const assets = await loadBrandingAssets(template);
+  requireOfficialAssets(assets);
+
+  const items = [];
+  let issuedCount = 0;
+  let skippedCount = 0;
+
+  for (const student of students) {
+    const hasPhoto = Boolean(
+      student.photo?.url || student.photo?.filePath || student.photo?.fileId
+    ) && student.photo?.status !== 'missing';
+
+    if (!hasPhoto) {
+      skippedCount++;
+      continue;
+    }
+
+    let certificate;
+    try {
+      certificate = await issueCertificate({ studentId: student._id, userId });
+      if (student.studentStatus !== 'graduated') {
+        student.studentStatus = 'graduated';
+        await student.save();
+      }
+      issuedCount++;
+    } catch (err) {
+      certificate = await Certificate.findOne({ student: student._id, status: 'issued' });
+      if (!certificate) {
+        skippedCount++;
+        continue;
+      }
+    }
+
+    const photoBuffer = await fetchCertificatePhoto(template, student.photo);
+    items.push({
+      certificate,
+      template,
+      photoBuffer,
+      logoBuffer: assets.logo,
+      sealBuffer: assets.seal,
+      signatureBuffer: assets.signature,
+    });
+  }
+
+  if (!items.length) {
+    throw new AppError(400, 'NO_ELIGIBLE_STUDENTS', 'No students in this cohort have verified photos to issue certificates. Upload photos first.');
+  }
+
+  const buffer = await renderBulkCertificatesPdf(items);
+  const progDoc = await Student.findById(students[0]._id).populate('program').lean();
+  const progCode = progDoc?.program?.code || 'PROG';
+  const filename = `All_Certificates_${progCode}_${batchId}.pdf`;
+
+  return { buffer, filename, issuedCount, skippedCount, total: items.length };
 }

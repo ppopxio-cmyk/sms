@@ -35,7 +35,7 @@ export default function StudentPicker({
     queryKey: ['registrar', 'student-picker', queryParams],
     queryFn: async () =>
       (await api.get(`${REGISTRAR}/students`, { params: queryParams })).data,
-    enabled: open,
+    enabled: open && settled.length >= 1,
     staleTime: 15_000,
   });
 
@@ -88,7 +88,11 @@ export default function StudentPicker({
           <div className="relative">
             <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
-              type="search"
+              type="text"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck="false"
+              name="student_search_no_recent"
               value={term}
               disabled={disabled}
               onChange={(event) => {
@@ -96,7 +100,7 @@ export default function StudentPicker({
                 setOpen(true);
               }}
               onFocus={() => setOpen(true)}
-              placeholder="Search by name or student ID"
+              placeholder="Search by name or student ID..."
               className={`focus-ring h-11 w-full rounded-xl border bg-white/85 pl-10 pr-10 text-sm text-slate-800 ${
                 error ? 'border-rose-300' : 'border-slate-200'
               }`}
@@ -107,7 +111,12 @@ export default function StudentPicker({
           </div>
           {open ? (
             <div className="absolute z-30 mt-1.5 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
-              {rows.length ? (
+              {!settled ? (
+                <div className="px-4 py-3 text-xs text-slate-500 flex items-center gap-2">
+                  <Search className="h-3.5 w-3.5 text-slate-400" />
+                  <span>Type a trainee name or ID to search</span>
+                </div>
+              ) : rows.length ? (
                 rows.map((row) => (
                   <button
                     key={row.id}

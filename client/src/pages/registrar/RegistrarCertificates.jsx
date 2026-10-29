@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Download, Eye, FileCheck2, Plus, Printer, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { Download, Eye, FileCheck2, Plus, Printer, ShieldCheck, TriangleAlert, Camera, AlertCircle } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import {
   REGISTRAR,
@@ -347,12 +347,15 @@ export default function RegistrarCertificates() {
 }
 
 function IssueCertificateModal({ open, onClose, onSaved }) {
+  const queryClient = useQueryClient();
   const [student, setStudent] = useState(null);
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState('');
   const [previewing, setPreviewing] = useState(false);
   const [previewData, setPreviewData] = useState(null);
   const [idempotencyKey, setIdempotencyKey] = useState(newKey());
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoInputRef = useRef(null);
 
   useEffect(() => {
     if (open) {
@@ -365,9 +368,48 @@ function IssueCertificateModal({ open, onClose, onSaved }) {
     }
   }, [open]);
 
+  const studentHasPhoto = Boolean(
+    student?.photoUrl ||
+    student?.photo?.url ||
+    student?.photo?.thumbnailUrl ||
+    student?.photo?.filePath ||
+    student?.photo?.fileId
+  ) && student?.photo?.status !== 'missing';
+
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !student) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('The photo must be smaller than 5 MB.');
+      return;
+    }
+    setUploadingPhoto(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const res = await api.post(`${REGISTRAR}/students/${student.id}/photo`, buffer, {
+        headers: { 'Content-Type': file.type || 'image/jpeg' },
+      });
+      toast.success(`Photo uploaded for ${student.fullName}! Certificate unlocked.`);
+      setStudent((prev) => ({
+        ...prev,
+        photo: res.data?.photo,
+        photoUrl: res.data?.photo?.url || res.data?.photo?.thumbnailUrl,
+      }));
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'certificates'] });
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'students'] });
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'gpa-cgpa'] });
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to upload photo.'));
+    } finally {
+      setUploadingPhoto(false);
+      if (photoInputRef.current) photoInputRef.current.value = '';
+    }
+  };
+
   const issue = useMutation({
     mutationFn: async () => {
       if (!student) throw new Error('Choose a student.');
+      if (!studentHasPhoto) throw new Error('A verified trainee photograph is strictly required before issuing an official certificate.');
       if (!confirmed) throw new Error('Confirm that eligibility was checked before issuing.');
       return (await api.post(`${REGISTRAR}/certificates/issue`, {
         student: student.id,
@@ -444,7 +486,13 @@ function IssueCertificateModal({ open, onClose, onSaved }) {
               <Eye className="h-4 w-4" /> Preview PDF
             </Button>
           )}
-          <Button onClick={() => issue.mutate()} loading={issue.isPending} disabled={!student || !confirmed}>
+          <Button
+            onClick={() => issue.mutate()}
+            loading={issue.isPending}
+            disabled={!student || !confirmed || !studentHasPhoto}
+            title={!studentHasPhoto ? 'Verified student photo required to issue certificate' : ''}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+          >
             Issue certificate
           </Button>
         </>
@@ -458,6 +506,47 @@ function IssueCertificateModal({ open, onClose, onSaved }) {
           onChange={(value) => { setStudent(value); setConfirmed(false); setError(''); setPreviewData(null); }}
           hint="Search only graduated students by student ID or name"
         />
+
+        {student && (
+          <>
+            {!studentHasPhoto ? (
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-xs text-amber-800">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                  <span>
+                    <strong>No Photo:</strong> Trainee photograph is missing. An official certificate cannot be issued without a photo (Preview is allowed).
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => photoInputRef.current?.click()}
+                  loading={uploadingPhoto}
+                  className="gap-1.5 bg-white text-amber-900 border-amber-300 hover:bg-amber-100 shrink-0 font-bold"
+                >
+                  <Camera className="h-3.5 w-3.5 text-amber-700" /> Upload Photo
+                </Button>
+                <input
+                  type="file"
+                  ref={photoInputRef}
+                  onChange={handlePhotoUpload}
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                />
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-2.5 text-xs text-emerald-800">
+                <img
+                  src={student.photoUrl || student.photo?.thumbnailUrl || student.photo?.url}
+                  alt=""
+                  className="h-8 w-8 rounded-full object-cover ring-1 ring-emerald-300"
+                />
+                <span>Verified trainee photograph is attached and ready for certificate printing.</span>
+              </div>
+            )}
+          </>
+        )}
 
         {previewData ? (
           <div className="space-y-2">

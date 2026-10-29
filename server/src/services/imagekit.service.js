@@ -40,6 +40,21 @@ export function signedImageUrl(filePath, { transformation, expiresIn = 3600 } = 
   });
 }
 
+export function photoView(photo) {
+  if (!photo) return null;
+  const usable = photo.status !== 'missing';
+  const url = usable && photo.filePath ? signedImageUrl(photo.filePath, { expiresIn: 3600 }) : usable ? photo.url : null;
+  const thumbnailUrl = usable
+    ? photo.filePath
+      ? signedImageUrl(photo.filePath, {
+          transformation: [{ width: 160, height: 160, crop: 'maintain_ratio', focus: 'face' }],
+          expiresIn: 3600,
+        })
+      : photo.thumbnailUrl || url
+    : null;
+  return { ...photo, url, thumbnailUrl };
+}
+
 export async function uploadImage(buffer, { fileName, folder, contentType }) {
   const sdk = getClient();
   const file = await toFile(buffer, fileName, { type: contentType });

@@ -107,9 +107,9 @@ export default function RegistrarTranscripts() {
       label: 'Student',
       render: (row) => (
         <div className="flex items-center gap-3">
-          {row.student?.photo?.thumbnailUrl || row.student?.photo?.url ? (
+          {row.student?.photo?.thumbnailUrl || row.student?.photo?.url || row.photo?.thumbnailUrl || row.photo?.url ? (
             <img
-              src={row.student.photo.thumbnailUrl || row.student.photo.url}
+              src={row.student?.photo?.thumbnailUrl || row.student?.photo?.url || row.photo?.thumbnailUrl || row.photo?.url}
               alt=""
               className="h-9 w-9 rounded-full object-cover ring-1 ring-slate-200 shrink-0"
             />

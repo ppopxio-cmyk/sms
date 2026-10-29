@@ -104,7 +104,7 @@ import {
 import {
   listCertificates, getCertificate, preview, issue, downloadCertificate, revokeCertificate,
   reissueCertificate, printCertificate, listTranscripts, getTranscript, createTranscript, downloadTranscript, exportTranscriptRecord, revokeTranscript, printTranscript, certificateMeta,
-  getStudentTranscriptCount,
+  getStudentTranscriptCount, downloadBulkCertificatesPdf,
 } from '../controllers/registrar.documents.controller.js';
 import {
   listIdCards,
@@ -339,6 +339,9 @@ r.post('/transcripts/:id/revoke', requirePermission('transcripts:revoke'), valid
 r.get('/certificates/meta', requirePermission('certificates:view'), certificateMeta);
 r.get('/certificates', requirePermission('certificates:view'), validate(listCertificatesQuerySchema, 'query'), listCertificates);
 r.post('/certificates/preview', requirePermission('certificates:view'), validate(certificatePreviewSchema), preview);
+r.get('/certificates/bulk-pdf', requirePermission('certificates:view'), downloadBulkCertificatesPdf);
+r.post('/certificates/bulk-pdf', requirePermission('certificates:view'), downloadBulkCertificatesPdf);
+r.post('/certificates/bulk-print', requirePermission('certificates:view'), downloadBulkCertificatesPdf);
 r.get('/certificates/:id', requirePermission('certificates:view'), validate(idParamSchema, 'params'), getCertificate);
 r.post('/certificates/issue', requirePermission('certificates:issue'), validate(certificateIssueSchema), issue);
 r.get('/certificates/:id/pdf', requirePermission('certificates:view'), validate(idParamSchema, 'params'), downloadCertificate);

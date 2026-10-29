@@ -13,6 +13,7 @@ import { pageOf, sortOf, searchFilter, mergeFilters, paged, ownFilter } from '..
 import { requireGradingPolicy, gradeFor, calculateGpa, getGradingPolicy, cgpaForStudent, publishedResultsForStudent } from '../services/grading.service.js';
 import { buildExport } from '../services/export.service.js';
 import { evaluateStudent } from '../services/eligibility.service.js';
+import { photoView } from '../services/imagekit.service.js';
 import { sendCode } from '../services/codeDelivery.js';
 import { checkCode, resendWaitMessage } from '../services/code.service.js';
 
@@ -1018,6 +1019,8 @@ export const gpaCgpa = asyncHandler(async (req, res) => {
         id: String(student._id),
         studentId: student.studentId,
         fullName: student.fullName,
+        photo: photoView(student.photo),
+        hasPhoto: Boolean(student.photo?.url || student.photo?.filePath || student.photo?.fileId) && student.photo?.status !== 'missing',
         program: student.program?.name,
         batch: student.batch?.code,
         level: student.level,
@@ -1100,6 +1103,17 @@ export const gpaCgpa = asyncHandler(async (req, res) => {
     .limit(500)
     .lean();
 
+  const studentIds = students.map((s) => s._id);
+  const existingCertificates = await Certificate.find({
+    student: { $in: studentIds },
+    status: 'issued',
+  }).lean();
+
+  const certMap = new Map();
+  for (const c of existingCertificates) {
+    certMap.set(String(c.student), c);
+  }
+
   const rows = [];
   const isStageCalculated = Boolean(batchDoc?.calculatedStages?.includes(Number(query.level)));
 
@@ -1124,13 +1138,30 @@ export const gpaCgpa = asyncHandler(async (req, res) => {
       }
     }
 
+    const cert = certMap.get(String(student._id));
+    const pv = photoView(student.photo);
+    const hasPhoto = Boolean(pv?.url || pv?.thumbnailUrl);
+
     rows.push({
       id: String(student._id),
       studentId: student.studentId,
       fullName: student.fullName,
+      photo: pv,
+      hasPhoto,
+      certificate: cert
+        ? {
+            id: String(cert._id),
+            certificateNumber: cert.certificateNumber,
+            printCount: cert.printCount || 0,
+            status: cert.status,
+            issuedAt: cert.issuedAt,
+          }
+        : null,
+      certificateIssued: Boolean(cert),
       program: student.program?.name,
       batch: student.batch?.code,
       level: student.level,
+      studentStatus: student.studentStatus,
       cgpa: cumResult.gpa,
       credits: cumResult.credits,
       qualityPoints: cumResult.qualityPoints,
