@@ -73,16 +73,12 @@ export default function RegistrarCertificates() {
   const query = useQuery({
     queryKey: ['registrar', 'certificates', params],
     queryFn: async () => (await api.get(`${REGISTRAR}/certificates`, { params })).data,
-    enabled: hasSearched && Boolean(searchTerm.trim()),
+    enabled: hasSearched,
     placeholderData: (previous) => previous,
   });
 
   const handleShowSearch = (e) => {
     e?.preventDefault?.();
-    if (!searchDraft.trim()) {
-      toast.error('Enter a certificate number, student ID, or name before clicking Show.');
-      return;
-    }
     setSearchTerm(searchDraft.trim());
     setHasSearched(true);
     setPage(1);
@@ -142,7 +138,8 @@ export default function RegistrarCertificates() {
     }
     setPrintingId(row.id);
     try {
-      await printFile(`${REGISTRAR}/certificates/${row.id}/print`, { method: 'post' });
+      const res = await api.post(`${REGISTRAR}/certificates/${row.id}/print`, {}, { responseType: 'blob' });
+      printBlob(res.data);
       toast.success('Print dialog opened. Print counter updated.');
       invalidate();
     } catch (err) {
@@ -555,7 +552,8 @@ function CertificateDetail({ certificateId, onClose, onPrint }) {
     }
     setPrinting(true);
     try {
-      await printFile(`${REGISTRAR}/certificates/${row.id}/print`, { method: 'post' });
+      const res = await api.post(`${REGISTRAR}/certificates/${row.id}/print`, {}, { responseType: 'blob' });
+      printBlob(res.data);
       toast.success('Print dialog opened. Print counter recorded.');
       queryClient.invalidateQueries({ queryKey: ['registrar', 'certificate', certificateId] });
       queryClient.invalidateQueries({ queryKey: ['registrar', 'certificates'] });

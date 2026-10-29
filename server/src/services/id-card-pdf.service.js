@@ -57,6 +57,19 @@ export async function drawSingleIdCardFront(doc, { idCard = {}, photoBuffer = nu
   // Inner subtle border
   doc.roundedRect(ox + 2, oy + 2, CARD_WIDTH - 4, CARD_HEIGHT - 4, 3).strokeColor('#0d9488').lineWidth(0.5).stroke();
 
+  // Corner ornamental squares (1x1 mm tiny square matching certificate)
+  const cornerSquare = 2.83;
+  const idCorners = [
+    [ox + 2, oy + 2],
+    [ox + CARD_WIDTH - 2 - cornerSquare, oy + 2],
+    [ox + 2, oy + CARD_HEIGHT - 2 - cornerSquare],
+    [ox + CARD_WIDTH - 2 - cornerSquare, oy + CARD_HEIGHT - 2 - cornerSquare],
+  ];
+  for (const [cx, cy] of idCorners) {
+    doc.rect(cx, cy, cornerSquare, cornerSquare).fill('#0f2747');
+    doc.rect(cx, cy, cornerSquare, cornerSquare).strokeColor('#0d9488').lineWidth(0.4).stroke();
+  }
+
   // 2. Top Header Bar: Navy Blue with Teal accent stripe
   const headerH = 30;
   doc.rect(ox + 2, oy + 2, CARD_WIDTH - 4, headerH).fill('#0f2747');

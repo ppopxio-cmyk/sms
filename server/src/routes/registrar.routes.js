@@ -329,6 +329,7 @@ r.post('/transcripts', requirePermission('transcripts:issue'), validate(transcri
 r.get('/transcripts/:id', requirePermission('transcripts:view'), validate(idParamSchema, 'params'), getTranscript);
 r.get('/transcripts/:id/pdf', requirePermission('transcripts:view'), validate(idParamSchema, 'params'), downloadTranscript);
 r.post('/transcripts/:id/print', requirePermission('transcripts:view'), validate(idParamSchema, 'params'), printTranscript);
+r.get('/transcripts/:id/print', requirePermission('transcripts:view'), validate(idParamSchema, 'params'), printTranscript);
 r.get('/transcripts/:id/export', exportLimiter, requirePermission('transcripts:view'), validate(idParamSchema, 'params'), exportTranscriptRecord);
 r.post('/transcripts/:id/revoke', requirePermission('transcripts:revoke'), validate(idParamSchema, 'params'), validate(revokeSchema), revokeTranscript);
 
@@ -340,6 +341,7 @@ r.get('/certificates/:id', requirePermission('certificates:view'), validate(idPa
 r.post('/certificates/issue', requirePermission('certificates:issue'), validate(certificateIssueSchema), issue);
 r.get('/certificates/:id/pdf', requirePermission('certificates:view'), validate(idParamSchema, 'params'), downloadCertificate);
 r.post('/certificates/:id/print', requirePermission('certificates:view'), validate(idParamSchema, 'params'), printCertificate);
+r.get('/certificates/:id/print', requirePermission('certificates:view'), validate(idParamSchema, 'params'), printCertificate);
 r.post('/certificates/:id/revoke', requirePermission('certificates:revoke'), validate(idParamSchema, 'params'), validate(revokeSchema), revokeCertificate);
 r.post('/certificates/:id/reissue', requirePermission('certificates:issue'), validate(idParamSchema, 'params'), validate(reissueSchema), reissueCertificate);
 
@@ -352,6 +354,7 @@ r.post('/id-cards/issue', issueIdCard);
 r.post('/id-cards/bulk-issue', bulkIssueIdCards);
 r.get('/id-cards/:id/pdf', downloadIdCardPdf);
 r.post('/id-cards/:id/print', printIdCard);
+r.get('/id-cards/:id/print', printIdCard);
 r.post('/id-cards/preview', previewIdCardPdf);
 
 // ---- Reports ----------------------------------------------------------------

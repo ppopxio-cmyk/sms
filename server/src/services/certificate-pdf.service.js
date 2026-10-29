@@ -88,8 +88,8 @@ async function drawCleanTrainingCertificatePage(doc, {
     .lineWidth(0.8)
     .stroke();
 
-  // Corner ornamental squares
-  const cornerSize = 10;
+  // Corner ornamental squares: exact 1x1 mm (1 mm ≈ 2.834 pt)
+  const cornerSize = 2.83;
   const corners = [
     [outerMargin, outerMargin],
     [width - outerMargin - cornerSize, outerMargin],
@@ -98,7 +98,7 @@ async function drawCleanTrainingCertificatePage(doc, {
   ];
   for (const [cx, cy] of corners) {
     doc.rect(cx, cy, cornerSize, cornerSize).fill('#0f2747');
-    doc.rect(cx + 2, cy + 2, cornerSize - 4, cornerSize - 4).strokeColor('#b89047').lineWidth(0.6).stroke();
+    doc.rect(cx, cy, cornerSize, cornerSize).strokeColor('#b89047').lineWidth(0.4).stroke();
   }
   doc.restore();
 

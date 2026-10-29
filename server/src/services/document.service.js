@@ -14,6 +14,7 @@ import { signedImageUrl } from './imagekit.service.js';
 import { renderCertificatePdf, renderTranscriptPdf } from './certificate-pdf.service.js';
 import { logger } from '../utils/logger.js';
 import { ownFilter } from './registrar.helpers.js';
+import { toEthiopian } from '../utils/ethiopianDate.js';
 
 export async function fetchAssetBuffer(asset, { jpeg = false } = {}) {
   if (!asset) return null;
@@ -225,7 +226,7 @@ async function nextCertificateNumber(prefix, year) {
     { $inc: { value: 1 } },
     { upsert: true, new: true, setDefaultsOnInsert: true },
   );
-  return `${prefix || 'CERT'}-${year}-${String(counter.value).padStart(6, '0')}`;
+  return `${prefix || 'CERT'}-${year}-${String(counter.value).padStart(5, '0')}`;
 }
 
 async function renderIssuedCertificate(certificate, template, prepared = null) {
@@ -287,11 +288,11 @@ export async function issueCertificate({ studentId, userId, idempotencyKey }) {
   }
   const academicStudent = data.student;
   const academicYearId = data.enrollment?.academicYear ?? academicStudent.admissionAcademicYear?._id ?? academicStudent.admissionAcademicYear ?? null;
-  const completionYear = new Date(data.completionDate).getFullYear();
+  const ethYear = toEthiopian(data.completionDate || new Date()).year || 2019;
   const preparedAssets = await loadBrandingAssets(template);
   requireOfficialAssets(preparedAssets);
   const preparedPhoto = await fetchCertificatePhoto(template, academicStudent.photo);
-  const certificateNumber = await nextCertificateNumber(template.certificatePrefix, completionYear);
+  const certificateNumber = await nextCertificateNumber(template.certificatePrefix, ethYear);
   const verificationId = crypto.randomBytes(12).toString('hex');
   const record = {
     certificateNumber,

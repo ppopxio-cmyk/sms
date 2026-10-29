@@ -26,9 +26,22 @@ export const listCertificates = asyncHandler(async (req, res) => {
   const query = req.valid.query;
   const { page, limit, skip } = pageOf(query);
   let searchCondition = null;
-  if (query.search) {
-    const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (query.search && query.search.trim()) {
+    const raw = query.search.trim();
+    const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(escaped, 'i');
+
+    const numPart = raw.replace(/\D/g, '');
+    const altRegexes = [regex];
+    if (numPart.length >= 3) {
+      altRegexes.push(new RegExp(numPart, 'i'));
+    }
+    if (/CERT-2026-/i.test(raw)) {
+      altRegexes.push(new RegExp(raw.replace(/CERT-2026-/i, 'CERT-2019-'), 'i'));
+    } else if (/CERT-2019-/i.test(raw)) {
+      altRegexes.push(new RegExp(raw.replace(/CERT-2019-/i, 'CERT-2026-'), 'i'));
+    }
+
     const students = await Student.find({
       $or: [{ studentId: regex }, { fullName: regex }],
     })
@@ -39,7 +52,7 @@ export const listCertificates = asyncHandler(async (req, res) => {
 
     searchCondition = {
       $or: [
-        { certificateNumber: regex },
+        ...altRegexes.map((r) => ({ certificateNumber: r })),
         { verificationId: regex },
         { 'studentSnapshot.studentId': regex },
         { 'studentSnapshot.fullName': regex },
@@ -91,7 +104,8 @@ export const listCertificates = asyncHandler(async (req, res) => {
 });
 
 export const printCertificate = asyncHandler(async (req, res) => {
-  const certificate = await Certificate.findById(req.valid.params.id);
+  const id = req.valid?.params?.id || req.params.id;
+  const certificate = await Certificate.findById(id);
   if (!certificate) throw new AppError(404, 'CERTIFICATE_NOT_FOUND', 'That certificate was not found.');
   if (certificate.status === 'revoked') {
     throw new AppError(400, 'CERTIFICATE_REVOKED', 'This certificate is revoked and cannot be printed.');
@@ -102,8 +116,8 @@ export const printCertificate = asyncHandler(async (req, res) => {
   certificate.printCount = (certificate.printCount || 0) + 1;
   await certificate.save();
 
-  audit({ req, action: 'registrar.certificate.print', targetType: 'Certificate', targetId: req.valid.params.id, meta: { printCount: certificate.printCount } });
-  const result = await certificatePdf(req.valid.params.id);
+  audit({ req, action: 'registrar.certificate.print', targetType: 'Certificate', targetId: id, meta: { printCount: certificate.printCount } });
+  const result = await certificatePdf(id);
   sendPdf(res, result);
 });
 
@@ -259,7 +273,8 @@ export const listTranscripts = asyncHandler(async (req, res) => {
 });
 
 export const printTranscript = asyncHandler(async (req, res) => {
-  const transcript = await Transcript.findById(req.valid.params.id);
+  const id = req.valid?.params?.id || req.params.id;
+  const transcript = await Transcript.findById(id);
   if (!transcript) throw new AppError(404, 'TRANSCRIPT_NOT_FOUND', 'That transcript was not found.');
   if (transcript.status === 'revoked') {
     throw new AppError(400, 'TRANSCRIPT_REVOKED', 'This transcript is revoked and cannot be printed.');
@@ -270,14 +285,9 @@ export const printTranscript = asyncHandler(async (req, res) => {
   transcript.printCount = (transcript.printCount || 0) + 1;
   await transcript.save();
 
-  audit({ req, action: 'registrar.transcript.print', targetType: 'Transcript', targetId: req.valid.params.id, meta: { printCount: transcript.printCount } });
-  const result = await transcriptPdf(req.valid.params.id);
+  audit({ req, action: 'registrar.transcript.print', targetType: 'Transcript', targetId: id, meta: { printCount: transcript.printCount } });
+  const result = await transcriptPdf(id);
   sendPdf(res, result);
-});
-      page,
-      limit,
-    ),
-  });
 });
 
 export const getTranscript = asyncHandler(async (req, res) => {

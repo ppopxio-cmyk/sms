@@ -26,8 +26,9 @@ import SearchInput from '../../components/ui/SearchInput';
 
 export default function RegistrarTranscripts() {
   const queryClient = useQueryClient();
-  const [search, setSearch] = useState('');
-  const debounced = useDebounced(search, 300);
+  const [searchDraft, setSearchDraft] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [hasSearched, setHasSearched] = useState(false);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [issuing, setIssuing] = useState(false);
@@ -39,16 +40,31 @@ export default function RegistrarTranscripts() {
     () => ({
       page,
       limit,
-      ...(debounced.trim() ? { search: debounced.trim() } : {}),
+      ...(searchTerm.trim() ? { search: searchTerm.trim() } : {}),
     }),
-    [page, limit, debounced],
+    [page, limit, searchTerm],
   );
 
   const query = useQuery({
     queryKey: ['registrar', 'transcripts', params],
     queryFn: async () => (await api.get(`${REGISTRAR}/transcripts`, { params })).data,
+    enabled: hasSearched,
     placeholderData: (previous) => previous,
   });
+
+  const handleShowSearch = (e) => {
+    e?.preventDefault?.();
+    setSearchTerm(searchDraft.trim());
+    setHasSearched(true);
+    setPage(1);
+  };
+
+  const handleResetSearch = () => {
+    setSearchDraft('');
+    setSearchTerm('');
+    setHasSearched(false);
+    setPage(1);
+  };
 
   const rows = query.data?.rows ?? [];
   const pagination = query.data?.pagination ?? { page: 1, pages: 1, total: 0, limit };
@@ -74,7 +90,8 @@ export default function RegistrarTranscripts() {
     }
     setPrintingId(row.id);
     try {
-      await printFile(`${REGISTRAR}/transcripts/${row.id}/print`, { method: 'post' });
+      const res = await api.post(`${REGISTRAR}/transcripts/${row.id}/print`, {}, { responseType: 'blob' });
+      printBlob(res.data);
       toast.success('Print dialog opened. Print counter updated.');
       invalidate();
     } catch (err) {
@@ -175,54 +192,90 @@ export default function RegistrarTranscripts() {
         }
       />
 
-      {/* Clean Search Bar: Only search by student name or ID */}
+      {/* Search Bar with Show Transcripts Button */}
       <Card className="p-4 sm:p-5">
-        <SearchInput
-          value={search}
-          onChange={(event) => {
-            setSearch(event.target.value);
-            setPage(1);
-          }}
-          placeholder="Search by student name or student ID..."
-          loading={query.isFetching}
-        />
+        <form onSubmit={handleShowSearch} className="flex flex-col sm:flex-row items-center gap-3">
+          <div className="relative flex-1 w-full">
+            <input
+              type="search"
+              value={searchDraft}
+              onChange={(e) => setSearchDraft(e.target.value)}
+              placeholder="Search by student name, student ID, or verification code..."
+              className="focus-ring h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm"
+            />
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Button
+              type="submit"
+              className="flex-1 sm:flex-initial gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold h-11 px-5 shadow-sm"
+              loading={query.isFetching}
+            >
+              Show Transcripts
+            </Button>
+            {hasSearched ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleResetSearch}
+                className="h-11 px-4 text-slate-600"
+              >
+                Clear
+              </Button>
+            ) : null}
+          </div>
+        </form>
       </Card>
 
-      <Card>
-        <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-900">Transcript register</h2>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {pagination.total ?? 0} document{pagination.total === 1 ? '' : 's'}
+      {/* Transcript register history — Visible only when Show is clicked */}
+      {hasSearched ? (
+        <Card>
+          <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Transcript register</h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                {pagination.total ?? 0} document{pagination.total === 1 ? '' : 's'}{searchTerm ? ` matching "${searchTerm}"` : ''}
+              </p>
+            </div>
+            <FileText className="h-4 w-4 text-slate-300" />
+          </div>
+          <RegistrarTable
+            columns={columns}
+            rows={rows}
+            loading={query.isLoading}
+            error={query.error ? query.error?.response?.data?.message || 'Transcripts could not be loaded.' : null}
+            onRetry={query.refetch}
+            rowKey={(row) => row.id}
+            noResults={Boolean(searchTerm.trim())}
+            emptyTitle="No transcripts found"
+            emptyMessage={searchTerm ? `No transcript found matching "${searchTerm}". Check the student name or ID.` : 'No transcripts have been issued yet.'}
+          />
+          <div className="px-5 pb-4">
+            <Pagination
+              page={pagination.page}
+              pages={pagination.pages}
+              total={pagination.total}
+              limit={pagination.limit}
+              onPage={setPage}
+              onLimit={(value) => {
+                setLimit(value);
+                setPage(1);
+              }}
+            />
+          </div>
+        </Card>
+      ) : (
+        <Card className="py-12 text-center border-dashed">
+          <div className="max-w-md mx-auto space-y-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-600 mx-auto">
+              <FileText className="h-6 w-6" />
+            </div>
+            <h3 className="text-base font-bold text-slate-900">Search Transcript Register</h3>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Enter a student name, student ID, or verification code above and click <strong>Show Transcripts</strong> to view official transcript issuance history.
             </p>
           </div>
-          <FileText className="h-4 w-4 text-slate-300" />
-        </div>
-        <RegistrarTable
-          columns={columns}
-          rows={rows}
-          loading={query.isLoading}
-          error={query.error ? query.error?.response?.data?.message || 'Transcripts could not be loaded.' : null}
-          onRetry={query.refetch}
-          rowKey={(row) => row.id}
-          noResults={Boolean(debounced.trim())}
-          emptyTitle="No transcripts found"
-          emptyMessage="Issue a transcript for an enrolled or graduated student with published course results."
-        />
-        <div className="px-5 pb-4">
-          <Pagination
-            page={pagination.page}
-            pages={pagination.pages}
-            total={pagination.total}
-            limit={pagination.limit}
-            onPage={setPage}
-            onLimit={(value) => {
-              setLimit(value);
-              setPage(1);
-            }}
-          />
-        </div>
-      </Card>
+        </Card>
+      )}
 
       <IssueTranscriptModal open={issuing} onClose={() => setIssuing(false)} onSaved={invalidate} />
 

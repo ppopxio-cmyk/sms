@@ -60,6 +60,7 @@ export default function RegistrarIdCards() {
   const [filterBatch, setFilterBatch] = useState('');
   const [filterDept, setFilterDept] = useState('');
   const [filterProg, setFilterProg] = useState('');
+  const [hasClickedShowCohorts, setHasClickedShowCohorts] = useState(false);
 
   // Single Student Actions / Preview Modal States
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -318,7 +319,8 @@ export default function RegistrarIdCards() {
         res.data,
         `All_IDs_Landscape_${openedCohort.programCode || 'PROG'}_${openedCohort.batchCode || '2019'}.pdf`,
       );
-      toast.success('All student ID cards generated in 1 landscape PDF!');
+      toast.success('All student ID cards generated and issued in 1 landscape PDF!');
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'id-cards-cohort-summary'] });
     } catch (err) {
       toast.error(errorMessage(err, 'Could not generate bulk landscape ID cards PDF.'));
     } finally {
@@ -339,7 +341,8 @@ export default function RegistrarIdCards() {
         responseType: 'blob',
       });
       printBlob(res.data);
-      toast.success('Sending bulk ID cards (A4 Landscape) to printer...');
+      toast.success('Bulk ID cards issued and sent to printer (A4 Landscape)!');
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'id-cards-cohort-summary'] });
     } catch (err) {
       toast.error(errorMessage(err, 'Could not generate bulk landscape ID cards for print.'));
     } finally {
@@ -675,7 +678,15 @@ export default function RegistrarIdCards() {
               </select>
             </div>
 
-            <div className="flex items-end justify-end">
+            <div className="flex items-end gap-2">
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => setHasClickedShowCohorts(true)}
+                className="flex-1 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs"
+              >
+                <CreditCard className="h-3.5 w-3.5" /> Show Programmes
+              </Button>
               <Button
                 variant="secondary"
                 size="sm"
@@ -683,78 +694,101 @@ export default function RegistrarIdCards() {
                   setFilterBatch('');
                   setFilterDept('');
                   setFilterProg('');
+                  setHasClickedShowCohorts(false);
                 }}
-                className="w-full text-xs"
+                className="text-xs"
               >
-                Reset Filters
+                Reset
               </Button>
             </div>
           </div>
 
-          {/* Programme Cohorts Grid */}
-          <div>
-            <h2 className="text-base font-bold text-slate-900 mb-1">
-              Select Programme to Open ID Hub
-            </h2>
-            <p className="text-xs text-slate-500 mb-4">
-              Click on any programme cohort below to open its dedicated slug workbench, list students, and manage ID cards.
-            </p>
+          {/* Programme Cohorts Grid — visible only when Show Programmes is clicked */}
+          {hasClickedShowCohorts ? (
+            <div>
+              <h2 className="text-base font-bold text-slate-900 mb-1">
+                Select Programme to Open ID Hub
+              </h2>
+              <p className="text-xs text-slate-500 mb-4">
+                Click on any programme cohort below to open its dedicated slug workbench, list students, and manage ID cards.
+              </p>
 
-            {cohortCards.length === 0 ? (
-              <Card>
-                <CardBody className="py-12 text-center">
-                  <CreditCard className="mx-auto h-12 w-12 text-slate-300" />
-                  <h3 className="mt-3 text-sm font-semibold text-slate-800">
-                    No Programme Cohorts Found
-                  </h3>
-                  <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
-                    Adjust the filter selections above to find active programme and batch cohorts.
-                  </p>
-                </CardBody>
-              </Card>
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {cohortCards.map((cohort) => (
-                  <Card
-                    key={cohort.id}
-                    className="group flex flex-col justify-between overflow-hidden border border-slate-200 transition hover:border-brand-400 hover:shadow-md"
-                  >
-                    <div className="p-5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-2.5 py-1 text-xs font-bold text-brand-800">
-                          <Building2 className="h-3.5 w-3.5 text-brand-600" />
-                          {cohort.departmentName}
-                        </span>
-                        <Badge tone={cohort.category === 'extension' ? 'warning' : 'neutral'}>
-                          {cohort.batchCode}
-                        </Badge>
+              {cohortCards.length === 0 ? (
+                <Card>
+                  <CardBody className="py-12 text-center">
+                    <CreditCard className="mx-auto h-12 w-12 text-slate-300" />
+                    <h3 className="mt-3 text-sm font-semibold text-slate-800">
+                      No Programme Cohorts Found
+                    </h3>
+                    <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
+                      Adjust the filter selections above to find active programme and batch cohorts.
+                    </p>
+                  </CardBody>
+                </Card>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {cohortCards.map((cohort) => (
+                    <Card
+                      key={cohort.id}
+                      className="group flex flex-col justify-between overflow-hidden border border-slate-200 transition hover:border-brand-400 hover:shadow-md"
+                    >
+                      <div className="p-5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-2.5 py-1 text-xs font-bold text-brand-800">
+                            <Building2 className="h-3.5 w-3.5 text-brand-600" />
+                            {cohort.departmentName}
+                          </span>
+                          <Badge tone={cohort.category === 'extension' ? 'warning' : 'neutral'}>
+                            {cohort.batchCode}
+                          </Badge>
+                        </div>
+
+                        <h3 className="mt-3 text-base font-bold text-slate-900 group-hover:text-brand-700 transition">
+                          {cohort.programName}
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {cohort.qualificationType?.toUpperCase()} · Batch: {cohort.batchName}
+                        </p>
                       </div>
 
-                      <h3 className="mt-3 text-base font-bold text-slate-900 group-hover:text-brand-700 transition">
-                        {cohort.programName}
-                      </h3>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        {cohort.qualificationType?.toUpperCase()} · Batch: {cohort.batchName}
-                      </p>
-                    </div>
-
-                    <div className="border-t border-slate-100 bg-slate-50/80 p-4">
-                      <Button
-                        onClick={() => {
-                          setOpenedCohort(cohort);
-                          setSlugSubTab('students');
-                        }}
-                        className="w-full gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs"
-                      >
-                        <CreditCard className="h-4 w-4" /> Open Programme ID Hub
-                        <ChevronRight className="h-4 w-4 ml-auto" />
-                      </Button>
-                    </div>
-                  </Card>
-                ))}
+                      <div className="border-t border-slate-100 bg-slate-50/80 p-4">
+                        <Button
+                          onClick={() => {
+                            setOpenedCohort(cohort);
+                            setSlugSubTab('students');
+                          }}
+                          className="w-full gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs"
+                        >
+                          <CreditCard className="h-4 w-4" /> Open Programme ID Hub
+                          <ChevronRight className="h-4 w-4 ml-auto" />
+                        </Button>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <Card className="py-14 text-center border-dashed">
+              <div className="max-w-md mx-auto space-y-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-50 text-teal-600 mx-auto">
+                  <CreditCard className="h-6 w-6" />
+                </div>
+                <h3 className="text-base font-bold text-slate-900">Ready to View Programme ID Hubs</h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Select batch, department, or programme filters above and click <strong>Show Programmes</strong> to browse ID card cohorts.
+                </p>
+                <div className="pt-2">
+                  <Button
+                    onClick={() => setHasClickedShowCohorts(true)}
+                    className="gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs shadow-sm mx-auto"
+                  >
+                    <CreditCard className="h-4 w-4" /> Show Programmes
+                  </Button>
+                </div>
               </div>
-            )}
-          </div>
+            </Card>
+          )}
         </div>
       ) : (
         /* =========================================================================

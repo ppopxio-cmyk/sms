@@ -35,6 +35,7 @@ const initials = (value) =>
 export default function RegistrarStudents() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [draftSearch, setDraftSearch] = useState('');
   const [draftStatus, setDraftStatus] = useState('all');
   const [draftProgram, setDraftProgram] = useState('');
   const [draftDepartment, setDraftDepartment] = useState('');
@@ -43,6 +44,7 @@ export default function RegistrarStudents() {
   const [hasClickedShow, setHasClickedShow] = useState(false);
 
   const [appliedFilters, setAppliedFilters] = useState({
+    search: '',
     status: 'all',
     program: '',
     department: '',
@@ -89,6 +91,7 @@ export default function RegistrarStudents() {
     () => ({
       page,
       limit,
+      ...(appliedFilters.search ? { search: appliedFilters.search } : {}),
       ...(appliedFilters.status !== 'all' ? { status: appliedFilters.status } : {}),
       ...(appliedFilters.program ? { program: appliedFilters.program } : {}),
       ...(appliedFilters.department ? { department: appliedFilters.department } : {}),
@@ -130,11 +133,31 @@ export default function RegistrarStudents() {
     setHasClickedShow(true);
     setPage(1);
     setAppliedFilters({
+      search: draftSearch.trim(),
       status: draftStatus,
       program: draftProgram,
       department: draftDepartment,
       batch: draftBatch,
       category: draftCategory,
+    });
+  };
+
+  const handleResetFilters = () => {
+    setDraftSearch('');
+    setDraftStatus('all');
+    setDraftProgram('');
+    setDraftDepartment('');
+    setDraftBatch('');
+    setDraftCategory('all');
+    setHasClickedShow(false);
+    setPage(1);
+    setAppliedFilters({
+      search: '',
+      status: 'all',
+      program: '',
+      department: '',
+      batch: '',
+      category: 'all',
     });
   };
 
@@ -307,6 +330,21 @@ export default function RegistrarStudents() {
 
       <Card className="p-4 sm:p-5">
         <div className="flex flex-col gap-3">
+          <div className="relative w-full">
+            <input
+              type="search"
+              value={draftSearch}
+              onChange={(e) => setDraftSearch(e.target.value)}
+              placeholder="Search students by name or student ID..."
+              className="focus-ring h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleShowStudents();
+                }
+              }}
+            />
+          </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 items-end">
             <SelectField
               label="Department"
@@ -361,13 +399,20 @@ export default function RegistrarStudents() {
               <option value="suspended">Suspended</option>
               <option value="archived">Archived</option>
             </SelectField>
-            <div>
-              <span className="mb-1.5 block text-sm font-medium text-slate-700">Actions</span>
+            <div className="flex items-center gap-2">
               <Button
                 onClick={handleShowStudents}
-                className="h-11 w-full gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold shadow-sm"
+                className="h-11 flex-1 gap-1.5 bg-brand-600 hover:bg-brand-700 text-white font-bold shadow-sm text-xs"
               >
-                <Filter className="h-4 w-4" /> Show Students
+                <Filter className="h-3.5 w-3.5" /> Show
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleResetFilters}
+                className="h-11 px-3 text-xs text-slate-600"
+              >
+                Reset
               </Button>
             </div>
           </div>

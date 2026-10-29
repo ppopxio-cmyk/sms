@@ -5,9 +5,25 @@ import { CourseOffering } from '../models/Offering.js';
 import { Program, Batch, Department } from '../models/AcademicStructure.js';
 import { generateIdCardPdf, generateBulkIdCardsLandscapePdf } from '../services/id-card-pdf.service.js';
 import { fetchAssetBuffer } from '../services/document.service.js';
+import { signedImageUrl } from '../services/imagekit.service.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { audit } from '../services/audit.service.js';
+
+function photoView(photo) {
+  if (!photo) return null;
+  const usable = photo.status !== 'missing';
+  const url = usable && photo.filePath ? signedImageUrl(photo.filePath, { expiresIn: 3600 }) : usable ? photo.url : null;
+  const thumbnailUrl = usable
+    ? photo.filePath
+      ? signedImageUrl(photo.filePath, {
+          transformation: [{ width: 160, height: 160, crop: 'maintain_ratio', focus: 'face' }],
+          expiresIn: 3600,
+        })
+      : photo.thumbnailUrl
+    : null;
+  return { ...photo, url, thumbnailUrl };
+}
 
 export const listIdCards = asyncHandler(async (req, res) => {
   const { batch, department, program, search, page = 1, limit = 20 } = req.query;
@@ -266,6 +282,7 @@ export const getProgrammeCardCohortSummary = asyncHandler(async (req, res) => {
     const latestCard = studentCards[0] || null;
     const issueCount = studentCards.length;
     const printCount = latestCard?.printCount || 0;
+    const pv = photoView(s.photo);
     const hasPhoto = Boolean(s.photo?.url || s.photo?.filePath);
 
     if (hasPhoto) photoCount++;
@@ -278,7 +295,8 @@ export const getProgrammeCardCohortSummary = asyncHandler(async (req, res) => {
       fullName: s.fullName,
       gender: s.gender,
       level: s.level || 1,
-      photo: s.photo,
+      photo: pv,
+      photoUrl: pv?.thumbnailUrl || pv?.url || null,
       hasPhoto,
       issueCount,
       printCount,
@@ -492,14 +510,85 @@ export const downloadBulkIdCardsPdf = asyncHandler(async (req, res) => {
 
   if (!students.length) throw new AppError(404, 'NO_STUDENTS', 'No students found in this cohort.');
 
+  const studentIds = students.map((s) => s._id);
+  const existingCards = await StudentIdCard.find({ student: { $in: studentIds } }).lean();
+
+  const cardsByStudent = new Map();
+  for (const c of existingCards) {
+    const sId = String(c.student);
+    if (!cardsByStudent.has(sId)) cardsByStudent.set(sId, []);
+    cardsByStudent.get(sId).push(c);
+  }
+
+  let maxCohortIssues = 0;
+  for (const s of students) {
+    const count = cardsByStudent.get(String(s._id))?.length || 0;
+    if (count > maxCohortIssues) maxCohortIssues = count;
+  }
+
+  if (maxCohortIssues >= 2) {
+    throw new AppError(400, 'BULK_LIMIT_REACHED', 'Bulk ID issuance and mass printing for this programme cohort has already reached the maximum limit of 2 times.');
+  }
+
   // Find offerings & compute results for promotion records
   const offerings = await CourseOffering.find({ program: programId }).select('_id level').lean();
   const offLevelMap = new Map(offerings.map((o) => [String(o._id), o.level]));
 
+  // Auto-issue StudentIdCard records in MongoDB for eligible students who have photos
+  for (const student of students) {
+    const hasPhoto = Boolean(student.photo?.url || student.photo?.filePath);
+    if (!hasPhoto) continue;
+    const sExisting = cardsByStudent.get(String(student._id)) || [];
+    if (sExisting.length >= 2) continue;
+
+    const results = await Result.find({ student: student._id, status: { $in: ['submitted', 'approved', 'published'] } }).lean();
+    const passedStages = new Set();
+    for (const r of results) {
+      const lvl = offLevelMap.get(String(r.offering));
+      if (lvl) passedStages.add(lvl);
+    }
+    for (let l = 1; l < (student.level || 1); l++) {
+      passedStages.add(l);
+    }
+    const promotedStages = [...passedStages].sort((a, b) => a - b);
+    const issueNumber = sExisting.length + 1;
+
+    const newCard = await StudentIdCard.create({
+      student: student._id,
+      studentSnapshot: {
+        studentId: student.studentId,
+        fullName: student.fullName,
+        photo: student.photo,
+        qualificationType: student.qualificationType || student.program?.qualificationType || 'degree',
+        departmentName: student.department?.name || program.department?.name || '',
+        programName: student.program?.name || program.name || '',
+        batchCode: student.batch?.code || batch.code || '2019',
+        category: student.batch?.category || batch.category || 'regular',
+        admissionYear: '2019',
+        admissionDate: student.admissionDate || '2019-01-10',
+        completionDate: student.completionDate || '2019-12-31',
+        gender: student.sex || student.gender || '—',
+        email: student.email,
+        phone: student.phone || '—',
+        studentStatus: student.studentStatus,
+      },
+      issueNumber,
+      promotedStages,
+      currentLevel: student.level || 1,
+      qualificationType: student.qualificationType || student.program?.qualificationType || 'degree',
+      issuedAt: new Date(),
+      issuedBy: req.user?.id || null,
+      status: 'active',
+    });
+    sExisting.push(newCard);
+    cardsByStudent.set(String(student._id), sExisting);
+  }
+
   const cardsWithPhotos = [];
   for (const student of students) {
-    const existingCount = await StudentIdCard.countDocuments({ student: student._id });
-    const issueNumber = Math.min(4, Math.max(1, existingCount || 1));
+    const sCards = cardsByStudent.get(String(student._id)) || [];
+    const latest = sCards[sCards.length - 1];
+    const issueNumber = latest?.issueNumber || Math.min(2, Math.max(1, sCards.length || 1));
 
     const results = await Result.find({ student: student._id, status: { $in: ['submitted', 'approved', 'published'] } }).lean();
     const passedStages = new Set();

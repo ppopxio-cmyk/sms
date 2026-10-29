@@ -24,7 +24,7 @@ export default function StudentPicker({
 
   const queryParams = useMemo(() => ({
     search: settled,
-    limit: 8,
+    limit: 30,
     sort: 'fullName',
     order: 'asc',
     ...(status ? { status } : {}),

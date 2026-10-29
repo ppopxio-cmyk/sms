@@ -38,7 +38,7 @@ export const paginationSchema = z.object({
 });
 
 export const listStudentsQuerySchema = paginationSchema.extend({
-  status: z.enum(['all', 'active', 'pending', 'graduated', 'withdrawn', 'suspended', 'archived']).optional().default('all'),
+  status: z.enum(['all', 'active', 'pending', 'graduated', 'withdrawn', 'suspended', 'archived']).optional(),
   program: objectId.optional(),
   department: objectId.optional(),
   batch: objectId.optional(),

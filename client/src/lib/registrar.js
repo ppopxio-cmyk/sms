@@ -95,23 +95,36 @@ export function printBlob(blob) {
   iframe.style.position = 'fixed';
   iframe.style.right = '0';
   iframe.style.bottom = '0';
-  iframe.style.width = '0';
-  iframe.style.height = '0';
+  iframe.style.width = '1px';
+  iframe.style.height = '1px';
+  iframe.style.opacity = '0.01';
   iframe.style.border = '0';
   iframe.src = url;
   document.body.appendChild(iframe);
-  iframe.onload = () => {
+
+  let printed = false;
+  const doPrint = () => {
+    if (printed) return;
+    printed = true;
     try {
       iframe.contentWindow?.focus();
       iframe.contentWindow?.print();
     } catch {
-      window.open(url, '_blank')?.print();
+      window.open(url, '_blank');
     }
-    setTimeout(() => {
-      iframe.remove();
-      URL.revokeObjectURL(url);
-    }, 60000);
   };
+
+  iframe.onload = () => {
+    setTimeout(doPrint, 300);
+  };
+
+  // Fallback in case PDF in iframe doesn't trigger onload
+  setTimeout(doPrint, 1500);
+
+  setTimeout(() => {
+    iframe.remove();
+    URL.revokeObjectURL(url);
+  }, 120000);
 }
 
 export async function printFile(path, { params, method = 'get' } = {}) {
