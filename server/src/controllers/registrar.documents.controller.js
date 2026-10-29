@@ -82,7 +82,7 @@ export const listCertificates = asyncHandler(async (req, res) => {
         certificateNumber: row.certificateNumber,
         verificationId: row.verificationId,
         student: row.student
-          ? { id: String(row.student._id), studentId: row.student.studentId, fullName: row.student.fullName, level: row.student.level }
+          ? { id: String(row.student._id), studentId: row.student.studentId, fullName: row.student.fullName, level: row.student.level, photo: row.student.photo }
           : { studentId: row.studentSnapshot?.studentId, fullName: row.studentSnapshot?.fullName },
         program: row.programSnapshot,
         department: row.departmentSnapshot,
@@ -232,16 +232,23 @@ export const listTranscripts = asyncHandler(async (req, res) => {
       ],
     };
   }
+  const daysFilter =
+    query.days && Number(query.days) > 0
+      ? { issuedAt: { $gte: new Date(Date.now() - Number(query.days) * 24 * 60 * 60 * 1000) } }
+      : null;
+
   const filter = mergeFilters(
     query.status && query.status !== 'all' ? { status: query.status } : null,
     query.program ? { 'programSnapshot.code': query.program } : null,
     query.batch ? { 'studentSnapshot.batchCode': query.batch } : null,
+    daysFilter,
     searchCondition,
   );
+  const sort = { ...sortOf(query, ['issuedAt', 'status'], 'issuedAt'), createdAt: -1 };
   const [rows, total] = await Promise.all([
     Transcript.find(filter)
       .populate('student', 'studentId fullName level program batch photo')
-      .sort(sortOf(query, ['issuedAt', 'status'], 'issuedAt'))
+      .sort(sort)
       .skip(skip)
       .limit(limit)
       .lean(),
@@ -253,7 +260,7 @@ export const listTranscripts = asyncHandler(async (req, res) => {
         id: String(row._id),
         verificationId: row.verificationId,
         student: row.student
-          ? { id: String(row.student._id), studentId: row.student.studentId, fullName: row.student.fullName, level: row.student.level }
+          ? { id: String(row.student._id), studentId: row.student.studentId, fullName: row.student.fullName, level: row.student.level, photo: row.student.photo }
           : { studentId: row.studentSnapshot?.studentId, fullName: row.studentSnapshot?.fullName },
         program: row.programSnapshot,
         cgpa: row.cgpa,

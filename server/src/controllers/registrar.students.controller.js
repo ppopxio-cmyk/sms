@@ -725,5 +725,98 @@ export const studentOptions = asyncHandler(async (_req, res) => {
   });
 });
 
+export const graduatedCohortsSummary = asyncHandler(async (_req, res) => {
+  const cohortAggregation = await Student.aggregate([
+    { $match: { studentStatus: 'graduated' } },
+    {
+      $group: {
+        _id: {
+          department: '$department',
+          program: '$program',
+          batch: '$batch',
+        },
+        count: { $sum: 1 },
+        latestCompletionDate: { $max: '$completionDate' },
+        updatedAt: { $max: '$updatedAt' },
+      },
+    },
+    { $sort: { latestCompletionDate: -1, updatedAt: -1 } },
+  ]);
+
+  const deptIds = [...new Set(cohortAggregation.map((c) => String(c._id.department)).filter(Boolean))];
+  const progIds = [...new Set(cohortAggregation.map((c) => String(c._id.program)).filter(Boolean))];
+  const batchIds = [...new Set(cohortAggregation.map((c) => String(c._id.batch)).filter(Boolean))];
+
+  const [departments, programs, batches] = await Promise.all([
+    Department.find({ _id: { $in: deptIds } }).lean(),
+    Program.find({ _id: { $in: progIds } }).lean(),
+    Batch.find({ _id: { $in: batchIds } }).lean(),
+  ]);
+
+  const deptMap = new Map(departments.map((d) => [String(d._id), d]));
+  const progMap = new Map(programs.map((p) => [String(p._id), p]));
+  const batchMap = new Map(batches.map((b) => [String(b._id), b]));
+
+  const deptGroups = new Map();
+
+  for (const item of cohortAggregation) {
+    const deptId = String(item._id.department || '');
+    const progId = String(item._id.program || '');
+    const batchId = String(item._id.batch || '');
+
+    const dept = deptMap.get(deptId) || { _id: deptId, name: 'General / Other', code: 'GEN' };
+    const prog = progMap.get(progId) || { _id: progId, name: 'General Programme', code: 'PROG' };
+    const batch = batchMap.get(batchId) || { _id: batchId, code: 'General', category: 'regular' };
+
+    const key = String(dept._id);
+    if (!deptGroups.has(key)) {
+      deptGroups.set(key, {
+        departmentId: String(dept._id),
+        departmentName: dept.name,
+        departmentCode: dept.code,
+        cohorts: [],
+      });
+    }
+
+    deptGroups.get(key).cohorts.push({
+      id: `${progId}_${batchId}`,
+      slug: `${prog.code || 'PROG'}-${batch.code || 'BATCH'}`,
+      departmentId: String(dept._id),
+      departmentName: dept.name,
+      departmentCode: dept.code,
+      programId: String(prog._id),
+      programName: prog.name,
+      programCode: prog.code,
+      qualificationType: prog.qualificationType,
+      batchId: String(batch._id),
+      batchCode: batch.code,
+      batchCategory: batch.category || 'regular',
+      count: item.count,
+      latestCompletionDate: item.latestCompletionDate,
+    });
+  }
+
+  res.json({
+    departments: departments.map((d) => ({ id: String(d._id), code: d.code, name: d.name })),
+    programs: programs.map((p) => ({
+      id: String(p._id),
+      code: p.code,
+      name: p.name,
+      department: String(p.department),
+      qualificationType: p.qualificationType,
+    })),
+    batches: batches.map((b) => ({
+      id: String(b._id),
+      code: b.code,
+      name: b.name,
+      program: String(b.program),
+      category: b.category || 'regular',
+    })),
+    departmentGroups: Array.from(deptGroups.values()),
+    totalGraduated: cohortAggregation.reduce((acc, c) => acc + c.count, 0),
+  });
+});
+
+
 
 

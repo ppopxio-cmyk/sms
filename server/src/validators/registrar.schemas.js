@@ -582,6 +582,7 @@ export const listTranscriptsQuerySchema = paginationSchema.extend({
   status: z.enum(['all', 'issued', 'revoked']).optional().default('all'),
   program: objectId.optional(),
   batch: objectId.optional(),
+  days: z.coerce.number().min(0).max(3650).optional(),
 });
 
 export const noticeListSchema = paginationSchema.extend({

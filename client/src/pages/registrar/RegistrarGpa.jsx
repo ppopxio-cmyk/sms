@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
@@ -25,9 +25,10 @@ import {
   Clock,
   History,
   ShieldCheck,
+  Printer,
 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
-import { REGISTRAR, humanStatus, toneForStatus } from '../../lib/registrar';
+import { REGISTRAR, humanStatus, toneForStatus, printBlob } from '../../lib/registrar';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
 import RegistrarTable from '../../components/registrar/RegistrarTable';
 import Card, { CardBody, CardHeader } from '../../components/ui/Card';
@@ -1123,16 +1124,28 @@ function GpaIssueCertificateModal({ student, onClose, onSaved }) {
             Cancel
           </Button>
           {previewData ? (
-            <Button
-              variant="secondary"
-              className="gap-2 text-brand-700"
-              onClick={() => {
-                downloadBlob(previewData.blob, `Certificate_${student.studentId || student.fullName}.pdf`);
-                toast.success('Certificate PDF downloaded.');
-              }}
-            >
-              <Download className="h-4 w-4" /> Download PDF
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                className="gap-2 text-indigo-700"
+                onClick={() => {
+                  printBlob(previewData.blob);
+                  toast.success('Print dialog opened.');
+                }}
+              >
+                <Printer className="h-4 w-4" /> Print PDF
+              </Button>
+              <Button
+                variant="secondary"
+                className="gap-2 text-brand-700"
+                onClick={() => {
+                  downloadBlob(previewData.blob, `Certificate_${student.studentId || student.fullName}.pdf`);
+                  toast.success('Certificate PDF downloaded.');
+                }}
+              >
+                <Download className="h-4 w-4" /> Download PDF
+              </Button>
+            </>
           ) : (
             <Button variant="secondary" onClick={preview} loading={previewing}>
               <Eye className="h-4 w-4" /> Preview PDF

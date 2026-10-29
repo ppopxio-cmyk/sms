@@ -74,6 +74,7 @@ import {
 import {
   listStudents, getStudent, createStudent, updateStudent, uploadStudentPhoto, removeStudentPhoto,
   requestStudentDeleteCode, deleteStudent, exportStudentProfile, studentOptions, studentSummary,
+  graduatedCohortsSummary,
 } from '../controllers/registrar.students.controller.js';
 import {
   structure, createDepartment, updateDepartment, deleteDepartment, createProgram, updateProgram, deleteProgram,
@@ -138,6 +139,7 @@ r.get('/search', requirePermission('registrar:search'), search);
 // ---- Students ---------------------------------------------------------------
 r.get('/students/options', requirePermission('students:view'), studentOptions);
 r.get('/students/summary', requirePermission('students:view'), studentSummary);
+r.get('/students/graduated-summary', requirePermission('students:view'), graduatedCohortsSummary);
 r.get('/students', requirePermission('students:view'), validate(listStudentsQuerySchema, 'query'), listStudents);
 r.post('/students', requirePermission('students:manage'), validate(createStudentSchema), createStudent);
 r.get('/students/:studentId', requirePermission('students:view'), validate(studentIdParamSchema, 'params'), getStudent);

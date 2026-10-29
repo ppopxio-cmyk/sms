@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Download, Eye, FileText, Plus, Printer, ShieldCheck } from 'lucide-react';
+import { Download, Eye, FileText, Plus, Printer, ShieldCheck, Search, Clock } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import {
   REGISTRAR,
   displayDateTime,
   downloadFile,
-  printFile,
+  printBlob,
   fileErrorMessage,
   humanStatus,
   toneForStatus,
@@ -28,7 +28,7 @@ export default function RegistrarTranscripts() {
   const queryClient = useQueryClient();
   const [searchDraft, setSearchDraft] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [hasSearched, setHasSearched] = useState(false);
+  const [days, setDays] = useState(3);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [issuing, setIssuing] = useState(false);
@@ -40,29 +40,28 @@ export default function RegistrarTranscripts() {
     () => ({
       page,
       limit,
+      ...(days ? { days } : {}),
       ...(searchTerm.trim() ? { search: searchTerm.trim() } : {}),
     }),
-    [page, limit, searchTerm],
+    [page, limit, days, searchTerm],
   );
 
   const query = useQuery({
     queryKey: ['registrar', 'transcripts', params],
     queryFn: async () => (await api.get(`${REGISTRAR}/transcripts`, { params })).data,
-    enabled: hasSearched,
     placeholderData: (previous) => previous,
   });
 
   const handleShowSearch = (e) => {
     e?.preventDefault?.();
     setSearchTerm(searchDraft.trim());
-    setHasSearched(true);
     setPage(1);
   };
 
   const handleResetSearch = () => {
     setSearchDraft('');
     setSearchTerm('');
-    setHasSearched(false);
+    setDays(3);
     setPage(1);
   };
 
@@ -93,6 +92,7 @@ export default function RegistrarTranscripts() {
       const res = await api.post(`${REGISTRAR}/transcripts/${row.id}/print`, {}, { responseType: 'blob' });
       printBlob(res.data);
       toast.success('Print dialog opened. Print counter updated.');
+      setViewing((prev) => (prev && prev.id === row.id ? { ...prev, printCount: (prev.printCount || 0) + 1 } : prev));
       invalidate();
     } catch (err) {
       toast.error(await fileErrorMessage(err, 'The transcript PDF could not be printed.'));
@@ -106,9 +106,22 @@ export default function RegistrarTranscripts() {
       key: 'student',
       label: 'Student',
       render: (row) => (
-        <div>
-          <p className="text-sm font-semibold text-slate-900">{row.student?.fullName || '—'}</p>
-          <p className="text-xs text-slate-500">{row.student?.studentId || '—'}</p>
+        <div className="flex items-center gap-3">
+          {row.student?.photo?.thumbnailUrl || row.student?.photo?.url ? (
+            <img
+              src={row.student.photo.thumbnailUrl || row.student.photo.url}
+              alt=""
+              className="h-9 w-9 rounded-full object-cover ring-1 ring-slate-200 shrink-0"
+            />
+          ) : (
+            <span className="brand-gradient flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-xs">
+              {(row.student?.fullName || '?').slice(0, 2).toUpperCase()}
+            </span>
+          )}
+          <div>
+            <p className="text-sm font-semibold text-slate-900">{row.student?.fullName || '—'}</p>
+            <p className="text-xs text-slate-500 font-mono">{row.student?.studentId || '—'}</p>
+          </div>
         </div>
       ),
     },
@@ -192,9 +205,9 @@ export default function RegistrarTranscripts() {
         }
       />
 
-      {/* Search Bar with Show Transcripts Button */}
+      {/* Search and Period Filter */}
       <Card className="p-4 sm:p-5">
-        <form onSubmit={handleShowSearch} className="flex flex-col sm:flex-row items-center gap-3">
+        <form onSubmit={handleShowSearch} className="flex flex-col md:flex-row items-center gap-3">
           <div className="relative flex-1 w-full">
             <input
               type="search"
@@ -204,78 +217,93 @@ export default function RegistrarTranscripts() {
               className="focus-ring h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm"
             />
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2 w-full md:w-auto">
+            <select
+              value={days}
+              onChange={(e) => {
+                const val = e.target.value ? Number(e.target.value) : '';
+                setDays(val);
+                setPage(1);
+              }}
+              className="focus-ring h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm"
+              title="Filter by issue date"
+            >
+              <option value="3">Latest 3 Days</option>
+              <option value="7">Latest 7 Days</option>
+              <option value="30">Latest 30 Days</option>
+              <option value="">All Time</option>
+            </select>
             <Button
               type="submit"
-              className="flex-1 sm:flex-initial gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold h-11 px-5 shadow-sm"
+              className="gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold h-11 px-5 shadow-sm"
               loading={query.isFetching}
             >
-              Show Transcripts
+              <Search className="h-4 w-4" /> Search
             </Button>
-            {hasSearched ? (
+            {searchTerm || days !== 3 ? (
               <Button
                 type="button"
                 variant="secondary"
                 onClick={handleResetSearch}
                 className="h-11 px-4 text-slate-600"
               >
-                Clear
+                Reset
               </Button>
             ) : null}
           </div>
         </form>
       </Card>
 
-      {/* Transcript register history — Visible only when Show is clicked */}
-      {hasSearched ? (
-        <Card>
-          <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-900">Transcript register</h2>
-              <p className="mt-0.5 text-xs text-slate-500">
-                {pagination.total ?? 0} document{pagination.total === 1 ? '' : 's'}{searchTerm ? ` matching "${searchTerm}"` : ''}
-              </p>
-            </div>
-            <FileText className="h-4 w-4 text-slate-300" />
-          </div>
-          <RegistrarTable
-            columns={columns}
-            rows={rows}
-            loading={query.isLoading}
-            error={query.error ? query.error?.response?.data?.message || 'Transcripts could not be loaded.' : null}
-            onRetry={query.refetch}
-            rowKey={(row) => row.id}
-            noResults={Boolean(searchTerm.trim())}
-            emptyTitle="No transcripts found"
-            emptyMessage={searchTerm ? `No transcript found matching "${searchTerm}". Check the student name or ID.` : 'No transcripts have been issued yet.'}
-          />
-          <div className="px-5 pb-4">
-            <Pagination
-              page={pagination.page}
-              pages={pagination.pages}
-              total={pagination.total}
-              limit={pagination.limit}
-              onPage={setPage}
-              onLimit={(value) => {
-                setLimit(value);
-                setPage(1);
-              }}
-            />
-          </div>
-        </Card>
-      ) : (
-        <Card className="py-12 text-center border-dashed">
-          <div className="max-w-md mx-auto space-y-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-600 mx-auto">
-              <FileText className="h-6 w-6" />
-            </div>
-            <h3 className="text-base font-bold text-slate-900">Search Transcript Register</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Enter a student name, student ID, or verification code above and click <strong>Show Transcripts</strong> to view official transcript issuance history.
+      {/* Transcript register history table */}
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Transcript Register</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {days ? `Showing transcripts issued in the last ${days} days (newest first).` : 'Showing all issued transcripts.'}
+              {searchTerm ? ` Filtering for "${searchTerm}".` : ''}
             </p>
           </div>
-        </Card>
-      )}
+          <div className="flex items-center gap-2">
+            {days ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                <Clock className="h-3 w-3" /> Last {days} Days
+              </span>
+            ) : null}
+            <Badge tone="neutral">{pagination.total ?? 0} Record{pagination.total === 1 ? '' : 's'}</Badge>
+          </div>
+        </div>
+        <RegistrarTable
+          columns={columns}
+          rows={rows}
+          loading={query.isLoading}
+          error={query.error ? query.error?.response?.data?.message || 'Transcripts could not be loaded.' : null}
+          onRetry={query.refetch}
+          rowKey={(row) => row.id}
+          noResults={Boolean(searchTerm.trim())}
+          emptyTitle={days ? `No transcripts issued in the last ${days} days` : 'No transcripts found'}
+          emptyMessage={
+            searchTerm
+              ? `No transcript found matching "${searchTerm}". Try broadening your search or choosing 'All Time'.`
+              : days
+              ? 'No transcripts have been issued within this timeframe. Switch to "All Time" to view previous records.'
+              : 'No transcripts have been issued yet.'
+          }
+        />
+        <div className="px-5 pb-4">
+          <Pagination
+            page={pagination.page}
+            pages={pagination.pages}
+            total={pagination.total}
+            limit={pagination.limit}
+            onPage={setPage}
+            onLimit={(value) => {
+              setLimit(value);
+              setPage(1);
+            }}
+          />
+        </div>
+      </Card>
 
       <IssueTranscriptModal open={issuing} onClose={() => setIssuing(false)} onSaved={invalidate} />
 
