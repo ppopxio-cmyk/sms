@@ -36,23 +36,27 @@ function photoView(photo) {
   return { ...photo, url, thumbnailUrl };
 }
 
-export const studentView = (student) => ({
-  ...student,
-  id: String(student._id),
-  studentCategory: student.studentCategory || 'regular',
-  photo: photoView(student.photo),
-  program: student.program
-    ? { id: String(student.program._id), code: student.program.code, name: student.program.name, qualificationType: student.program.qualificationType }
-    : null,
-  department: student.department
-    ? { id: String(student.department._id), code: student.department.code, name: student.department.name }
-    : null,
-  batch: student.batch ? { id: String(student.batch._id), code: student.batch.code, name: student.batch.name } : null,
-  admissionAcademicYear: student.admissionAcademicYear
-    ? { id: String(student.admissionAcademicYear._id), label: student.admissionAcademicYear.label }
-    : null,
-  _id: undefined,
-});
+export const studentView = (student) => {
+  const photo = photoView(student.photo);
+  return {
+    ...student,
+    id: String(student._id),
+    studentCategory: student.studentCategory || 'regular',
+    photo,
+    photoUrl: photo?.thumbnailUrl || photo?.url || null,
+    program: student.program
+      ? { id: String(student.program._id), code: student.program.code, name: student.program.name, qualificationType: student.program.qualificationType }
+      : null,
+    department: student.department
+      ? { id: String(student.department._id), code: student.department.code, name: student.department.name }
+      : null,
+    batch: student.batch ? { id: String(student.batch._id), code: student.batch.code, name: student.batch.name } : null,
+    admissionAcademicYear: student.admissionAcademicYear
+      ? { id: String(student.admissionAcademicYear._id), label: student.admissionAcademicYear.label }
+      : null,
+    _id: undefined,
+  };
+};
 
 async function loadOptions(programId, departmentId, batchId, category = 'regular') {
   const program = await Program.findById(programId).lean();
@@ -203,9 +207,11 @@ async function assertPhoneAvailable(phone, excludeId) {
 export const listStudents = asyncHandler(async (req, res) => {
   const query = req.valid.query;
   const { page, limit, skip } = pageOf(query);
-  const statusFilter = query.status && query.status !== 'all'
-    ? { studentStatus: query.status }
-    : { studentStatus: { $ne: 'graduated' } };
+  const statusFilter = query.status === 'all'
+    ? null
+    : query.status
+      ? { studentStatus: query.status }
+      : { studentStatus: { $ne: 'graduated' } };
 
   const filter = mergeFilters(
     statusFilter,

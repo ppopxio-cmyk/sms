@@ -56,9 +56,9 @@ export const getStudentCardEligibility = asyncHandler(async (req, res) => {
   res.json({
     student,
     issueCount: existingCount,
-    canIssue: existingCount < 4 && hasPhoto,
-    maxIssues: 4,
-    remainingIssues: Math.max(0, 4 - existingCount),
+    canIssue: existingCount < 2 && hasPhoto,
+    maxIssues: 2,
+    remainingIssues: Math.max(0, 2 - existingCount),
     hasPhoto,
   });
 });
@@ -80,10 +80,10 @@ export const issueIdCard = asyncHandler(async (req, res) => {
     throw new AppError(400, 'PHOTO_REQUIRED', 'Student must have an uploaded photo before an ID card can be prepared or issued.');
   }
 
-  // Strict 4-Issue Limit: "and the student only issued for 4 times"
+  // Strict 2-Issue Limit: "bulking only 2 times okay... and counter is reached in single issued too remove print and say reached"
   const existingCount = await StudentIdCard.countDocuments({ student: student._id });
-  if (existingCount >= 4) {
-    throw new AppError(400, 'ISSUE_LIMIT_REACHED', 'This student has already reached the maximum limit of 4 ID card issuances.');
+  if (existingCount >= 2) {
+    throw new AppError(400, 'ISSUE_LIMIT_REACHED', 'This student has already reached the maximum limit of 2 ID card issuances.');
   }
 
   // Calculate promoted stages: find all offerings with published results or student level
@@ -137,7 +137,7 @@ export const issueIdCard = asyncHandler(async (req, res) => {
 
   res.status(201).json({
     success: true,
-    message: `Student ID Card #${issueNumber} of 4 issued successfully!`,
+    message: `Student ID Card #${issueNumber} of 2 issued successfully!`,
     idCard,
   });
 });
@@ -258,16 +258,19 @@ export const getProgrammeCardCohortSummary = asyncHandler(async (req, res) => {
 
   let photoCount = 0;
   let issuedCount = 0;
+  let maxCohortIssues = 0;
 
   const studentRows = students.map((s) => {
     const sId = String(s._id);
     const studentCards = cardsByStudent.get(sId) || [];
     const latestCard = studentCards[0] || null;
     const issueCount = studentCards.length;
+    const printCount = latestCard?.printCount || 0;
     const hasPhoto = Boolean(s.photo?.url || s.photo?.filePath);
 
     if (hasPhoto) photoCount++;
     if (issueCount > 0) issuedCount++;
+    if (issueCount > maxCohortIssues) maxCohortIssues = issueCount;
 
     return {
       id: String(s._id),
@@ -278,11 +281,15 @@ export const getProgrammeCardCohortSummary = asyncHandler(async (req, res) => {
       photo: s.photo,
       hasPhoto,
       issueCount,
-      canIssue: issueCount < 4 && hasPhoto,
+      printCount,
+      canIssue: issueCount < 2 && hasPhoto,
+      canPrint: issueCount > 0 && printCount < 2,
+      limitReached: issueCount >= 2 || printCount >= 2,
       latestCard: latestCard
         ? {
             id: String(latestCard._id),
             issueNumber: latestCard.issueNumber,
+            printCount: latestCard.printCount || 0,
             issuedAt: latestCard.issuedAt,
           }
         : null,
@@ -292,6 +299,10 @@ export const getProgrammeCardCohortSummary = asyncHandler(async (req, res) => {
   const totalStudents = students.length;
   const allHavePhotos = totalStudents > 0 && photoCount === totalStudents;
   const allIssued = totalStudents > 0 && issuedCount === totalStudents;
+  const bulkCount = maxCohortIssues;
+  const bulkLimitReached = bulkCount >= 2;
+  const canBulkIssue = bulkCount < 2 && allHavePhotos && totalStudents > 0;
+  const canBulkPrint = bulkCount > 0 && bulkCount <= 2 && allHavePhotos;
 
   res.json({
     program: {
@@ -313,15 +324,150 @@ export const getProgrammeCardCohortSummary = asyncHandler(async (req, res) => {
     allHavePhotos,
     issuedCount,
     allIssued,
+    bulkCount,
+    canBulkIssue,
+    canBulkPrint,
+    bulkLimitReached,
     students: studentRows,
     history: idCards.slice(0, 30).map((c) => ({
       id: String(c._id),
       studentId: c.studentSnapshot?.studentId,
       fullName: c.studentSnapshot?.fullName,
       issueNumber: c.issueNumber,
+      printCount: c.printCount || 0,
       promotedStages: c.promotedStages,
       issuedAt: c.issuedAt,
     })),
+  });
+});
+
+export const printIdCard = asyncHandler(async (req, res) => {
+  const idCard = await StudentIdCard.findById(req.params.id);
+  if (!idCard) throw new AppError(404, 'NOT_FOUND', 'ID card record not found.');
+  if ((idCard.printCount || 0) >= 2) {
+    throw new AppError(400, 'PRINT_LIMIT_REACHED', 'This ID card has reached its printing limit of 2 times.');
+  }
+  idCard.printCount = (idCard.printCount || 0) + 1;
+  await idCard.save();
+
+  let photoBuffer = null;
+  if (idCard.studentSnapshot?.photo?.filePath) {
+    try {
+      photoBuffer = await fetchAssetBuffer(idCard.studentSnapshot.photo, { jpeg: true });
+    } catch {
+      photoBuffer = null;
+    }
+  }
+  const pdf = await generateIdCardPdf({ idCard, photoBuffer });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="ID_Card_${idCard.studentSnapshot?.studentId || 'print'}.pdf"`);
+  res.send(pdf);
+});
+
+export const bulkIssueIdCards = asyncHandler(async (req, res) => {
+  const { programId, batchId } = req.body;
+  if (!programId || !batchId) {
+    throw new AppError(400, 'PARAMS_REQUIRED', 'Program ID and Batch ID are required.');
+  }
+
+  const [program, batch] = await Promise.all([
+    Program.findById(programId).populate('department').lean(),
+    Batch.findById(batchId).lean(),
+  ]);
+  if (!program || !batch) throw new AppError(404, 'NOT_FOUND', 'Program or Batch not found.');
+
+  const students = await Student.find({
+    program: programId,
+    batch: batchId,
+    studentStatus: { $ne: 'archived' },
+  })
+    .populate('program')
+    .populate('department')
+    .populate('batch')
+    .sort({ studentId: 1 });
+
+  if (!students.length) {
+    throw new AppError(404, 'NO_STUDENTS', 'No students found in this cohort.');
+  }
+
+  const studentIds = students.map((s) => s._id);
+  const existingCards = await StudentIdCard.find({ student: { $in: studentIds } }).lean();
+
+  const cardsByStudent = new Map();
+  for (const c of existingCards) {
+    const sId = String(c.student);
+    if (!cardsByStudent.has(sId)) cardsByStudent.set(sId, []);
+    cardsByStudent.get(sId).push(c);
+  }
+
+  let maxCohortIssues = 0;
+  for (const s of students) {
+    const count = cardsByStudent.get(String(s._id))?.length || 0;
+    if (count > maxCohortIssues) maxCohortIssues = count;
+  }
+
+  if (maxCohortIssues >= 2) {
+    throw new AppError(400, 'BULK_LIMIT_REACHED', 'Bulk ID issuance for this programme cohort has already reached the maximum limit of 2 times.');
+  }
+
+  const offerings = await CourseOffering.find({ program: programId }).select('_id level').lean();
+  const offLevelMap = new Map(offerings.map((o) => [String(o._id), o.level]));
+
+  const createdCards = [];
+  for (const student of students) {
+    const hasPhoto = Boolean(student.photo?.url || student.photo?.filePath);
+    if (!hasPhoto) continue;
+
+    const sExisting = cardsByStudent.get(String(student._id)) || [];
+    if (sExisting.length >= 2) continue;
+
+    const results = await Result.find({ student: student._id, status: { $in: ['submitted', 'approved', 'published'] } }).lean();
+    const passedStages = new Set();
+    for (const r of results) {
+      const lvl = offLevelMap.get(String(r.offering));
+      if (lvl) passedStages.add(lvl);
+    }
+    for (let l = 1; l < (student.level || 1); l++) {
+      passedStages.add(l);
+    }
+    const promotedStages = [...passedStages].sort((a, b) => a - b);
+    const issueNumber = sExisting.length + 1;
+
+    const newCard = await StudentIdCard.create({
+      student: student._id,
+      studentSnapshot: {
+        studentId: student.studentId,
+        fullName: student.fullName,
+        photo: student.photo,
+        qualificationType: student.qualificationType || student.program?.qualificationType || 'degree',
+        departmentName: student.department?.name || program.department?.name || '',
+        programName: student.program?.name || program.name || '',
+        batchCode: student.batch?.code || batch.code || '2019',
+        category: student.batch?.category || batch.category || 'regular',
+        admissionYear: '2019',
+        admissionDate: student.admissionDate || '2019-01-10',
+        completionDate: student.completionDate || '2019-12-31',
+        gender: student.sex || student.gender || '—',
+        email: student.email,
+        phone: student.phone || '—',
+        studentStatus: student.studentStatus,
+      },
+      issueNumber,
+      promotedStages,
+      currentLevel: student.level || 1,
+      qualificationType: student.qualificationType || student.program?.qualificationType || 'degree',
+      issuedAt: new Date(),
+      issuedBy: req.user.id,
+      status: 'active',
+    });
+
+    createdCards.push(newCard);
+  }
+
+  res.status(201).json({
+    success: true,
+    issuedCount: createdCards.length,
+    message: `Successfully issued ${createdCards.length} student ID cards in bulk.`,
   });
 });
 

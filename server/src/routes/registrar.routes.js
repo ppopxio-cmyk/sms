@@ -102,14 +102,16 @@ import {
 } from '../controllers/registrar.grading-policy.controller.js';
 import {
   listCertificates, getCertificate, preview, issue, downloadCertificate, revokeCertificate,
-  reissueCertificate, listTranscripts, getTranscript, createTranscript, downloadTranscript, exportTranscriptRecord, revokeTranscript, certificateMeta,
+  reissueCertificate, printCertificate, listTranscripts, getTranscript, createTranscript, downloadTranscript, exportTranscriptRecord, revokeTranscript, printTranscript, certificateMeta,
   getStudentTranscriptCount,
 } from '../controllers/registrar.documents.controller.js';
 import {
   listIdCards,
   getStudentCardEligibility,
   issueIdCard,
+  bulkIssueIdCards,
   downloadIdCardPdf,
+  printIdCard,
   previewIdCardPdf,
   getProgrammeCardCohortSummary,
   downloadBulkIdCardsPdf,
@@ -326,6 +328,7 @@ r.get('/transcripts', requirePermission('transcripts:view'), validate(listTransc
 r.post('/transcripts', requirePermission('transcripts:issue'), validate(transcriptCreateSchema), createTranscript);
 r.get('/transcripts/:id', requirePermission('transcripts:view'), validate(idParamSchema, 'params'), getTranscript);
 r.get('/transcripts/:id/pdf', requirePermission('transcripts:view'), validate(idParamSchema, 'params'), downloadTranscript);
+r.post('/transcripts/:id/print', requirePermission('transcripts:view'), validate(idParamSchema, 'params'), printTranscript);
 r.get('/transcripts/:id/export', exportLimiter, requirePermission('transcripts:view'), validate(idParamSchema, 'params'), exportTranscriptRecord);
 r.post('/transcripts/:id/revoke', requirePermission('transcripts:revoke'), validate(idParamSchema, 'params'), validate(revokeSchema), revokeTranscript);
 
@@ -336,6 +339,7 @@ r.post('/certificates/preview', requirePermission('certificates:view'), validate
 r.get('/certificates/:id', requirePermission('certificates:view'), validate(idParamSchema, 'params'), getCertificate);
 r.post('/certificates/issue', requirePermission('certificates:issue'), validate(certificateIssueSchema), issue);
 r.get('/certificates/:id/pdf', requirePermission('certificates:view'), validate(idParamSchema, 'params'), downloadCertificate);
+r.post('/certificates/:id/print', requirePermission('certificates:view'), validate(idParamSchema, 'params'), printCertificate);
 r.post('/certificates/:id/revoke', requirePermission('certificates:revoke'), validate(idParamSchema, 'params'), validate(revokeSchema), revokeCertificate);
 r.post('/certificates/:id/reissue', requirePermission('certificates:issue'), validate(idParamSchema, 'params'), validate(reissueSchema), reissueCertificate);
 
@@ -345,7 +349,9 @@ r.get('/id-cards/cohort-summary', getProgrammeCardCohortSummary);
 r.get('/id-cards/bulk-pdf', downloadBulkIdCardsPdf);
 r.get('/id-cards/student/:studentId', getStudentCardEligibility);
 r.post('/id-cards/issue', issueIdCard);
+r.post('/id-cards/bulk-issue', bulkIssueIdCards);
 r.get('/id-cards/:id/pdf', downloadIdCardPdf);
+r.post('/id-cards/:id/print', printIdCard);
 r.post('/id-cards/preview', previewIdCardPdf);
 
 // ---- Reports ----------------------------------------------------------------

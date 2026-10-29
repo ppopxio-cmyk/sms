@@ -25,18 +25,32 @@ const sendPdf = (res, { buffer, filename }) => {
 export const listCertificates = asyncHandler(async (req, res) => {
   const query = req.valid.query;
   const { page, limit, skip } = pageOf(query);
-  let studentIds = null;
+  let searchCondition = null;
   if (query.search) {
-    const students = await Student.find(searchFilter(query.search, ['studentId', 'fullName']))
+    const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escaped, 'i');
+    const students = await Student.find({
+      $or: [{ studentId: regex }, { fullName: regex }],
+    })
       .select('_id')
       .limit(2000)
       .lean();
-    studentIds = students.map((row) => row._id);
+    const studentIds = students.map((row) => row._id);
+
+    searchCondition = {
+      $or: [
+        { certificateNumber: regex },
+        { verificationId: regex },
+        { 'studentSnapshot.studentId': regex },
+        { 'studentSnapshot.fullName': regex },
+        ...(studentIds.length ? [{ student: { $in: studentIds } }] : []),
+      ],
+    };
   }
   const filter = mergeFilters(
     query.status && query.status !== 'all' ? { status: query.status } : null,
     query.academicYear ? { academicYear: query.academicYear } : null,
-    studentIds ? { student: { $in: studentIds } } : null,
+    searchCondition,
   );
   const [rows, total] = await Promise.all([
     Certificate.find(filter)
@@ -63,6 +77,7 @@ export const listCertificates = asyncHandler(async (req, res) => {
         cgpa: row.cgpa,
         status: row.status,
         issueNumber: row.issueNumber || 1,
+        printCount: row.printCount || 0,
         issuedAt: row.issuedAt,
         pdfGeneratedAt: row.pdfGeneratedAt,
         revokedAt: row.revokedAt,
@@ -73,6 +88,23 @@ export const listCertificates = asyncHandler(async (req, res) => {
       limit,
     ),
   });
+});
+
+export const printCertificate = asyncHandler(async (req, res) => {
+  const certificate = await Certificate.findById(req.valid.params.id);
+  if (!certificate) throw new AppError(404, 'CERTIFICATE_NOT_FOUND', 'That certificate was not found.');
+  if (certificate.status === 'revoked') {
+    throw new AppError(400, 'CERTIFICATE_REVOKED', 'This certificate is revoked and cannot be printed.');
+  }
+  if ((certificate.printCount || 0) >= 2) {
+    throw new AppError(400, 'PRINT_LIMIT_REACHED', 'This certificate has reached its printing limit of 2 times.');
+  }
+  certificate.printCount = (certificate.printCount || 0) + 1;
+  await certificate.save();
+
+  audit({ req, action: 'registrar.certificate.print', targetType: 'Certificate', targetId: req.valid.params.id, meta: { printCount: certificate.printCount } });
+  const result = await certificatePdf(req.valid.params.id);
+  sendPdf(res, result);
 });
 
 export const getCertificate = asyncHandler(async (req, res) => {
@@ -165,23 +197,36 @@ export const reissueCertificate = asyncHandler(async (req, res) => {
 export const listTranscripts = asyncHandler(async (req, res) => {
   const query = req.valid.query;
   const { page, limit, skip } = pageOf(query);
-  let studentIds = null;
-  const studentConditions = [];
-  if (query.search) studentConditions.push(searchFilter(query.search, ['studentId', 'fullName']));
-  if (query.program) studentConditions.push({ program: query.program });
-  if (query.batch) studentConditions.push({ batch: query.batch });
-  if (studentConditions.length) {
-    const studentFilter = studentConditions.length === 1 ? studentConditions[0] : { $and: studentConditions };
-    const students = await Student.find(studentFilter).select('_id').limit(2000).lean();
-    studentIds = students.map((row) => row._id);
+  let searchCondition = null;
+  if (query.search) {
+    const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escaped, 'i');
+    const students = await Student.find({
+      $or: [{ studentId: regex }, { fullName: regex }],
+    })
+      .select('_id')
+      .limit(2000)
+      .lean();
+    const studentIds = students.map((row) => row._id);
+
+    searchCondition = {
+      $or: [
+        { verificationId: regex },
+        { 'studentSnapshot.studentId': regex },
+        { 'studentSnapshot.fullName': regex },
+        ...(studentIds.length ? [{ student: { $in: studentIds } }] : []),
+      ],
+    };
   }
   const filter = mergeFilters(
     query.status && query.status !== 'all' ? { status: query.status } : null,
-    studentIds ? { student: { $in: studentIds } } : null,
+    query.program ? { 'programSnapshot.code': query.program } : null,
+    query.batch ? { 'studentSnapshot.batchCode': query.batch } : null,
+    searchCondition,
   );
   const [rows, total] = await Promise.all([
     Transcript.find(filter)
-      .populate('student', 'studentId fullName level program batch')
+      .populate('student', 'studentId fullName level program batch photo')
       .sort(sortOf(query, ['issuedAt', 'status'], 'issuedAt'))
       .skip(skip)
       .limit(limit)
@@ -203,9 +248,32 @@ export const listTranscripts = asyncHandler(async (req, res) => {
         purpose: row.purpose,
         status: row.status,
         issueNumber: row.issueNumber || 1,
+        printCount: row.printCount || 0,
         issuedAt: row.issuedAt,
       })),
       total,
+      page,
+      limit,
+    ),
+  });
+});
+
+export const printTranscript = asyncHandler(async (req, res) => {
+  const transcript = await Transcript.findById(req.valid.params.id);
+  if (!transcript) throw new AppError(404, 'TRANSCRIPT_NOT_FOUND', 'That transcript was not found.');
+  if (transcript.status === 'revoked') {
+    throw new AppError(400, 'TRANSCRIPT_REVOKED', 'This transcript is revoked and cannot be printed.');
+  }
+  if ((transcript.printCount || 0) >= 2) {
+    throw new AppError(400, 'PRINT_LIMIT_REACHED', 'This transcript has reached its printing limit of 2 times.');
+  }
+  transcript.printCount = (transcript.printCount || 0) + 1;
+  await transcript.save();
+
+  audit({ req, action: 'registrar.transcript.print', targetType: 'Transcript', targetId: req.valid.params.id, meta: { printCount: transcript.printCount } });
+  const result = await transcriptPdf(req.valid.params.id);
+  sendPdf(res, result);
+});
       page,
       limit,
     ),

@@ -89,6 +89,43 @@ export function downloadBlob(blob, filename) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+export function printBlob(blob) {
+  const url = URL.createObjectURL(blob);
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  iframe.src = url;
+  document.body.appendChild(iframe);
+  iframe.onload = () => {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } catch {
+      window.open(url, '_blank')?.print();
+    }
+    setTimeout(() => {
+      iframe.remove();
+      URL.revokeObjectURL(url);
+    }, 60000);
+  };
+}
+
+export async function printFile(path, { params, method = 'get' } = {}) {
+  const response = await api.request({
+    url: path,
+    method,
+    params,
+    responseType: 'blob',
+  });
+  const type = response.headers?.['content-type'] || 'application/pdf';
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data], { type });
+  printBlob(blob);
+}
+
 function filenameFrom(response, fallback) {
   const header = response.headers?.['content-disposition'] || '';
   const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header);
@@ -153,19 +190,21 @@ export function isValidEthiopianPhone(value) {
   return /^\+251\d{9}$/.test(normalized);
 }
 
-export async function toJpegFile(file, { maxDimension = 1600, quality = 0.9 } = {}) {
+export async function toJpegFile(file, { size = 600, quality = 0.92 } = {}) {
   const bitmap = await createImageBitmap(file);
   try {
-    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
+    // 2 x 2 inches standard passport photo: 1:1 aspect ratio square (600x600 px at 300 DPI)
+    const minDim = Math.min(bitmap.width, bitmap.height);
+    const sx = Math.max(0, Math.round((bitmap.width - minDim) / 2));
+    const sy = Math.max(0, Math.round((bitmap.height - minDim) / 2));
+
     const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = size;
+    canvas.height = size;
     const context = canvas.getContext('2d');
     context.fillStyle = '#ffffff';
-    context.fillRect(0, 0, width, height);
-    context.drawImage(bitmap, 0, 0, width, height);
+    context.fillRect(0, 0, size, size);
+    context.drawImage(bitmap, sx, sy, minDim, minDim, 0, 0, size, size);
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
     if (!blob) throw new Error('The photo could not be prepared for upload.');
     return new File([blob], `${String(file.name || 'student').replace(/\.[^.]+$/, '')}.jpg`, {

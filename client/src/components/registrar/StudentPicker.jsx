@@ -35,7 +35,7 @@ export default function StudentPicker({
     queryKey: ['registrar', 'student-picker', queryParams],
     queryFn: async () =>
       (await api.get(`${REGISTRAR}/students`, { params: queryParams })).data,
-    enabled: open && settled.length >= 2,
+    enabled: open,
     staleTime: 15_000,
   });
 
@@ -54,13 +54,21 @@ export default function StudentPicker({
       <label className="mb-1.5 block text-sm font-medium text-slate-700">{label}</label>
       {value ? (
         <div className="flex items-center gap-3 rounded-xl border border-brand-200 bg-brand-50/60 px-3 py-2.5">
-          <span className="brand-gradient flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white">
-            <UserRound className="h-4 w-4" />
-          </span>
+          {value.photoUrl || value.photo?.thumbnailUrl || value.photo?.url ? (
+            <img
+              src={value.photoUrl || value.photo?.thumbnailUrl || value.photo?.url}
+              alt=""
+              className="h-9 w-9 shrink-0 rounded-full object-cover ring-2 ring-brand-500 shadow-sm"
+            />
+          ) : (
+            <span className="brand-gradient flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white">
+              <UserRound className="h-4 w-4" />
+            </span>
+          )}
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-slate-900">{studentName(value)}</p>
             <p className="truncate text-xs text-slate-500">
-              {[value.studentId, value.program?.code || value.program?.name].filter(Boolean).join(' · ')}
+              {[value.studentId, value.program?.code || value.program?.name, value.studentStatus ? `Status: ${value.studentStatus}` : null].filter(Boolean).join(' · ')}
             </p>
           </div>
           <button
@@ -97,8 +105,8 @@ export default function StudentPicker({
               <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-brand-500" />
             ) : null}
           </div>
-          {open && settled.length >= 2 ? (
-            <div className="absolute z-30 mt-1.5 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+          {open ? (
+            <div className="absolute z-30 mt-1.5 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
               {rows.length ? (
                 rows.map((row) => (
                   <button
@@ -111,13 +119,32 @@ export default function StudentPicker({
                     }}
                     className="focus-ring flex w-full items-center gap-3 border-b border-slate-50 px-3 py-2.5 text-left last:border-0 hover:bg-brand-50/50"
                   >
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
-                      <UserRound className="h-4 w-4" />
-                    </span>
+                    {row.photoUrl || row.photo?.thumbnailUrl || row.photo?.url ? (
+                      <img
+                        src={row.photoUrl || row.photo?.thumbnailUrl || row.photo?.url}
+                        alt=""
+                        className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-slate-200"
+                      />
+                    ) : (
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                        <UserRound className="h-4 w-4" />
+                      </span>
+                    )}
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-slate-800">{row.fullName}</span>
+                      <span className="flex items-center justify-between">
+                        <span className="block truncate text-sm font-semibold text-slate-800">{row.fullName}</span>
+                        {row.studentStatus ? (
+                          <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                            row.studentStatus === 'graduated'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}>
+                            {row.studentStatus}
+                          </span>
+                        ) : null}
+                      </span>
                       <span className="block truncate text-xs text-slate-500">
-                        {[row.studentId, row.program?.code, row.level ? `Level ${row.level}` : null].filter(Boolean).join(' · ')}
+                        {[row.studentId, row.program?.code || row.program?.name, row.level ? `Level ${row.level}` : null].filter(Boolean).join(' · ')}
                       </span>
                     </span>
                   </button>

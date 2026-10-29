@@ -27,7 +27,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
-import { REGISTRAR, displayDateTime, toJpegFile } from '../../lib/registrar';
+import { REGISTRAR, displayDateTime, toJpegFile, printBlob } from '../../lib/registrar';
 import { formatEthiopian } from '../../lib/ethiopianDate';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
 import RegistrarTable from '../../components/registrar/RegistrarTable';
@@ -68,7 +68,9 @@ export default function RegistrarIdCards() {
   const [previewTitle, setPreviewTitle] = useState('Student ID Card Preview');
   const [previewingId, setPreviewingId] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
+  const [printingId, setPrintingId] = useState(null);
   const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [bulkPrinting, setBulkPrinting] = useState(false);
   const [uploadingStudent, setUploadingStudent] = useState(null);
   const [uploadLoading, setUploadLoading] = useState(false);
   const fileInputRef = useRef(null);
@@ -104,6 +106,7 @@ export default function RegistrarIdCards() {
       toast.success(`Photo uploaded for ${uploadingStudent.fullName}! ID card is now unlocked.`);
       queryClient.invalidateQueries({ queryKey: ['registrar', 'id-cards-cohort-summary'] });
       queryClient.invalidateQueries({ queryKey: ['registrar', 'students'] });
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'student'] });
     } catch (err) {
       toast.error(errorMessage(err, 'Failed to upload student photo.'));
     } finally {
@@ -221,6 +224,20 @@ export default function RegistrarIdCards() {
     },
   });
 
+  // Mutation: Bulk Issue All Eligible ID Cards in the cohort
+  const bulkIssueMutation = useMutation({
+    mutationFn: async ({ programId, batchId }) => {
+      return (await api.post(`${REGISTRAR}/id-cards/bulk-issue`, { programId, batchId })).data;
+    },
+    onSuccess: (data) => {
+      toast.success(data.message || 'All eligible student ID cards issued in bulk!');
+      queryClient.invalidateQueries({ queryKey: ['registrar', 'id-cards-cohort-summary'] });
+    },
+    onError: (err) => {
+      toast.error(errorMessage(err, 'Failed to bulk issue student ID cards.'));
+    },
+  });
+
   // Handle Single Student Preview (Modal iframe)
   const handlePreviewStudent = async (student) => {
     setPreviewingId(student.id);
@@ -240,6 +257,29 @@ export default function RegistrarIdCards() {
       toast.error(errorMessage(err, 'Could not generate ID card preview.'));
     } finally {
       setPreviewingId(null);
+    }
+  };
+
+  // Handle Single Student Direct Print
+  const handlePrintStudent = async (student) => {
+    setPrintingId(student.id);
+    try {
+      if (student.latestCard?.id) {
+        const res = await api.post(
+          `${REGISTRAR}/id-cards/${student.latestCard.id}/print`,
+          {},
+          { responseType: 'blob' },
+        );
+        printBlob(res.data);
+        toast.success(`Printing ID card for ${student.fullName}...`);
+        queryClient.invalidateQueries({ queryKey: ['registrar', 'id-cards-cohort-summary'] });
+      } else {
+        toast.error('Student ID card must be issued before printing.');
+      }
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not print ID card.'));
+    } finally {
+      setPrintingId(null);
     }
   };
 
@@ -283,6 +323,27 @@ export default function RegistrarIdCards() {
       toast.error(errorMessage(err, 'Could not generate bulk landscape ID cards PDF.'));
     } finally {
       setBulkDownloading(false);
+    }
+  };
+
+  // Handle Bulk Print of All Students' IDs in Landscape View
+  const handleBulkPrint = async () => {
+    if (!openedCohort) return;
+    setBulkPrinting(true);
+    try {
+      const res = await api.get(`${REGISTRAR}/id-cards/bulk-pdf`, {
+        params: {
+          programId: openedCohort.programId,
+          batchId: openedCohort.batchId,
+        },
+        responseType: 'blob',
+      });
+      printBlob(res.data);
+      toast.success('Sending bulk ID cards (A4 Landscape) to printer...');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not generate bulk landscape ID cards for print.'));
+    } finally {
+      setBulkPrinting(false);
     }
   };
 
@@ -336,10 +397,15 @@ export default function RegistrarIdCards() {
         <div>
           {row.issueCount > 0 ? (
             <Badge tone="success">
-              Issue #{row.issueCount} of 4
+              Issue #{row.issueCount} of 2
             </Badge>
           ) : (
             <Badge tone="neutral">Not Issued</Badge>
+          )}
+          {row.latestCard && (
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Prints: {row.latestCard.printCount || 0}/2
+            </p>
           )}
           {row.latestCard?.issuedAt && (
             <p className="text-[10px] text-slate-400 mt-0.5">
@@ -375,62 +441,86 @@ export default function RegistrarIdCards() {
       label: 'Actions',
       className: 'text-right',
       mobileFull: true,
-      render: (row) => (
-        <div className="flex flex-wrap items-center justify-end gap-1.5">
-          {!row.hasPhoto ? (
+      render: (row) => {
+        const issueLimitReached = row.issueCount >= 2;
+        const printLimitReached = (row.latestCard?.printCount || 0) >= 2;
+
+        return (
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            {!row.hasPhoto ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => handleTriggerUpload(row)}
+                loading={uploadLoading && uploadingStudent?.id === row.id}
+                className="gap-1 text-xs text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 font-semibold"
+              >
+                <Camera className="h-3.5 w-3.5 text-amber-700" /> Add Photo
+              </Button>
+            ) : null}
+
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => handlePreviewStudent(row)}
+              loading={previewingId === row.id}
+              disabled={!row.hasPhoto}
+              title={row.hasPhoto ? 'Preview ID Card' : 'Photo required for preview'}
+              className="text-xs text-indigo-700 hover:bg-indigo-50"
+            >
+              <Eye className="h-3.5 w-3.5" /> Preview
+            </Button>
+
+            {issueLimitReached ? (
+              <span className="rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800 border border-amber-200">
+                Limit reached (2/2)
+              </span>
+            ) : (
+              <Button
+                size="sm"
+                variant={row.issueCount > 0 ? 'secondary' : 'primary'}
+                onClick={() => issueMutation.mutate({ studentId: row.id })}
+                loading={issueMutation.isPending && issueMutation.variables?.studentId === row.id}
+                disabled={!row.hasPhoto}
+                className="gap-1 text-xs font-bold"
+              >
+                <CreditCard className="h-3.5 w-3.5" />
+                {row.issueCount > 0 ? `Reissue (${row.issueCount + 1}/2)` : 'Issue ID'}
+              </Button>
+            )}
+
+            {row.latestCard?.id && (
+              printLimitReached ? (
+                <span className="rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800 border border-amber-200">
+                  Print reached (2/2)
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => handlePrintStudent(row)}
+                  loading={printingId === row.id}
+                  className="gap-1 text-xs text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 font-semibold"
+                  title={`Print ID Card (${row.latestCard?.printCount || 0}/2 used)`}
+                >
+                  <Printer className="h-3.5 w-3.5 text-teal-600" /> Print ID ({row.latestCard?.printCount || 0}/2)
+                </Button>
+              )
+            )}
+
             <Button
               size="sm"
               variant="secondary"
-              onClick={() => handleTriggerUpload(row)}
-              loading={uploadLoading && uploadingStudent?.id === row.id}
-              className="gap-1 text-xs text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 font-semibold"
-            >
-              <Camera className="h-3.5 w-3.5 text-amber-700" /> Add Photo
-            </Button>
-          ) : null}
-
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => handlePreviewStudent(row)}
-            loading={previewingId === row.id}
-            disabled={!row.hasPhoto}
-            title={row.hasPhoto ? 'Preview ID Card' : 'Photo required for preview'}
-            className="text-xs text-indigo-700 hover:bg-indigo-50"
-          >
-            <Eye className="h-3.5 w-3.5" /> Preview
-          </Button>
-
-          {row.issueCount >= 4 ? (
-            <span className="rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800 border border-amber-200">
-              Limit (4/4)
-            </span>
-          ) : (
-            <Button
-              size="sm"
-              variant={row.issueCount > 0 ? 'secondary' : 'primary'}
-              onClick={() => issueMutation.mutate({ studentId: row.id })}
-              loading={issueMutation.isPending && issueMutation.variables?.studentId === row.id}
+              onClick={() => handleDownloadStudent(row)}
+              loading={downloadingId === row.id}
               disabled={!row.hasPhoto}
-              className="gap-1 text-xs font-bold"
+              className="gap-1 text-xs"
             >
-              <CreditCard className="h-3.5 w-3.5" />
-              {row.issueCount > 0 ? `Reissue (${row.issueCount + 1}/4)` : 'Issue ID'}
+              <Download className="h-3.5 w-3.5 text-slate-600" /> PDF
             </Button>
-          )}
-
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => handleDownloadStudent(row)}
-            loading={downloadingId === row.id}
-            disabled={!row.hasPhoto}
-            className="gap-1 text-xs"
-          >
-            <Download className="h-3.5 w-3.5 text-slate-600" /> PDF
-          </Button>
-        </div>
-      ),
+          </div>
+        );
+      },
     },
   ];
 
@@ -449,7 +539,16 @@ export default function RegistrarIdCards() {
     {
       key: 'issueNumber',
       label: 'Issuance Counter',
-      render: (row) => <Badge tone="brand">Issue #{row.issueNumber} of 4</Badge>,
+      render: (row) => <Badge tone="brand">Issue #{row.issueNumber} of 2</Badge>,
+    },
+    {
+      key: 'printCount',
+      label: 'Prints Counter',
+      render: (row) => (
+        <span className="text-xs font-mono font-semibold text-slate-700">
+          {row.printCount || 0} / 2 prints
+        </span>
+      ),
     },
     {
       key: 'promotions',
@@ -692,7 +791,28 @@ export default function RegistrarIdCards() {
             </div>
           )}
 
-          {allHavePhotos && totalStudents > 0 ? (
+          {cohortData?.bulkLimitReached ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50/90 p-4 text-xs font-semibold text-amber-900 shadow-sm">
+              <div className="flex items-center gap-3">
+                <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
+                <div>
+                  <h4 className="text-sm font-bold text-amber-950">Bulk Limit Reached (2/2)</h4>
+                  <p className="text-amber-800 mt-0.5">
+                    This programme cohort has reached the institutional limit of 2 bulk issuance cycles and bulk printing. Bulk issue and mass print actions are now closed.
+                  </p>
+                </div>
+              </div>
+              <Button
+                onClick={handleBulkDownload}
+                loading={bulkDownloading}
+                variant="secondary"
+                size="sm"
+                className="gap-1.5 text-xs font-bold"
+              >
+                <Download className="h-4 w-4" /> Download PDF Archive
+              </Button>
+            </div>
+          ) : (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-teal-300 bg-gradient-to-r from-teal-50 to-blue-50 p-4 text-xs text-teal-950 shadow-sm">
               <div className="flex items-center gap-3">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-white shadow-sm">
@@ -700,28 +820,60 @@ export default function RegistrarIdCards() {
                 </span>
                 <div>
                   <h4 className="text-sm font-bold text-slate-900">
-                    Bulk Print Ready: All Students Have Verified Photos!
+                    Bulk ID Cards Center (Cycle {cohortData?.bulkCount || 0}/2)
                   </h4>
                   <p className="text-slate-600 mt-0.5">
-                    Generate all {totalStudents} students' 2-sided CR80 ID cards onto A4 Landscape sheets ready for immediate mass printing.
+                    Bulk issue official ID records and generate 2-sided CR80 ID cards onto A4 Landscape sheets ready for immediate mass printing.
                   </p>
                 </div>
               </div>
 
-              <Button
-                onClick={handleBulkDownload}
-                loading={bulkDownloading}
-                className="gap-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-sm"
-              >
-                <Download className="h-4 w-4" /> Generate All Student IDs in 1 PDF (Landscape View)
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {cohortData?.canBulkIssue && (
+                  <Button
+                    onClick={() =>
+                      bulkIssueMutation.mutate({
+                        programId: openedCohort.programId,
+                        batchId: openedCohort.batchId,
+                      })
+                    }
+                    loading={bulkIssueMutation.isPending}
+                    className="gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs shadow-sm"
+                  >
+                    <CreditCard className="h-4 w-4" /> Bulk Issue All IDs ({cohortData?.bulkCount || 0}/2)
+                  </Button>
+                )}
+
+                <Button
+                  onClick={handleBulkPrint}
+                  loading={bulkPrinting}
+                  disabled={!allHavePhotos}
+                  className="gap-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-sm"
+                  title={allHavePhotos ? 'Print all ID cards in landscape' : 'All students must have uploaded photos'}
+                >
+                  <Printer className="h-4 w-4" /> Print All (A4 Landscape)
+                </Button>
+
+                <Button
+                  onClick={handleBulkDownload}
+                  loading={bulkDownloading}
+                  disabled={!allHavePhotos}
+                  variant="secondary"
+                  className="gap-2 text-xs font-bold"
+                  title={allHavePhotos ? 'Download all ID cards in landscape' : 'All students must have uploaded photos'}
+                >
+                  <Download className="h-4 w-4" /> Download All (Landscape PDF)
+                </Button>
+              </div>
             </div>
-          ) : (
+          )}
+
+          {!allHavePhotos && totalStudents > 0 && (
             <div className="flex items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50/70 p-4 text-xs text-amber-900 shadow-sm">
               <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
               <span>
                 <strong>{photoCount} of {totalStudents}</strong> students have uploaded photos.{' '}
-                {totalStudents - photoCount} student(s) still require a portrait photo before bulk landscape generation is unlocked.
+                {totalStudents - photoCount} student(s) still require a portrait photo before mass printing is unlocked.
               </span>
             </div>
           )}
@@ -752,9 +904,9 @@ export default function RegistrarIdCards() {
               </p>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Max Replacements</p>
-              <p className="text-2xl font-black text-indigo-700 mt-1">4 Max</p>
-              <p className="text-[11px] text-slate-500">Institutional limit per student</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Max Replacements / Prints</p>
+              <p className="text-2xl font-black text-indigo-700 mt-1">2 Max</p>
+              <p className="text-[11px] text-slate-500">Institutional limit per student & cohort</p>
             </div>
           </div>
 
@@ -835,16 +987,30 @@ export default function RegistrarIdCards() {
           size="xl"
           footer={
             <div className="flex items-center justify-between w-full">
-              <Button
-                variant="primary"
-                onClick={() => {
-                  downloadBlob(previewBlob, 'Student_ID_Card.pdf');
-                  toast.success('ID Card PDF downloaded.');
-                }}
-                className="gap-1.5 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs shadow-sm"
-              >
-                <Download className="h-4 w-4" /> Download ID Card PDF
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    downloadBlob(previewBlob, 'Student_ID_Card.pdf');
+                    toast.success('ID Card PDF downloaded.');
+                  }}
+                  className="gap-1.5 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs shadow-sm"
+                >
+                  <Download className="h-4 w-4" /> Download ID Card PDF
+                </Button>
+                {previewBlob && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      printBlob(previewBlob);
+                      toast.success('Sending ID Card to printer...');
+                    }}
+                    className="gap-1.5 text-xs font-bold"
+                  >
+                    <Printer className="h-4 w-4" /> Print ID Card
+                  </Button>
+                )}
+              </div>
               <Button variant="secondary" onClick={closePreview}>
                 Close Preview
               </Button>

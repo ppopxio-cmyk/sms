@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Download, Eye, FileText, Plus, ShieldCheck } from 'lucide-react';
+import { Download, Eye, FileText, Plus, Printer, ShieldCheck } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import {
   REGISTRAR,
   displayDateTime,
   downloadFile,
+  printFile,
   fileErrorMessage,
   humanStatus,
   toneForStatus,
@@ -15,7 +16,7 @@ import { useDebounced } from '../../lib/useDebounced';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
 import RegistrarTable from '../../components/registrar/RegistrarTable';
 import StudentPicker from '../../components/registrar/StudentPicker';
-import { TextAreaField, SelectField } from '../../components/registrar/Fields';
+import { TextAreaField } from '../../components/registrar/Fields';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
@@ -27,54 +28,20 @@ export default function RegistrarTranscripts() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const debounced = useDebounced(search, 300);
-  const [program, setProgram] = useState('');
-  const [batch, setBatch] = useState('');
-  const [status, setStatus] = useState('all');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [issuing, setIssuing] = useState(false);
   const [viewing, setViewing] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
-
-  const options = useQuery({
-    queryKey: ['registrar', 'students', 'options'],
-    queryFn: async () => (await api.get(`${REGISTRAR}/students/options`)).data,
-    staleTime: 5 * 60_000,
-  });
-
-  const structure = useQuery({
-    queryKey: ['registrar', 'structure'],
-    queryFn: async () => (await api.get(`${REGISTRAR}/academic-structure`)).data,
-    staleTime: 5 * 60_000,
-  });
-
-  const availableBatches = useMemo(() => {
-    // Include all batches across previous and active years
-    const optBatches = options.data?.batches || [];
-    const structBatches = structure.data?.batches || [];
-    const combined = [...optBatches, ...structBatches];
-    const filtered = !program
-      ? combined
-      : combined.filter((b) => String(b.program?.id || b.program) === String(program));
-    const seen = new Set();
-    return filtered.filter((row) => {
-      const key = `${row.code}::${row.category || 'regular'}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }, [options.data?.batches, structure.data?.batches, program]);
+  const [printingId, setPrintingId] = useState(null);
 
   const params = useMemo(
     () => ({
       page,
       limit,
       ...(debounced.trim() ? { search: debounced.trim() } : {}),
-      ...(program ? { program } : {}),
-      ...(batch ? { batch } : {}),
-      ...(status !== 'all' ? { status } : {}),
     }),
-    [page, limit, debounced, program, batch, status],
+    [page, limit, debounced],
   );
 
   const query = useQuery({
@@ -100,6 +67,23 @@ export default function RegistrarTranscripts() {
     }
   };
 
+  const handlePrintTranscript = async (row) => {
+    if ((row.printCount || 0) >= 2) {
+      toast.error('This transcript has reached its printing limit of 2 times.');
+      return;
+    }
+    setPrintingId(row.id);
+    try {
+      await printFile(`${REGISTRAR}/transcripts/${row.id}/print`, { method: 'post' });
+      toast.success('Print dialog opened. Print counter updated.');
+      invalidate();
+    } catch (err) {
+      toast.error(await fileErrorMessage(err, 'The transcript PDF could not be printed.'));
+    } finally {
+      setPrintingId(null);
+    }
+  };
+
   const columns = [
     {
       key: 'student',
@@ -116,7 +100,18 @@ export default function RegistrarTranscripts() {
       label: 'Issue #',
       render: (row) => (
         <span className="inline-flex items-center rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
-          Issue {row.issueNumber || 1} of 3
+          Issue {row.issueNumber || 1} of 2
+        </span>
+      ),
+    },
+    {
+      key: 'prints',
+      label: 'Print Counter',
+      render: (row) => (
+        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${
+          (row.printCount || 0) >= 2 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'
+        }`}>
+          Prints: {row.printCount || 0} / 2
         </span>
       ),
     },
@@ -148,6 +143,21 @@ export default function RegistrarTranscripts() {
           >
             <Download className="h-3.5 w-3.5" /> PDF
           </Button>
+          {(row.printCount || 0) >= 2 ? (
+            <span className="rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800 border border-amber-200">
+              Limit reached (2/2)
+            </span>
+          ) : (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => handlePrintTranscript(row)}
+              loading={printingId === row.id}
+              className="gap-1 text-xs text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200"
+            >
+              <Printer className="h-3.5 w-3.5" /> Print ({row.printCount || 0}/2)
+            </Button>
+          )}
         </div>
       ),
     },
@@ -165,70 +175,23 @@ export default function RegistrarTranscripts() {
         }
       />
 
+      {/* Clean Search Bar: Only search by student name or ID */}
       <Card className="p-4 sm:p-5">
-        <div className="grid gap-3 sm:grid-cols-[1fr_200px_200px_160px] sm:items-end">
-          <SearchInput
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setPage(1);
-            }}
-            placeholder="Search student name or ID"
-            loading={query.isFetching}
-          />
-          <SelectField
-            label="Programme"
-            value={program}
-            onChange={(event) => {
-              setProgram(event.target.value);
-              setBatch('');
-              setPage(1);
-            }}
-          >
-            <option value="">All programmes</option>
-            {(options.data?.programs || []).map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.code} · {row.name}
-              </option>
-            ))}
-          </SelectField>
-          <SelectField
-            label="Batch"
-            value={batch}
-            onChange={(event) => {
-              setBatch(event.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="">All batches</option>
-            {availableBatches.map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.code} · {row.name}
-              </option>
-            ))}
-          </SelectField>
-          <SelectField
-            label="Status"
-            value={status}
-            onChange={(event) => {
-              setStatus(event.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="all">All statuses</option>
-            {['issued', 'revoked'].map((value) => (
-              <option key={value} value={value}>
-                {humanStatus(value)}
-              </option>
-            ))}
-          </SelectField>
-        </div>
+        <SearchInput
+          value={search}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            setPage(1);
+          }}
+          placeholder="Search by student name or student ID..."
+          loading={query.isFetching}
+        />
       </Card>
 
       <Card>
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
           <div>
-            <h2 className="text-sm font-semibold text-slate-900">Issued transcripts</h2>
+            <h2 className="text-sm font-semibold text-slate-900">Transcript register</h2>
             <p className="mt-0.5 text-xs text-slate-500">
               {pagination.total ?? 0} document{pagination.total === 1 ? '' : 's'}
             </p>
@@ -242,9 +205,9 @@ export default function RegistrarTranscripts() {
           error={query.error ? query.error?.response?.data?.message || 'Transcripts could not be loaded.' : null}
           onRetry={query.refetch}
           rowKey={(row) => row.id}
-          noResults={Boolean(debounced.trim() || status !== 'all' || program || batch)}
+          noResults={Boolean(debounced.trim())}
           emptyTitle="No transcripts found"
-          emptyMessage="Issue a transcript for a student with published course results."
+          emptyMessage="Issue a transcript for an enrolled or graduated student with published course results."
         />
         <div className="px-5 pb-4">
           <Pagination
@@ -265,7 +228,12 @@ export default function RegistrarTranscripts() {
 
       {/* Transcript Detail / Preview Modal */}
       {viewing && (
-        <TranscriptDetailModal transcript={viewing} onClose={() => setViewing(null)} onDownload={downloadPdf} />
+        <TranscriptDetailModal
+          transcript={viewing}
+          onClose={() => setViewing(null)}
+          onDownload={downloadPdf}
+          onPrint={handlePrintTranscript}
+        />
       )}
     </div>
   );
@@ -329,7 +297,7 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
     mutationFn: async () => {
       if (!student) throw new Error('Choose a student.');
       if (countQuery.data && !countQuery.data.canIssue) {
-        throw new Error('This student has already reached the maximum issuance limit of 3 transcripts.');
+        throw new Error('This student has already reached the maximum issuance limit of 2 transcripts.');
       }
       if (!selectedLevels.length) throw new Error('Select at least one Year/Level to include in the transcript.');
       return (
@@ -353,13 +321,13 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
   });
 
   const studentHasResults = Boolean(gpaQuery.data?.courses?.length);
-  const canIssueByCount = countQuery.data ? countQuery.data.canIssue : true;
+  const canIssueByCount = countQuery.data ? countQuery.data.count < 2 : true;
 
   return (
     <Modal
       open={open}
       title="Issue official transcript"
-      subtitle="Select the years or levels to include, or issue for all completed stages. Maximum 3 issuances per student."
+      subtitle="Select the years or levels to include, or issue for all completed stages. Maximum 2 issuances per student."
       onClose={issue.isPending ? undefined : onClose}
       dismissible={!issue.isPending}
       footer={
@@ -381,25 +349,27 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
         {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{error}</p> : null}
 
         <StudentPicker
+          status="all"
           value={student}
           onChange={(val) => {
             setStudent(val);
             setError('');
           }}
+          hint="Search both graduated and active students by name or student ID"
         />
 
         {countQuery.data && (
           <div
             className={`rounded-xl p-3 text-xs font-semibold flex items-center justify-between ${
-              countQuery.data.canIssue
+              countQuery.data.count < 2
                 ? 'bg-blue-50 text-blue-800 border border-blue-200'
                 : 'bg-rose-50 text-rose-800 border border-rose-200'
             }`}
           >
             <span>
-              Transcript Issuance Counter: <strong>{countQuery.data.count} of 3</strong>
+              Transcript Issuance Counter: <strong>{countQuery.data.count} of 2</strong>
             </span>
-            <span>{countQuery.data.canIssue ? `${countQuery.data.remaining} remaining` : 'Limit reached (Max 3)'}</span>
+            <span>{countQuery.data.count < 2 ? `${Math.max(0, 2 - countQuery.data.count)} remaining` : 'Limit reached (Max 2)'}</span>
           </div>
         )}
 
@@ -497,8 +467,9 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
   );
 }
 
-function TranscriptDetailModal({ transcript, onClose, onDownload }) {
+function TranscriptDetailModal({ transcript, onClose, onDownload, onPrint }) {
   const [downloading, setDownloading] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   const handlePdf = async () => {
     setDownloading(true);
@@ -506,6 +477,15 @@ function TranscriptDetailModal({ transcript, onClose, onDownload }) {
       await onDownload(transcript);
     } finally {
       setDownloading(false);
+    }
+  };
+
+  const handlePrint = async () => {
+    setPrinting(true);
+    try {
+      await onPrint(transcript);
+    } finally {
+      setPrinting(false);
     }
   };
 
@@ -523,8 +503,18 @@ function TranscriptDetailModal({ transcript, onClose, onDownload }) {
           <div className="flex items-center gap-1.5 text-xs text-slate-500">
             <ShieldCheck className="h-4 w-4 text-emerald-600" />
             <span>ID: <code className="font-mono text-slate-700">{transcript.verificationId}</code></span>
+            <span className="ml-2 font-semibold">Prints: {transcript.printCount || 0}/2</span>
           </div>
           <div className="flex items-center gap-2">
+            {(transcript.printCount || 0) >= 2 ? (
+              <span className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs font-bold text-amber-800 border border-amber-200">
+                Print Limit Reached (2/2)
+              </span>
+            ) : (
+              <Button size="sm" variant="secondary" onClick={handlePrint} loading={printing} className="gap-1 text-indigo-700">
+                <Printer className="h-3.5 w-3.5" /> Print Transcript
+              </Button>
+            )}
             <Button size="sm" variant="primary" onClick={handlePdf} loading={downloading}>
               <Download className="h-3.5 w-3.5" /> Download PDF
             </Button>

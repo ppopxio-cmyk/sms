@@ -15,7 +15,8 @@ const studentIdCardSchema = new Schema(
       batchCode: { type: String, default: '' },
       admissionYear: { type: String, default: '2019' },
     },
-    issueNumber: { type: Number, required: true, min: 1, max: 4 }, // Maximum 4 times limit
+    issueNumber: { type: Number, required: true, min: 1, max: 2 }, // Maximum 2 times limit
+    printCount: { type: Number, default: 0, min: 0 },
     promotedStages: [{ type: Number }], // e.g. [1, 2] meaning Year 1 and Year 2 are sealed as Promoted
     currentLevel: { type: Number, default: 1 },
     qualificationType: { type: String, enum: ['degree', 'diploma', 'short-term'], default: 'degree' },
