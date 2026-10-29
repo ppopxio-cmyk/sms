@@ -5,7 +5,7 @@ export const HOME = {
   ADMIN: '/admin',
   REGISTRAR: '/registrar/dashboard',
   TEACHER: '/teacher/dashboard',
-  ACCOUNTANT: '/accountant',
+  ACCOUNTANT: '/accountant/dashboard',
 };
 
 export const homeFor = (role) => HOME[role] ?? '/me';

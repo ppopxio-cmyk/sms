@@ -81,6 +81,31 @@ const systemSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const financeSchema = new mongoose.Schema(
+  {
+    defaultBank: {
+      bank: { type: String, trim: true, default: 'Commercial Bank of Ethiopia' },
+      accountNumber: { type: String, trim: true, default: '1000123456789' },
+      holderName: { type: String, trim: true, default: 'HARAMAYA HEALTH SCIENCE COLLEGE' },
+    },
+    graceDays: { type: Number, min: 0, max: 90, default: 0 },
+    reminders: {
+      daysBefore: { type: [Number], default: [3, 1, 0] },
+      notifyTeachersOnOverdue: { type: Boolean, default: true },
+    },
+    enforcement: {
+      blockAssessments: { type: Boolean, default: true },
+      blockTeacherResults: { type: Boolean, default: true },
+      blockDocuments: { type: Boolean, default: true },
+      blockGraduation: { type: Boolean, default: true },
+      blockRegistration: { type: Boolean, default: false },
+      blockProgression: { type: Boolean, default: false },
+      blockPublishing: { type: Boolean, default: false },
+    },
+  },
+  { _id: false },
+);
+
 const settingSchema = new mongoose.Schema(
   {
     key: { type: String, unique: true, default: 'global', immutable: true },
@@ -90,6 +115,7 @@ const settingSchema = new mongoose.Schema(
     notifications: { type: notificationSchema, default: () => ({}) },
     localization: { type: localizationSchema, default: () => ({}) },
     system: { type: systemSchema, default: () => ({}) },
+    finance: { type: financeSchema, default: () => ({}) },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     maintenanceUpdatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     maintenanceChangedAt: { type: Date, default: null },

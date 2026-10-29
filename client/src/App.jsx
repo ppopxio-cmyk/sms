@@ -75,11 +75,21 @@ const RegistrarReports = lazy(() => import('./pages/registrar/RegistrarReports.j
 const RegistrarAnnouncements = lazy(() => import('./pages/registrar/RegistrarAnnouncements.jsx'));
 const RegistrarNotifications = lazy(() => import('./pages/registrar/RegistrarNotifications.jsx'));
 const PublicVerification = lazy(() => import('./pages/PublicVerification.jsx'));
+const MonthlyPaymentPortal = lazy(() => import('./pages/portal/MonthlyPaymentPortal.jsx'));
+const MonthlyPaymentDone = lazy(() => import('./pages/portal/MonthlyPaymentDone.jsx'));
+const FinanceDashboard = lazy(() => import('./pages/finance/FinanceDashboard.jsx'));
+const FinancePaymentCycles = lazy(() => import('./pages/finance/FinancePaymentCycles.jsx'));
+const FinanceCollections = lazy(() => import('./pages/finance/FinanceCollections.jsx'));
+const FinanceLedger = lazy(() => import('./pages/finance/FinanceLedger.jsx'));
+const FinanceReviewQueue = lazy(() => import('./pages/finance/FinanceReviewQueue.jsx'));
+const FinanceOverdueHolds = lazy(() => import('./pages/finance/FinanceOverdueHolds.jsx'));
+const FinanceWaivers = lazy(() => import('./pages/finance/FinanceWaivers.jsx'));
+const StudentFinanceProfile = lazy(() => import('./pages/finance/StudentFinanceProfile.jsx'));
+const FinanceReports = lazy(() => import('./pages/finance/FinanceReports.jsx'));
+const FinanceSettings = lazy(() => import('./pages/finance/FinanceSettings.jsx'));
 const NotFound = lazy(() => import('./pages/NotFound.jsx'));
 
-// The accountant's generic dashboard still lives under its own prefix. The Registrar
-// workspace has explicit routes below.
-const OTHER_ROLES = ['ACCOUNTANT'];
+const OTHER_ROLES = [];
 
 function Home() {
   const status = useAuth((s) => s.status);
@@ -165,6 +175,8 @@ export default function App() {
         <Route path="/assessments/student-answers" element={<PublicAssessment />} />
         <Route path="/assessments/:hash" element={<PublicAssessment />} />
         <Route path="/assesmets" element={<PublicAssessment />} />
+        <Route path="/monthly-payments/:hash" element={<MonthlyPaymentPortal />} />
+        <Route path="/monthly-payments/done/:doneHash" element={<MonthlyPaymentDone />} />
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>
@@ -248,6 +260,24 @@ export default function App() {
               <Route path="/registrar/my-devices" element={<Sessions />} />
               <Route path="/registrar/account" element={<Navigate to="/registrar/my-account" replace />} />
               <Route path="/registrar/devices" element={<Navigate to="/registrar/my-devices" replace />} />
+            </Route>
+
+            <Route element={<RequireRole roles={['ACCOUNTANT', 'ADMIN']} />}>
+              <Route path="/accountant" element={<Navigate to="/accountant/dashboard" replace />} />
+              <Route path="/accountant/dashboard" element={<FinanceDashboard />} />
+              <Route path="/accountant/cycles" element={<FinancePaymentCycles />} />
+              <Route path="/accountant/collections" element={<FinanceCollections />} />
+              <Route path="/accountant/ledger" element={<FinanceLedger />} />
+              <Route path="/accountant/review-queue" element={<FinanceReviewQueue />} />
+              <Route path="/accountant/overdue" element={<FinanceOverdueHolds />} />
+              <Route path="/accountant/waivers" element={<FinanceWaivers />} />
+              <Route path="/accountant/students/:id" element={<StudentFinanceProfile />} />
+              <Route path="/accountant/reports" element={<FinanceReports />} />
+              <Route path="/accountant/settings" element={<FinanceSettings />} />
+              <Route path="/accountant/my-account" element={<Me />} />
+              <Route path="/accountant/my-devices" element={<Sessions />} />
+              <Route path="/accountant/account" element={<Navigate to="/accountant/my-account" replace />} />
+              <Route path="/accountant/devices" element={<Navigate to="/accountant/my-devices" replace />} />
             </Route>
 
             {OTHER_ROLES.map((role) => (

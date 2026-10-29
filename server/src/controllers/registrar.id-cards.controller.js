@@ -9,6 +9,7 @@ import { signedImageUrl } from '../services/imagekit.service.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { audit } from '../services/audit.service.js';
+import { assertNoFinancialHold, checkStudentFinancialHold } from '../services/finance.service.js';
 
 function photoView(photo) {
   if (!photo) return null;
@@ -68,11 +69,14 @@ export const getStudentCardEligibility = asyncHandler(async (req, res) => {
 
   const existingCount = await StudentIdCard.countDocuments({ student: student._id });
   const hasPhoto = Boolean(student.photo?.url || student.photo?.filePath);
+  const hold = await checkStudentFinancialHold(student._id);
 
   res.json({
     student,
     issueCount: existingCount,
-    canIssue: existingCount < 2 && hasPhoto,
+    canIssue: !hold.hasHold && existingCount < 2 && hasPhoto,
+    financialHold: hold.hasHold,
+    financialHoldMessage: hold.hasHold ? 'Student has active financial hold (unpaid monthly fees).' : null,
     maxIssues: 2,
     remainingIssues: Math.max(0, 2 - existingCount),
     hasPhoto,
@@ -82,6 +86,7 @@ export const getStudentCardEligibility = asyncHandler(async (req, res) => {
 export const issueIdCard = asyncHandler(async (req, res) => {
   const { studentId, notes } = req.body;
   if (!studentId) throw new AppError(400, 'STUDENT_REQUIRED', 'Student ID is required.');
+  await assertNoFinancialHold(studentId, 'issuing a student ID card');
 
   const student = await Student.findById(studentId)
     .populate('program')

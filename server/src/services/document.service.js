@@ -8,6 +8,7 @@ import { Certificate, CertificateTemplate, Transcript } from '../models/Document
 import { Counter } from '../models/RegistrarSupport.js';
 import { getGradingPolicy, academicSnapshot, cgpaForStudent } from './grading.service.js';
 import { evaluateStudent } from './eligibility.service.js';
+import { assertNoFinancialHold } from './finance.service.js';
 import { AppError } from '../utils/AppError.js';
 import { env } from '../config/env.js';
 import { signedImageUrl } from './imagekit.service.js';
@@ -244,6 +245,7 @@ async function renderIssuedCertificate(certificate, template, prepared = null) {
 }
 
 export async function issueCertificate({ studentId, userId, idempotencyKey }) {
+  await assertNoFinancialHold(studentId, 'issuing an official certificate');
   const student = await Student.findById(studentId).lean();
   if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student record was not found.');
 
@@ -376,6 +378,7 @@ export async function certificatePdf(certificateId) {
 }
 
 export async function issueTranscript({ studentId, userId, purpose, selectedLevels }) {
+  await assertNoFinancialHold(studentId, 'issuing an official transcript');
   const student = await Student.findById(studentId)
     .populate('program', 'code name qualificationType durationYears')
     .populate('department', 'code name')

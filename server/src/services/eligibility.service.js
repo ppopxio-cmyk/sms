@@ -6,6 +6,7 @@ import { Certificate } from '../models/Documents.js';
 import { Result } from '../models/Records.js';
 import { getGradingPolicy, calculateGpa, publishedResultsForStudent, round } from './grading.service.js';
 import { ownFilter } from './registrar.helpers.js';
+import { checkStudentFinancialHold } from './finance.service.js';
 
 export async function activePlan(programId, academicYearId) {
   if (!programId || !academicYearId) return null;
@@ -114,6 +115,11 @@ export async function evaluateStudent(studentId, { evaluatedBy = null } = {}) {
   }
   if (student.program?.graduationPolicy?.requiresPhoto && student.photo?.status !== 'active') {
     reasons.push('The programme requires a verified student photo, but none is on file.');
+  }
+
+  const hold = await checkStudentFinancialHold(studentId);
+  if (hold.hasHold) {
+    reasons.push('Unpaid fees');
   }
 
   const activeCertificate = await Certificate.findOne({ student: studentId, status: 'issued' }).select('_id').lean();

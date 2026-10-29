@@ -57,4 +57,11 @@ export const PERMISSIONS = {
   'attendance:mark': ['TEACHER'],
   'assessments:enter': ['TEACHER'],
   'finance:manage': ['ACCOUNTANT'],
+  'finance:view': ['ADMIN', 'ACCOUNTANT'],
+  'finance:cycles': ['ACCOUNTANT'],
+  'finance:payments': ['ACCOUNTANT'],
+  'finance:review': ['ACCOUNTANT'],
+  'finance:waivers': ['ACCOUNTANT'],
+  'finance:reports': ['ADMIN', 'ACCOUNTANT'],
+  'finance:settings': ['ACCOUNTANT'],
 };

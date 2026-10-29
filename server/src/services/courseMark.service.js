@@ -7,6 +7,7 @@ import { Program } from '../models/AcademicStructure.js';
 import { buildExport } from './export.service.js';
 import { notifyRole } from './notification.service.js';
 import { ownFilter } from './registrar.helpers.js';
+import { StudentCharge } from '../models/Finance.js';
 import {
   ASSIGNMENT_POPULATE,
   activeEnrollments,
@@ -296,12 +297,22 @@ export async function courseMarksDetail(teacherId, assignmentId) {
     activeEnrollments(assignmentId),
     Result.find({ offering: assignmentId }).lean(),
   ]);
+
+  const studentIds = enrollments.map((row) => row.student?._id).filter(Boolean);
+  const overdueCharges = await StudentCharge.find({
+    student: { $in: studentIds },
+    status: 'unpaid',
+    dueAt: { $lt: new Date() },
+  }).select('student').lean();
+  const holdStudentIds = new Set(overdueCharges.map((c) => String(c.student)));
+
   const byStudent = new Map(results.map((row) => [String(row.student), row]));
   const rows = enrollments
     .filter((row) => row.student)
     .map((row) => {
       const result = byStudent.get(String(row.student._id));
       const scores = resultScores(policy, result);
+      const isHold = holdStudentIds.has(String(row.student._id));
       return {
         ...enrollmentDto(row),
         scores,
@@ -311,6 +322,8 @@ export async function courseMarksDetail(teacherId, assignmentId) {
         passed: result?.passed ?? false,
         calculated: result?.totalMark !== null && result?.totalMark !== undefined,
         status: result?.status ?? 'draft',
+        hasFinancialHold: isHold,
+        financialHoldMessage: isHold ? 'Financial hold: Unpaid monthly fees' : null,
       };
     });
   return {
@@ -442,7 +455,17 @@ async function prepareSubmission(teacherId, assignmentId) {
   if (incomplete.length) {
     throw new AppError(409, 'MARKS_INCOMPLETE', 'Calculate every student’s total before submitting.');
   }
-  return { assignment, results, grading };
+
+  // Block result submission for students with active financial holds
+  const overdueCharges = await StudentCharge.find({
+    student: { $in: studentIds },
+    status: 'unpaid',
+    dueAt: { $lt: new Date() },
+  }).select('student').lean();
+  const holdSet = new Set(overdueCharges.map((c) => String(c.student)));
+  const resultsEligible = results.filter((row) => !holdSet.has(String(row.student)));
+
+  return { assignment, results: resultsEligible, grading, heldCount: holdSet.size };
 }
 
 export async function submitCourseMarks(teacherId, offeringIds) {

@@ -36,29 +36,31 @@ export function formatEthiopian(input = new Date(), { time = false } = {}) {
   return `${date}, ${clock}`;
 }
 
-// A date field starts from a stored Gregorian key and shows the Ethiopian calendar. The
-// reverse search is deliberately small: it compares real formatted dates, so leap years
-// and Pagume are handled by the same conversion used everywhere else on the screen.
-export function fromEthiopian({ year, month, day } = {}) {
-  const targetYear = Number(year);
-  const targetMonth = Number(month);
-  const targetDay = Number(day);
-  if (!targetYear || !targetMonth || !targetDay) return null;
+export function jdnToGregorian(jdn) {
+  const l = jdn + 68569;
+  const n = Math.floor((4 * l) / 146097);
+  const l2 = l - Math.floor((146097 * n + 3) / 4);
+  const i = Math.floor((4000 * (l2 + 1)) / 1461001);
+  const l3 = l2 - Math.floor((1461 * i) / 4) + 31;
+  const j = Math.floor((80 * l3) / 2447);
+  const d = l3 - Math.floor((2447 * j) / 80);
+  const l4 = Math.floor(j / 11);
+  const m = j + 2 - 12 * l4;
+  const y = 100 * (n - 49) + i + l4;
+  return { year: y, month: m, day: d };
+}
 
-  let low = Date.UTC(1800, 0, 1, 12);
-  let high = Date.UTC(2200, 11, 31, 12);
-  while (low <= high) {
-    const middle = low + Math.floor((high - low) / (2 * 86_400_000)) * 86_400_000;
-    const value = toEthiopian(new Date(middle));
-    const order =
-      value.year - targetYear ||
-      value.month - targetMonth ||
-      value.day - targetDay;
-    if (order === 0) return new Date(middle);
-    if (order < 0) low = middle + 86_400_000;
-    else high = middle - 86_400_000;
-  }
-  return null;
+export function fromEthiopian(yearOrObj, month, day, hour = 12, minute = 0, second = 0) {
+  let y = typeof yearOrObj === 'object' ? yearOrObj?.year : yearOrObj;
+  let m = typeof yearOrObj === 'object' ? yearOrObj?.month : month;
+  let d = typeof yearOrObj === 'object' ? yearOrObj?.day : day;
+  y = Number(y);
+  m = Number(m);
+  d = Number(d);
+  if (!y || !m || !d) return null;
+  const jdn = 1723856 + 365 * y + Math.floor(y / 4) + 30 * (m - 1) + d - 1;
+  const g = jdnToGregorian(jdn);
+  return new Date(Date.UTC(g.year, g.month - 1, g.day, hour - 3, minute, second));
 }
 
 export function dateKeyToEthiopian(key) {

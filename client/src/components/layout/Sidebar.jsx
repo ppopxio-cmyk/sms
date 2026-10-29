@@ -25,6 +25,7 @@ import Brand from '../ui/Brand';
 import { RoleBadge } from '../ui/Badge';
 import { formatEthiopian } from '../../lib/ethiopianDate';
 import RegistrarNav from './RegistrarNav';
+import AccountantNav from './AccountantNav';
 
 // The first entry is the role's own front door, so it is the same page for everybody but
 // under a different address. Personal pages (notices, profile, devices, signing out) live
@@ -125,6 +126,8 @@ export default function Sidebar({ role, user, onNavigate, onClose, onSignOut, co
         )}
         {role === 'REGISTRAR' ? (
           <RegistrarNav onNavigate={onNavigate} collapsed={collapsed} onExpand={onToggleCollapse} />
+        ) : role === 'ACCOUNTANT' ? (
+          <AccountantNav onNavigate={onNavigate} collapsed={collapsed} />
         ) : (
           <NavItems role={role} onNavigate={onNavigate} collapsed={collapsed} />
         )}

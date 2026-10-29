@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Calculator, CheckCircle2, Save, Send, TriangleAlert } from 'lucide-react';
+import { Calculator, CheckCircle2, Lock, Save, Send, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../../lib/api';
 import { classMeta, classTitle, displayDate } from '../../lib/teacher';
@@ -306,9 +306,20 @@ export default function TeacherCourseMarkDetail() {
                   {rows.map((row) => (
                     <tr key={row.studentId}>
                       <td className="py-2.5 pr-4">
-                        <Link to={`/teacher/students/${row.studentId}`} className="font-medium text-slate-800 hover:text-brand-700">
-                          {row.name}
-                        </Link>
+                        <div className="flex items-center gap-2">
+                          <Link to={`/teacher/students/${row.studentId}`} className="font-medium text-slate-800 hover:text-brand-700">
+                            {row.name}
+                          </Link>
+                          {row.hasFinancialHold ? (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-800 border border-amber-200"
+                              title="Financial hold: Unpaid monthly fees. Result submission is blocked for this student."
+                            >
+                              <Lock className="h-3 w-3 text-amber-600" />
+                              Hold
+                            </span>
+                          ) : null}
+                        </div>
                         <p className="font-mono text-[11px] text-slate-500">{row.studentNumber}</p>
                       </td>
                       {policy.components.map((component) => (
