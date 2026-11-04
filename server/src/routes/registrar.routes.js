@@ -127,10 +127,11 @@ import { env } from '../config/env.js';
 
 const r = Router();
 
-// Every route is behind authentication, the password-change gate, and the Registrar
-// role. Individual permissions repeat the check so the permission map remains the
-// source of truth and a future role cannot slip in through a single forgotten route.
-r.use(authenticate, requirePasswordChanged, requireRole('REGISTRAR'));
+// Every route is behind authentication and the password-change gate.
+// REGISTRAR, ADMIN, and ACCOUNTANT can enter the router, while individual
+// permission checks enforce route-level access (e.g. structure:view for Accountant,
+// registrar:dashboard / students:manage for Registrar).
+r.use(authenticate, requirePasswordChanged, requireRole('REGISTRAR', 'ADMIN', 'ACCOUNTANT'));
 
 r.get('/dashboard', requirePermission('registrar:dashboard'), dashboard);
 r.get('/analytics', requirePermission('registrar:dashboard'), validate(analyticsQuerySchema, 'query'), analytics);

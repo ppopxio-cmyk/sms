@@ -17,9 +17,12 @@ import {
   Upload,
   Camera,
   ArrowRight,
+  ArrowLeft,
   ShieldCheck,
   Building2,
   BookOpen,
+  Award,
+  FileCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Brand from '../../components/ui/Brand';
@@ -45,22 +48,24 @@ export default function PublicRegistrationPortal() {
   const [portal, setPortal] = useState(null);
   const [notFound, setNotFound] = useState(false);
 
+  // Stepper State (Step 1, 2, or 3)
+  const [currentStep, setCurrentStep] = useState(1);
+
   // Video Tutorial Modal
   const [showVideoModal, setShowVideoModal] = useState(false);
 
-  // Form State
+  // Step 1: Personal Information & Contact
   const [firstName, setFirstName] = useState('');
   const [middleName, setMiddleName] = useState('');
   const [lastName, setLastName] = useState('');
   const [gender, setGender] = useState('female');
 
   // Ethiopian Birth Date
-  const currentEthYear = 2019;
   const [birthYear, setBirthYear] = useState('2000');
   const [birthMonth, setBirthMonth] = useState('1');
   const [birthDay, setBirthDay] = useState('1');
 
-  // Contact
+  // Contact & Location
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [region, setRegion] = useState('');
@@ -68,17 +73,23 @@ export default function PublicRegistrationPortal() {
   const [woreda, setWoreda] = useState('');
   const [line, setLine] = useState('');
 
-  // Emergency & Background
+  // Student Photo (Max 5MB)
+  const [photoUrl, setPhotoUrl] = useState('');
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+  // Step 2: Emergency Contact & Academic Background
   const [emergencyName, setEmergencyName] = useState('');
   const [emergencyPhone, setEmergencyPhone] = useState('');
   const [emergencyRel, setEmergencyRel] = useState('');
   const [schoolName, setSchoolName] = useState('');
   const [completionYear, setCompletionYear] = useState('');
-  const [gradeOrGpa, setGradeOrGpa] = useState('');
 
-  // Photo
-  const [photoUrl, setPhotoUrl] = useState('');
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  // Step 3: Programme Selection & 12th Grade Document
+  const [qualificationType, setQualificationType] = useState('degree');
+  const [selectedDepartment, setSelectedDepartment] = useState('');
+  const [selectedProgram, setSelectedProgram] = useState('');
+  const [certificateDoc, setCertificateDoc] = useState(null); // { fileName, fileType, fileSize, dataUrl }
+  const [uploadingDoc, setUploadingDoc] = useState(false);
 
   // Submitting & Result
   const [submitting, setSubmitting] = useState(false);
@@ -96,6 +107,17 @@ export default function PublicRegistrationPortal() {
         }
         const data = await res.json();
         setPortal(data.portal);
+
+        // Auto-select initial department/program if available
+        if (data.portal?.departments?.length > 0) {
+          setSelectedDepartment(data.portal.departments[0]._id || data.portal.departments[0].id || '');
+        }
+        if (data.portal?.programs?.length > 0) {
+          setSelectedProgram(data.portal.programs[0]._id || data.portal.programs[0].id || '');
+          if (data.portal.programs[0].qualificationType) {
+            setQualificationType(data.portal.programs[0].qualificationType);
+          }
+        }
       } catch (err) {
         setNotFound(true);
       } finally {
@@ -107,8 +129,8 @@ export default function PublicRegistrationPortal() {
     }
   }, [portalId]);
 
-  // Handle Photo Upload (via ImageKit endpoint or standard reader)
-  const handlePhotoSelect = async (e) => {
+  // Handle Photo Select (Personal student photo, not strict passport, max 5MB)
+  const handlePhotoSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -124,11 +146,11 @@ export default function PublicRegistrationPortal() {
 
     setUploadingPhoto(true);
     try {
-      // Local preview / Data URL
       const reader = new FileReader();
       reader.onload = (event) => {
         setPhotoUrl(event.target.result);
         setUploadingPhoto(false);
+        toast.success('Student photo uploaded.');
       };
       reader.readAsDataURL(file);
     } catch {
@@ -137,21 +159,89 @@ export default function PublicRegistrationPortal() {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  // Handle 12th Grade Result Certificate Document (PDF or Word, max 15MB)
+  const handleDocSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
+    const isDoc =
+      file.type === 'application/pdf' ||
+      file.type === 'application/msword' ||
+      file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      /\.(pdf|doc|docx)$/i.test(file.name);
+
+    if (!isDoc) {
+      toast.error('Only PDF and Word documents (.pdf, .doc, .docx) are accepted.');
+      return;
+    }
+
+    if (file.size > 15 * 1024 * 1024) {
+      toast.error('Document size must be under 15MB.');
+      return;
+    }
+
+    setUploadingDoc(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setCertificateDoc({
+          fileName: file.name,
+          fileType: file.type || 'application/pdf',
+          fileSize: file.size,
+          dataUrl: event.target.result,
+        });
+        setUploadingDoc(false);
+        toast.success(`Attached ${file.name}`);
+      };
+      reader.onerror = () => {
+        toast.error('Failed to read document file.');
+        setUploadingDoc(false);
+      };
+      reader.readAsDataURL(file);
+    } catch {
+      toast.error('Error reading document file.');
+      setUploadingDoc(false);
+    }
+  };
+
+  // Step 1 Validation & Proceed
+  const handleProceedToStep2 = () => {
     if (!firstName.trim() || !lastName.trim()) {
       toast.error('First and last name are required.');
       return;
     }
-
     if (!email.trim() || !/^[\w.%+-]+@gmail\.com$/i.test(email.trim())) {
       toast.error('A valid Google Gmail address (@gmail.com) is required.');
       return;
     }
-
     if (!phone.trim()) {
       toast.error('An Ethiopian mobile phone number is required.');
+      return;
+    }
+    setCurrentStep(2);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Step 2 Validation & Proceed
+  const handleProceedToStep3 = () => {
+    if (!emergencyName.trim() || !emergencyPhone.trim()) {
+      toast.error('Emergency contact name and phone number are required.');
+      return;
+    }
+    if (!schoolName.trim()) {
+      toast.error('Previous school or college name is required.');
+      return;
+    }
+    setCurrentStep(3);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Step 3 Final Submit
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!certificateDoc) {
+      toast.error('Please upload your 12th grade result certification document (PDF or Word, max 15MB).');
       return;
     }
 
@@ -187,12 +277,22 @@ export default function PublicRegistrationPortal() {
           previousEducation: {
             schoolName: schoolName.trim(),
             completionYear: completionYear.trim(),
-            gradeOrGpa: gradeOrGpa.trim(),
           },
           photo: {
             url: photoUrl || null,
             status: photoUrl ? 'active' : 'missing',
           },
+          qualificationType,
+          departmentId: selectedDepartment || portal.departments?.[0]?._id || portal.department,
+          programId: selectedProgram || portal.programs?.[0]?._id || portal.program,
+          certificateDocument: certificateDoc
+            ? {
+                fileName: certificateDoc.fileName,
+                fileType: certificateDoc.fileType,
+                fileSize: certificateDoc.fileSize,
+                url: certificateDoc.dataUrl,
+              }
+            : null,
         }),
       });
 
@@ -205,7 +305,7 @@ export default function PublicRegistrationPortal() {
       setApplicationResult(data.application);
       toast.success('Application submitted successfully!');
     } catch (err) {
-      toast.error('Network error. Please try again.');
+      toast.error('Network error or file size limit. Please ensure document is within 15MB and try again.');
     } finally {
       setSubmitting(false);
     }
@@ -264,13 +364,13 @@ export default function PublicRegistrationPortal() {
           </div>
 
           <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm print:border-none print:shadow-none">
-            <div className="border-b border-emerald-100 bg-gradient-to-br from-emerald-500 to-teal-700 p-8 text-center text-white">
+            <div className="border-b border-emerald-100 bg-gradient-to-br from-emerald-600 to-teal-800 p-8 text-center text-white">
               <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-white/20 shadow-inner backdrop-blur-sm">
                 <CheckCircle2 className="h-10 w-10 text-white" />
               </div>
-              <h1 className="mt-4 text-2xl font-black tracking-tight">Application Received!</h1>
-              <p className="mt-1 text-sm text-emerald-100">
-                Your admission application has been registered with the College Registrar.
+              <h1 className="mt-4 text-2xl font-black tracking-tight">Application Submitted Successfully!</h1>
+              <p className="mt-1.5 text-xs text-emerald-100 max-w-md mx-auto leading-relaxed">
+                The Registrar Office will review and approve your application in a few hours. We will communicate the admission decision and your official Student ID via your phone and email. Stay tuned!
               </p>
             </div>
 
@@ -283,7 +383,7 @@ export default function PublicRegistrationPortal() {
                   {applicationResult.applicationNumber}
                 </p>
                 <p className="mt-1 text-xs text-emerald-700">
-                  Save this application number to check your status with the Registrar Office.
+                  Keep this application number handy for verification and inquiries.
                 </p>
               </div>
 
@@ -300,25 +400,19 @@ export default function PublicRegistrationPortal() {
                   <span className="text-slate-500">Phone Number</span>
                   <span className="font-mono text-xs text-slate-800">{applicationResult.phone}</span>
                 </div>
-                <div className="flex justify-between py-2">
-                  <span className="text-slate-500">Programme Applied</span>
-                  <span className="font-medium text-slate-900">{portal.program}</span>
-                </div>
-                <div className="flex justify-between py-2">
-                  <span className="text-slate-500">Department</span>
-                  <span className="font-medium text-slate-900">{portal.department}</span>
-                </div>
-                <div className="flex justify-between py-2">
-                  <span className="text-slate-500">Delivery Stream</span>
-                  <span className="capitalize font-medium text-slate-900">{portal.category}</span>
-                </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600 space-y-1">
-                <p className="font-semibold text-slate-800">What happens next?</p>
-                <p>1. The Registrar Office will review your academic qualifications and uploaded photo.</p>
-                <p>2. Once verified, an official Student ID will be issued and an admission confirmation will be sent to your Gmail.</p>
-                <p>3. If you have any inquiries, contact the Registrar Office with your reference number.</p>
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4 text-xs text-emerald-900 space-y-2">
+                <p className="font-bold text-sm text-emerald-950 flex items-center gap-1.5">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  <span>Next Steps: Verification & Admission</span>
+                </p>
+                <p className="leading-relaxed">
+                  1. The Registrar Office verifies your submitted 12th grade certification and personal information.
+                </p>
+                <p className="leading-relaxed">
+                  2. Once approved, your official Student ID card and admission confirmation will be dispatched to your Gmail.
+                </p>
               </div>
             </div>
           </div>
@@ -329,10 +423,24 @@ export default function PublicRegistrationPortal() {
 
   const embedUrl = getYouTubeEmbedUrl(portal.tutorialVideoUrl);
 
+  // Filter programmes for the selected qualification type
+  const availablePrograms = (portal.programs || []).filter((p) => {
+    if (!p.qualificationType) return true;
+    return p.qualificationType.toLowerCase() === qualificationType.toLowerCase();
+  });
+
+  // Current qualification minimum entry cutoff points
+  const currentCutoff =
+    qualificationType === 'degree'
+      ? portal.entryPoints?.degree || 350
+      : qualificationType === 'diploma'
+        ? portal.entryPoints?.diploma || 275
+        : portal.entryPoints?.shortTerm || 200;
+
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-10 sm:px-6">
       <div className="mx-auto max-w-2xl">
-        {/* Brand & Header */}
+        {/* Brand & Tutorial Video Button */}
         <div className="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <Brand />
           {portal.tutorialVideoUrl && (
@@ -355,363 +463,604 @@ export default function PublicRegistrationPortal() {
             </span>
             <h1 className="mt-2 text-2xl font-black">{portal.title}</h1>
             <p className="mt-1 text-xs text-brand-100">
-              Department of {portal.departments?.length > 1 ? portal.departments.map((d) => d.name || d.code).join(', ') : (portal.department || 'All Departments')} • {portal.programs?.length > 1 ? portal.programs.map((p) => p.name || p.code).join(', ') : (portal.program || 'All Programmes')} ({String(portal.category || 'regular').toUpperCase()})
+              Department of{' '}
+              {portal.departments?.length > 1
+                ? portal.departments.map((d) => d.name || d.code).join(', ')
+                : portal.department || 'All Departments'}{' '}
+              •{' '}
+              {portal.programs?.length > 1
+                ? portal.programs.map((p) => p.name || p.code).join(', ')
+                : portal.program || 'All Programmes'}{' '}
+              ({String(portal.category || 'regular').toUpperCase()})
             </p>
           </div>
 
-          {portal.instructions && (
-            <div className="border-b border-slate-100 bg-slate-50/70 p-5 text-xs text-slate-600 leading-relaxed">
-              <p className="font-semibold text-slate-800 mb-1">Instructions for Applicants:</p>
-              <p className="whitespace-pre-line">{portal.instructions}</p>
-            </div>
-          )}
-
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="p-6 sm:p-8 space-y-8">
-            {/* 1. Identity & Name */}
-            <div>
-              <h2 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
-                <User className="h-4 w-4 text-brand-600" />
-                <span>1. Personal Information</span>
-              </h2>
-
-              <div className="mt-4 grid gap-4 sm:grid-cols-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    First Name <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Semir"
-                    value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Father's Name (Middle)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Muleta"
-                    value={middleName}
-                    onChange={(e) => setMiddleName(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Grandfather's Name <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Ahmed"
-                    value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Gender <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="flex items-center gap-4 mt-2">
-                    <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="gender"
-                        value="female"
-                        checked={gender === 'female'}
-                        onChange={(e) => setGender(e.target.value)}
-                        className="text-brand-600 focus:ring-brand-500"
-                      />
-                      <span>Female</span>
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="gender"
-                        value="male"
-                        checked={gender === 'male'}
-                        onChange={(e) => setGender(e.target.value)}
-                        className="text-brand-600 focus:ring-brand-500"
-                      />
-                      <span>Male</span>
-                    </label>
+          {/* Stepper Progress Bar */}
+          <div className="border-b border-slate-100 bg-slate-50/70 p-4">
+            <div className="flex items-center justify-between">
+              {[
+                { step: 1, label: '1. Personal & Contact' },
+                { step: 2, label: '2. Academic & Emergency' },
+                { step: 3, label: '3. Programme & Certificate' },
+              ].map((item) => (
+                <div key={item.step} className="flex items-center gap-2">
+                  <div
+                    className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold transition ${
+                      currentStep === item.step
+                        ? 'bg-brand-600 text-white shadow-sm'
+                        : currentStep > item.step
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-slate-200 text-slate-500'
+                    }`}
+                  >
+                    {currentStep > item.step ? '✓' : item.step}
                   </div>
+                  <span
+                    className={`hidden sm:inline text-xs font-semibold ${
+                      currentStep === item.step
+                        ? 'text-brand-900 font-bold'
+                        : currentStep > item.step
+                          ? 'text-emerald-700'
+                          : 'text-slate-400'
+                    }`}
+                  >
+                    {item.label}
+                  </span>
                 </div>
-
-                {/* Ethiopian Date of Birth */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Date of Birth (Ethiopian Calendar) <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    <select
-                      value={birthDay}
-                      onChange={(e) => setBirthDay(e.target.value)}
-                      className="rounded-xl border border-slate-200 px-2 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    >
-                      {Array.from({ length: 30 }, (_, i) => i + 1).map((d) => (
-                        <option key={d} value={d}>
-                          Day {d}
-                        </option>
-                      ))}
-                    </select>
-
-                    <select
-                      value={birthMonth}
-                      onChange={(e) => setBirthMonth(e.target.value)}
-                      className="rounded-xl border border-slate-200 px-2 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    >
-                      {ETH_MONTHS.map((m, idx) => (
-                        <option key={m} value={idx + 1}>
-                          {idx + 1}. {m}
-                        </option>
-                      ))}
-                    </select>
-
-                    <select
-                      value={birthYear}
-                      onChange={(e) => setBirthYear(e.target.value)}
-                      className="rounded-xl border border-slate-200 px-2 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    >
-                      {Array.from({ length: 35 }, (_, i) => 2015 - i).map((y) => (
-                        <option key={y} value={y}>
-                          {y} E.C.
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
+              ))}
             </div>
+          </div>
 
-            {/* 2. Photo Upload (2x2 inch aspect ratio) */}
-            <div>
-              <h2 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
-                <Camera className="h-4 w-4 text-brand-600" />
-                <span>2. Passport Photo (2 x 2 inches)</span>
-              </h2>
+          {/* Multi-Step Form */}
+          <form onSubmit={handleSubmit} className="p-6 sm:p-8 space-y-6">
+            {/* ================= STEP 1: Personal & Contact ================= */}
+            {currentStep === 1 && (
+              <div className="space-y-6 animate-fade">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
+                    <User className="h-4 w-4 text-brand-600" />
+                    <span>Personal Information</span>
+                  </h2>
 
-              <div className="mt-4 flex flex-col sm:flex-row items-center gap-6">
-                <div className="flex h-32 w-32 shrink-0 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 overflow-hidden shadow-inner">
-                  {photoUrl ? (
-                    <img src={photoUrl} alt="Preview" className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="text-center p-2 text-slate-400">
-                      <Camera className="mx-auto h-8 w-8 text-slate-300" />
-                      <span className="text-[10px] block mt-1">2 x 2 inches</span>
+                  <div className="mt-4 grid gap-4 sm:grid-cols-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        First Name <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Semir"
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      />
                     </div>
-                  )}
-                </div>
 
-                <div className="space-y-2">
-                  <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 cursor-pointer">
-                    <Upload className="h-4 w-4 text-slate-500" />
-                    <span>{photoUrl ? 'Replace Photo' : 'Upload Passport Photo'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handlePhotoSelect}
-                      className="hidden"
-                    />
-                  </label>
-                  <p className="text-[11px] text-slate-500">
-                    Standard square 2x2 passport-style photo with plain background. Required for student ID.
-                  </p>
-                </div>
-              </div>
-            </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Father's Name (Middle)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Muleta"
+                        value={middleName}
+                        onChange={(e) => setMiddleName(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                    </div>
 
-            {/* 3. Contact & Address */}
-            <div>
-              <h2 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
-                <Phone className="h-4 w-4 text-brand-600" />
-                <span>3. Contact & Location</span>
-              </h2>
-
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Google Gmail Address <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                    <input
-                      type="email"
-                      required
-                      placeholder="yourname@gmail.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    />
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Grandfather's Name <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Ahmed"
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                    </div>
                   </div>
-                  <p className="mt-1 text-[10px] text-slate-400">Must end in @gmail.com</p>
-                </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Mobile Phone Number <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <Phone className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                    <input
-                      type="tel"
-                      required
-                      placeholder="0911223344 or +251 9..."
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    />
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Gender <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="flex items-center gap-4 mt-2">
+                        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="gender"
+                            value="female"
+                            checked={gender === 'female'}
+                            onChange={(e) => setGender(e.target.value)}
+                            className="text-brand-600 focus:ring-brand-500"
+                          />
+                          <span>Female</span>
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="gender"
+                            value="male"
+                            checked={gender === 'male'}
+                            onChange={(e) => setGender(e.target.value)}
+                            className="text-brand-600 focus:ring-brand-500"
+                          />
+                          <span>Male</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Ethiopian Date of Birth */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Date of Birth (Ethiopian Calendar) <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="grid grid-cols-3 gap-2 mt-1">
+                        <input
+                          type="number"
+                          min="1970"
+                          max="2015"
+                          value={birthYear}
+                          onChange={(e) => setBirthYear(e.target.value)}
+                          placeholder="Year"
+                          className="rounded-xl border border-slate-200 px-2 py-2 text-xs text-center font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        />
+                        <select
+                          value={birthMonth}
+                          onChange={(e) => setBirthMonth(e.target.value)}
+                          className="rounded-xl border border-slate-200 px-2 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        >
+                          {ETH_MONTHS.map((name, idx) => (
+                            <option key={name} value={idx + 1}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          min="1"
+                          max="30"
+                          value={birthDay}
+                          onChange={(e) => setBirthDay(e.target.value)}
+                          placeholder="Day"
+                          className="rounded-xl border border-slate-200 px-2 py-2 text-xs text-center font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="mt-4 grid gap-4 sm:grid-cols-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Region</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Oromia / Harari"
-                    value={region}
-                    onChange={(e) => setRegion(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">City / Town</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Harar / Haramaya"
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Woreda / Kebele</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 02"
-                    value={woreda}
-                    onChange={(e) => setWoreda(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* 4. Emergency & Education */}
-            <div>
-              <h2 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
-                <GraduationCap className="h-4 w-4 text-brand-600" />
-                <span>4. Academic Background & Emergency Contact</span>
-              </h2>
-
-              <div className="mt-4 grid gap-4 sm:grid-cols-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Previous School</label>
-                  <input
-                    type="text"
-                    placeholder="High school or university"
-                    value={schoolName}
-                    onChange={(e) => setSchoolName(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
+                {/* Student Photo Upload (Max 5MB, regular photo) */}
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4">
+                  <div className="flex flex-col sm:flex-row items-center gap-4">
+                    <div className="relative flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-white">
+                      {photoUrl ? (
+                        <img src={photoUrl} alt="Student" className="h-full w-full object-cover" />
+                      ) : (
+                        <Camera className="h-8 w-8 text-slate-300" />
+                      )}
+                      {uploadingPhoto && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                          <Loader2 className="h-5 w-5 animate-spin text-white" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-1 text-center sm:text-left">
+                      <h4 className="text-xs font-bold text-slate-900">Student Profile Photo</h4>
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        Upload a clear personal photo of the student (JPG, PNG, WEBP — Max 5MB).
+                        Does not have to be a passport format.
+                      </p>
+                      <label className="mt-2 inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 transition">
+                        <Upload className="h-3.5 w-3.5" />
+                        <span>{photoUrl ? 'Change Photo' : 'Upload Photo'}</span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          onChange={handlePhotoSelect}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  </div>
                 </div>
 
+                {/* Contact & Location */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Completion Year</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 2018 E.C."
-                    value={completionYear}
-                    onChange={(e) => setCompletionYear(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
+                  <h2 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
+                    <Phone className="h-4 w-4 text-brand-600" />
+                    <span>Contact & Location</span>
+                  </h2>
+
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Google Gmail Address <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                        <input
+                          type="email"
+                          required
+                          placeholder="yourname@gmail.com"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          className="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Ethiopian Mobile Phone <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <Phone className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                        <input
+                          type="tel"
+                          required
+                          placeholder="+251 911 234 567"
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          className="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 sm:grid-cols-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Region</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Harari / Oromia"
+                        value={region}
+                        onChange={(e) => setRegion(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">City / Town</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Harar"
+                        value={city}
+                        onChange={(e) => setCity(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Woreda / Kebele</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Woreda 03"
+                        value={woreda}
+                        onChange={(e) => setWoreda(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                    </div>
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Score / GPA</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 3.4 / 450"
-                    value={gradeOrGpa}
-                    onChange={(e) => setGradeOrGpa(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-4 sm:grid-cols-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Emergency Contact Person</label>
-                  <input
-                    type="text"
-                    placeholder="Full name"
-                    value={emergencyName}
-                    onChange={(e) => setEmergencyName(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Relationship</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Parent / Spouse"
-                    value={emergencyRel}
-                    onChange={(e) => setEmergencyRel(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Emergency Phone</label>
-                  <input
-                    type="tel"
-                    placeholder="09..."
-                    value={emergencyPhone}
-                    onChange={(e) => setEmergencyPhone(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Submission Button */}
-            <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-              <p className="text-xs text-slate-500">
-                By submitting, you certify that all entered credentials are correct and official.
-              </p>
-
-              <button
-                type="submit"
-                disabled={submitting}
-                className="inline-flex items-center gap-2 rounded-2xl bg-brand-600 px-6 py-3 text-sm font-bold text-white shadow-md hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50"
-              >
-                {submitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Submitting Application...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Submit Application</span>
+                {/* Step 1 Action */}
+                <div className="pt-4 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleProceedToStep2}
+                    className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-brand-700 transition"
+                  >
+                    <span>Continue to Step 2: Academic & Emergency</span>
                     <ArrowRight className="h-4 w-4" />
-                  </>
-                )}
-              </button>
-            </div>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ================= STEP 2: Academic & Emergency ================= */}
+            {currentStep === 2 && (
+              <div className="space-y-6 animate-fade">
+                {/* Emergency Contact */}
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-brand-600" />
+                    <span>Emergency Contact Information</span>
+                  </h2>
+
+                  <div className="mt-4 grid gap-4 sm:grid-cols-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Contact Person Name <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Muleta Ahmed"
+                        value={emergencyName}
+                        onChange={(e) => setEmergencyName(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Emergency Phone Number <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="tel"
+                        required
+                        placeholder="+251 9..."
+                        value={emergencyPhone}
+                        onChange={(e) => setEmergencyPhone(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Relationship <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Father / Mother / Guardian"
+                        value={emergencyRel}
+                        onChange={(e) => setEmergencyRel(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Academic Background (Score/GPA removed as requested) */}
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
+                    <GraduationCap className="h-4 w-4 text-brand-600" />
+                    <span>Previous Academic Background</span>
+                  </h2>
+
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Previous School / College Name <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Harar Senior Secondary School"
+                        value={schoolName}
+                        onChange={(e) => setSchoolName(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Year of Completion (E.C.)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 2016"
+                        value={completionYear}
+                        onChange={(e) => setCompletionYear(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Step 2 Actions */}
+                <div className="pt-4 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentStep(1)}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    <span>Back to Step 1</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleProceedToStep3}
+                    className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-brand-700 transition"
+                  >
+                    <span>Continue to Step 3: Programme & Certificate</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ================= STEP 3: Programme & Document Upload ================= */}
+            {currentStep === 3 && (
+              <div className="space-y-6 animate-fade">
+                {/* 1. Qualification Selection & Cutoff Notice */}
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
+                    <Award className="h-4 w-4 text-brand-600" />
+                    <span>Select Qualification & Target Programme</span>
+                  </h2>
+
+                  <div className="mt-4 space-y-3">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Qualification Level <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="grid grid-cols-3 gap-2.5">
+                      {[
+                        { id: 'degree', label: 'Degree', cutoff: portal.entryPoints?.degree || 350 },
+                        { id: 'diploma', label: 'Diploma', cutoff: portal.entryPoints?.diploma || 275 },
+                        { id: 'short-term', label: 'Short-Term', cutoff: portal.entryPoints?.shortTerm || 200 },
+                      ].map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setQualificationType(item.id)}
+                          className={`rounded-2xl border p-3 text-left transition ${
+                            qualificationType === item.id
+                              ? 'border-brand-600 bg-brand-50/70 shadow-sm'
+                              : 'border-slate-200 bg-white hover:bg-slate-50'
+                          }`}
+                        >
+                          <p className={`text-xs font-bold ${qualificationType === item.id ? 'text-brand-900' : 'text-slate-800'}`}>
+                            {item.label}
+                          </p>
+                          <p className="mt-1 text-[11px] font-semibold text-brand-700">
+                            Min. Cutoff: ≥ {item.cutoff} pts
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Official Cutoff Notification Callout */}
+                    <div className="rounded-2xl border border-brand-200 bg-brand-50/60 p-3.5 text-xs text-brand-900 flex items-start gap-2.5">
+                      <Award className="h-4 w-4 text-brand-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold">
+                          Assigned {qualificationType.toUpperCase()} Minimum Entry Cutoff: ≥ {currentCutoff} Points
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-brand-700 leading-relaxed">
+                          The College Registrar has assigned a minimum cutoff of {currentCutoff} points for this {qualificationType} programme. Please ensure your attached 12th grade certification meets or exceeds this score.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Department & Programme dropdowns */}
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Department <span className="text-rose-500">*</span>
+                      </label>
+                      <select
+                        value={selectedDepartment}
+                        onChange={(e) => setSelectedDepartment(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      >
+                        {portal.departments?.length > 0 ? (
+                          portal.departments.map((d) => (
+                            <option key={d._id || d.id} value={d._id || d.id}>
+                              {d.name} ({d.code})
+                            </option>
+                          ))
+                        ) : (
+                          <option value={portal.department}>{portal.department}</option>
+                        )}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Programme of Study <span className="text-rose-500">*</span>
+                      </label>
+                      <select
+                        value={selectedProgram}
+                        onChange={(e) => setSelectedProgram(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      >
+                        {availablePrograms.length > 0 ? (
+                          availablePrograms.map((p) => (
+                            <option key={p._id || p.id} value={p._id || p.id}>
+                              {p.name} ({p.code})
+                            </option>
+                          ))
+                        ) : (
+                          <option value={portal.program}>{portal.program}</option>
+                        )}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. 12th Grade Result Certificate Document (PDF or Word, max 15MB) */}
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-brand-600" />
+                    <span>Upload 12th Grade Result Certification Document</span>
+                  </h2>
+
+                  <div className="mt-4">
+                    <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50/50 p-6 text-center hover:bg-slate-50 transition">
+                      {certificateDoc ? (
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600">
+                            <FileCheck className="h-6 w-6" />
+                          </div>
+                          <p className="font-bold text-xs text-slate-800">{certificateDoc.fileName}</p>
+                          <p className="text-[11px] text-slate-500">
+                            {(certificateDoc.fileSize / (1024 * 1024)).toFixed(2)} MB • Document Ready
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setCertificateDoc(null)}
+                            className="mt-2 text-xs font-bold text-rose-600 hover:text-rose-700 underline"
+                          >
+                            Remove and upload a different document
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
+                            <Upload className="h-6 w-6" />
+                          </div>
+                          <h4 className="text-xs font-bold text-slate-800">
+                            Attach Official 12th Grade Certificate
+                          </h4>
+                          <p className="text-[11px] text-slate-500 max-w-sm leading-relaxed">
+                            Upload your official Ethiopian 12th grade entrance exam results or educational certificate (PDF, DOC, DOCX — Max 15MB).
+                          </p>
+                          <label className="mt-3 inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-slate-800 transition">
+                            <Upload className="h-3.5 w-3.5" />
+                            <span>Select Document (PDF / Word)</span>
+                            <input
+                              type="file"
+                              accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                              onChange={handleDocSelect}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Step 3 Actions */}
+                <div className="pt-4 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentStep(2)}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    <span>Back to Step 2</span>
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={submitting || !certificateDoc}
+                    className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50 transition"
+                  >
+                    {submitting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Submitting Application...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="h-4 w-4" />
+                        <span>Submit Official Application</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </form>
         </div>
       </div>

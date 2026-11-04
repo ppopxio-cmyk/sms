@@ -67,6 +67,22 @@ const studentApplicationSchema = new mongoose.Schema(
       completionYear: { type: String, default: '', trim: true },
       gradeOrGpa: { type: String, default: '', trim: true },
     },
+    qualificationType: {
+      type: String,
+      enum: ['degree', 'diploma', 'short-term'],
+      default: 'degree',
+      index: true,
+    },
+    department: { type: mongoose.Schema.Types.ObjectId, ref: 'Department', default: null, index: true },
+    program: { type: mongoose.Schema.Types.ObjectId, ref: 'Program', default: null, index: true },
+    batch: { type: mongoose.Schema.Types.ObjectId, ref: 'Batch', default: null },
+    certificateDocument: {
+      fileName: { type: String, default: null },
+      fileType: { type: String, default: null },
+      fileSize: { type: Number, default: null },
+      url: { type: String, default: null },
+      uploadedAt: { type: Date, default: Date.now },
+    },
     photo: { type: applicationPhotoSchema, default: () => ({}) },
     status: {
       type: String,

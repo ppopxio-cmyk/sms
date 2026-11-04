@@ -47,6 +47,11 @@ const INITIAL_FORM = {
   maxApplications: 500,
   tutorialVideoUrl: '',
   instructions: '',
+  entryPoints: {
+    degree: 350,
+    diploma: 275,
+    shortTerm: 200,
+  },
 };
 
 export default function RegistrarRegistrationPortals() {
@@ -120,31 +125,38 @@ export default function RegistrarRegistrationPortals() {
     setSelectedBatchIds([]);
   };
 
-  // Auto-generate title based on selected batches, departments, and programmes
+  // Auto-generate title based on: [Academic Year] New Student Registration on [Regular/Extension/Both] — [Programmes]
   useEffect(() => {
     if (!createOpen || !selectedBatchIds.length) return;
     const selectedDocs = plannedBatches.filter((b) => selectedBatchIds.includes(b.id));
-    const batchCodes = selectedDocs.map((b) => b.code).join(', ');
-    const progNames = autoPrograms.map((p) => p.name).join(', ');
-    const deptNames = autoDepartments.map((d) => d.name).join(', ');
+    const batchCategories = [...new Set(selectedDocs.map((b) => b.category?.toLowerCase()).filter(Boolean))];
+    let detectedCategory = 'regular';
+    let deliveryLabel = 'Regular';
+    if (batchCategories.includes('regular') && batchCategories.includes('extension')) {
+      detectedCategory = 'both';
+      deliveryLabel = 'Regular and Extension';
+    } else if (batchCategories.includes('extension')) {
+      detectedCategory = 'extension';
+      deliveryLabel = 'Extension';
+    }
 
-    const autoTitle = [
-      batchCodes ? `${batchCodes}` : '',
-      deptNames ? `${deptNames}` : '',
-      progNames ? `${progNames}` : '',
-    ]
-      .filter(Boolean)
-      .join(' — ');
+    const yId = selectedDocs[0]?.admissionAcademicYear;
+    const yDoc = academicYears.find((y) => String(y.id) === String(yId));
+    const ayLabel = yDoc?.label || '2020';
+
+    const progNames = autoPrograms.map((p) => p.name).join(', ');
+    const autoTitle = `${ayLabel} New Student Registration on ${deliveryLabel}${progNames ? ` — ${progNames}` : ''}`;
 
     setForm((prev) => ({
       ...prev,
-      title: autoTitle ? `${autoTitle} Intake` : prev.title,
+      title: autoTitle,
+      category: detectedCategory,
       batch: selectedBatchIds[0] || '',
       batches: selectedBatchIds,
       program: autoPrograms[0]?.id || '',
       department: autoDepartments[0]?.id || '',
     }));
-  }, [selectedBatchIds, autoPrograms, autoDepartments, plannedBatches, createOpen]);
+  }, [selectedBatchIds, autoPrograms, autoDepartments, plannedBatches, academicYears, createOpen]);
 
   // 2. Fetch Portals
   const portalsQuery = useQuery({
@@ -688,21 +700,18 @@ export default function RegistrarRegistrationPortals() {
             />
           </div>
 
-          {/* Dates & Study Category */}
+          {/* Delivery Stream (Auto-Derived from Batches) & Dates */}
           <div className="grid gap-3 sm:grid-cols-4">
             <div>
-              <label className="text-xs font-semibold text-slate-700">Study Category</label>
-              <select
-                value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-xs focus:border-brand-500 focus:outline-none"
-              >
-                <option value="regular">Regular</option>
-                <option value="extension">Extension</option>
-                <option value="evening">Evening</option>
-                <option value="weekend">Weekend</option>
-                <option value="distance">Distance</option>
-              </select>
+              <label className="text-xs font-semibold text-slate-700">Delivery Stream</label>
+              <div className="mt-1 flex items-center h-[34px] rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-brand-900">
+                {form.category === 'both'
+                  ? 'Regular & Extension'
+                  : form.category === 'extension'
+                    ? 'Extension'
+                    : 'Regular'}
+              </div>
+              <span className="text-[10px] text-slate-400">Auto-detected from batches</span>
             </div>
 
             <div>
@@ -735,6 +744,83 @@ export default function RegistrarRegistrationPortals() {
                 onChange={(e) => setForm({ ...form, maxApplications: Number(e.target.value) })}
                 className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-xs focus:border-brand-500 focus:outline-none"
               />
+            </div>
+          </div>
+
+          {/* Minimum Admission Entry Points per Qualification Type */}
+          <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-3.5 space-y-2.5">
+            <div>
+              <h4 className="text-xs font-bold text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
+                <span>Minimum Admission Entry Cutoff Points</span>
+              </h4>
+              <p className="text-[11px] text-slate-500">
+                Assign the minimum national exam or entrance points required. These cutoff requirements will be visibly shown to applying students.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Degree Minimum (Points) *
+                </label>
+                <input
+                  type="number"
+                  min="100"
+                  max="700"
+                  value={form.entryPoints?.degree ?? 350}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      entryPoints: { ...form.entryPoints, degree: Number(e.target.value) },
+                    })
+                  }
+                  placeholder="e.g. 350"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 focus:border-brand-500 focus:outline-none"
+                />
+                <span className="text-[10px] text-slate-400">e.g. ≥ 350 for university entrance</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Diploma Minimum (Points) *
+                </label>
+                <input
+                  type="number"
+                  min="50"
+                  max="600"
+                  value={form.entryPoints?.diploma ?? 275}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      entryPoints: { ...form.entryPoints, diploma: Number(e.target.value) },
+                    })
+                  }
+                  placeholder="e.g. 275"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 focus:border-brand-500 focus:outline-none"
+                />
+                <span className="text-[10px] text-slate-400">e.g. ≥ 275 for TVET/Level diploma</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Short-Term Minimum (Points) *
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="500"
+                  value={form.entryPoints?.shortTerm ?? 200}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      entryPoints: { ...form.entryPoints, shortTerm: Number(e.target.value) },
+                    })
+                  }
+                  placeholder="e.g. 200"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 focus:border-brand-500 focus:outline-none"
+                />
+                <span className="text-[10px] text-slate-400">e.g. ≥ 200 or 10th/12th pass</span>
+              </div>
             </div>
           </div>
 

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
+import { structure } from '../controllers/registrar.academic.controller.js';
 import {
   getDashboard,
   listCycles,
@@ -33,6 +34,9 @@ const router = Router();
 
 // Protect all finance endpoints with authentication
 router.use(authenticate);
+
+// Academic structure query alias for finance (structure:view)
+router.get('/academic-structure', requirePermission('structure:view'), structure);
 
 // Dashboard
 router.get('/dashboard', requirePermission('finance:view'), getDashboard);

@@ -36,7 +36,6 @@ import Modal from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';
 import { ETH_MONTHS, formatEthiopian } from '../../lib/ethiopianDate';
-import AccountantAcademicFilter, { SelectToViewCard } from '../../components/finance/AccountantAcademicFilter';
 
 const STATUS_TONES = {
   draft: 'neutral',
@@ -48,41 +47,24 @@ const STATUS_TONES = {
 export default function FinancePaymentCycles() {
   const queryClient = useQueryClient();
 
-  // Academic Filter (Batch -> Department -> Course)
-  const [selectedBatch, setSelectedBatch] = useState('');
-  const [selectedDepartment, setSelectedDepartment] = useState('');
-  const [selectedCourse, setSelectedCourse] = useState('');
-  const [isFilterApplied, setIsFilterApplied] = useState(false);
-
   const [statusFilter, setStatusFilter] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('');
   const [programFilter, setProgramFilter] = useState('');
-  const [batchFilter, setBatchFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
   const [monthFilter, setMonthFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
   const [page, setPage] = useState(1);
 
-  const handleApplyFilter = () => {
-    setIsFilterApplied(true);
-    setPage(1);
-  };
-
-  const handleResetFilter = () => {
-    setSelectedBatch('');
-    setSelectedDepartment('');
-    setSelectedCourse('');
-    setIsFilterApplied(false);
-    setDepartmentFilter('');
-    setProgramFilter('');
-    setBatchFilter('');
-    setPage(1);
-  };
-
   // Cascading Academic Structure Data
   const { data: structureData } = useQuery({
     queryKey: ['academic-structure'],
-    queryFn: async () => (await api.get('/registrar/academic-structure')).data,
+    queryFn: async () => {
+      try {
+        return (await api.get('/finance/academic-structure')).data;
+      } catch {
+        return (await api.get('/registrar/academic-structure')).data;
+      }
+    },
   });
 
   const departments = structureData?.departments || [];
@@ -131,34 +113,29 @@ export default function FinancePaymentCycles() {
   // Copy feedback
   const [copiedId, setCopiedId] = useState(null);
 
-  // 1. Fetch Cycles List with Cascading Filters
+  // 1. Fetch Cycles List with Academic Year / Month / Status Filters
   const { data: cyclesData, isLoading, refetch } = useQuery({
     queryKey: [
       'finance',
       'cycles',
       {
         status: statusFilter,
-        departmentId: selectedDepartment || departmentFilter,
-        programId: programFilter,
-        batchId: selectedBatch || batchFilter,
-        courseId: selectedCourse,
         ethYear: yearFilter,
         ethMonth: monthFilter,
+        departmentId: departmentFilter,
+        programId: programFilter,
         search: searchFilter,
         page,
-        isFilterApplied,
       },
     ],
     queryFn: async () => {
       const res = await api.get('/finance/cycles', {
         params: {
           status: statusFilter || undefined,
-          departmentId: selectedDepartment || departmentFilter || undefined,
-          programId: programFilter || undefined,
-          batchId: selectedBatch || batchFilter || undefined,
-          courseId: selectedCourse || undefined,
           ethYear: yearFilter || undefined,
           ethMonth: monthFilter || undefined,
+          departmentId: departmentFilter || undefined,
+          programId: programFilter || undefined,
           search: searchFilter || undefined,
           page,
           limit: 15,
@@ -166,7 +143,6 @@ export default function FinancePaymentCycles() {
       });
       return res.data;
     },
-    enabled: isFilterApplied,
   });
 
   // 2. Fetch Selected Cycle Detail
@@ -308,34 +284,8 @@ export default function FinancePaymentCycles() {
         }
       />
 
-      {/* Cascading Academic Filter: Batch -> Department -> Course */}
-      <AccountantAcademicFilter
-        selectedBatch={selectedBatch}
-        setSelectedBatch={(b) => {
-          setSelectedBatch(b);
-          setBatchFilter(b);
-        }}
-        selectedDepartment={selectedDepartment}
-        setSelectedDepartment={(d) => {
-          setSelectedDepartment(d);
-          setDepartmentFilter(d);
-        }}
-        selectedCourse={selectedCourse}
-        setSelectedCourse={setSelectedCourse}
-        isApplied={isFilterApplied}
-        onApply={handleApplyFilter}
-        onReset={handleResetFilter}
-      />
-
-      {!isFilterApplied ? (
-        <SelectToViewCard
-          title="Select to View Payment Cycles"
-          message="Please select a Batch, Department, and Course above, then click View Records to display monthly fee cycles."
-        />
-      ) : (
-        <>
-          {/* Cascading Filter Bar */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+      {/* Filter Bar: Academic Year, Month, Status, Department */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
           <div className="flex flex-wrap items-center gap-1">
             {['', 'draft', 'open', 'closed', 'cancelled'].map((st) => (
@@ -357,14 +307,13 @@ export default function FinancePaymentCycles() {
           </div>
 
           <div className="flex items-center gap-2">
-            {(departmentFilter || programFilter || batchFilter || yearFilter || monthFilter || searchFilter || statusFilter) && (
+            {(departmentFilter || programFilter || yearFilter || monthFilter || searchFilter || statusFilter) && (
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
                   setDepartmentFilter('');
                   setProgramFilter('');
-                  setBatchFilter('');
                   setYearFilter('');
                   setMonthFilter('');
                   setSearchFilter('');
@@ -382,77 +331,11 @@ export default function FinancePaymentCycles() {
           </div>
         </div>
 
-        {/* Cascading Dropdowns */}
-        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+        {/* Dropdowns: Academic Year First, then Month, Department, Programme, Search */}
+        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
           <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
-              Department
-            </label>
-            <select
-              value={departmentFilter}
-              onChange={(e) => {
-                setDepartmentFilter(e.target.value);
-                setProgramFilter('');
-                setBatchFilter('');
-                setPage(1);
-              }}
-              className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            >
-              <option value="">All Departments</option>
-              {departments.map((d) => (
-                <option key={d._id || d.id} value={d._id || d.id}>
-                  {d.name || d.code}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
-              Programme
-            </label>
-            <select
-              value={programFilter}
-              onChange={(e) => {
-                setProgramFilter(e.target.value);
-                setBatchFilter('');
-                setPage(1);
-              }}
-              className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            >
-              <option value="">All Programmes</option>
-              {programs.map((p) => (
-                <option key={p._id || p.id} value={p._id || p.id}>
-                  {p.name || p.code}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
-              Active Batch
-            </label>
-            <select
-              value={batchFilter}
-              onChange={(e) => {
-                setBatchFilter(e.target.value);
-                setPage(1);
-              }}
-              className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            >
-              <option value="">All Active Batches</option>
-              {batches.map((b) => (
-                <option key={b._id || b.id} value={b._id || b.id}>
-                  {b.name || b.code} ({b.category || 'Regular'})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
-              Ethiopian Year
+            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1">
+              Academic Year (EC)
             </label>
             <select
               value={yearFilter}
@@ -460,18 +343,20 @@ export default function FinancePaymentCycles() {
                 setYearFilter(e.target.value);
                 setPage(1);
               }}
-              className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+              className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
-              <option value="">All Years</option>
-              <option value="2017">2017</option>
-              <option value="2018">2018</option>
-              <option value="2019">2019</option>
-              <option value="2020">2020</option>
+              <option value="">All Academic Years</option>
+              <option value="2016">2016 E.C.</option>
+              <option value="2017">2017 E.C.</option>
+              <option value="2018">2018 E.C.</option>
+              <option value="2019">2019 E.C.</option>
+              <option value="2020">2020 E.C.</option>
+              <option value="2021">2021 E.C.</option>
             </select>
           </div>
 
           <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
               Ethiopian Month
             </label>
             <select
@@ -492,7 +377,50 @@ export default function FinancePaymentCycles() {
           </div>
 
           <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+              Department
+            </label>
+            <select
+              value={departmentFilter}
+              onChange={(e) => {
+                setDepartmentFilter(e.target.value);
+                setProgramFilter('');
+                setPage(1);
+              }}
+              className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="">All Departments</option>
+              {departments.map((d) => (
+                <option key={d._id || d.id} value={d._id || d.id}>
+                  {d.name || d.code}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+              Programme
+            </label>
+            <select
+              value={programFilter}
+              onChange={(e) => {
+                setProgramFilter(e.target.value);
+                setPage(1);
+              }}
+              className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="">All Programmes</option>
+              {programs.map((p) => (
+                <option key={p._id || p.id} value={p._id || p.id}>
+                  {p.name || p.code}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
               Search / Student ID
             </label>
             <input
@@ -653,8 +581,6 @@ export default function FinancePaymentCycles() {
           )}
         </CardBody>
       </Card>
-      </>
-      )}
 
       {/* CREATE CYCLE MODAL */}
       <Modal

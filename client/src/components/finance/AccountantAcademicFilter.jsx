@@ -19,7 +19,13 @@ export default function AccountantAcademicFilter({
   // Load academic structure (departments, programs, courses, batches)
   const { data: structureData, isLoading } = useQuery({
     queryKey: ['academic-structure'],
-    queryFn: async () => (await api.get('/registrar/academic-structure')).data,
+    queryFn: async () => {
+      try {
+        return (await api.get('/finance/academic-structure')).data;
+      } catch {
+        return (await api.get('/registrar/academic-structure')).data;
+      }
+    },
     staleTime: 5 * 60 * 1000,
   });
 

@@ -62,13 +62,25 @@ export const createPortal = asyncHandler(async (req, res) => {
     throw new AppError(400, 'STRUCTURE_REQUIRED', 'Target department, programme or batches must be selected.');
   }
 
-  // Auto-generate title if missing or empty
+  // Auto-detect delivery category from selected batches
+  const batchCategories = [...new Set(resolvedBatches.map((b) => b.category).filter(Boolean))];
+  let autoCategory = 'regular';
+  if (batchCategories.length === 1) {
+    autoCategory = batchCategories[0];
+  } else if (batchCategories.length > 1) {
+    autoCategory = 'both';
+  } else if (category) {
+    autoCategory = category;
+  }
+
+  // Auto-generate title if missing or empty: [Academic Year] New Student Registration on [Regular/Extension] — [Programmes]
   let portalTitle = (title || '').trim();
   if (!portalTitle) {
-    const batchCodes = resolvedBatches.map((b) => b.code).filter(Boolean).join(', ');
+    const deliveryLabel = autoCategory === 'both' ? 'Regular and Extension' : (autoCategory.charAt(0).toUpperCase() + autoCategory.slice(1));
     const progDocs = await Program.find({ _id: { $in: resolvedPrograms.length ? resolvedPrograms : [primaryProgram] } }).lean();
     const progNames = progDocs.map((p) => p.name).filter(Boolean).join(', ');
-    portalTitle = `${batchCodes ? `${batchCodes} — ` : ''}${progNames || 'Academic'} Intake`;
+    const ethYear = toEthiopian(new Date()).year;
+    portalTitle = `${ethYear} New Student Registration on ${deliveryLabel} — ${progNames || 'All Programmes'}`;
   }
 
   const portalId = crypto.randomBytes(16).toString('hex');
@@ -79,6 +91,12 @@ export const createPortal = asyncHandler(async (req, res) => {
     throw new AppError(400, 'INVALID_DATES', 'Closing date must be after opening date.');
   }
 
+  const entryPoints = {
+    degree: Number(req.body.entryPoints?.degree) || 350,
+    diploma: Number(req.body.entryPoints?.diploma) || 275,
+    shortTerm: Number(req.body.entryPoints?.shortTerm) || 200,
+  };
+
   const portal = await RegistrationPortal.create({
     title: portalTitle,
     portalId,
@@ -88,11 +106,12 @@ export const createPortal = asyncHandler(async (req, res) => {
     departments: resolvedDepartments.length ? resolvedDepartments : [primaryDept],
     programs: resolvedPrograms.length ? resolvedPrograms : [primaryProgram],
     batches: batchIdList,
-    category,
+    category: autoCategory,
     opensAt: parsedOpensAt,
     closesAt: parsedClosesAt,
     tutorialVideoUrl: tutorialVideoUrl.trim(),
     instructions: instructions.trim(),
+    entryPoints,
     maxApplications: Number(maxApplications) || 500,
     status: 'open',
     createdBy: req.user.id,
@@ -266,6 +285,7 @@ export const getPublicPortal = asyncHandler(async (req, res) => {
       isClosed: !isOpen,
       tutorialVideoUrl: portal.tutorialVideoUrl || '',
       instructions: portal.instructions || '',
+      entryPoints: portal.entryPoints || { degree: 350, diploma: 275, shortTerm: 200 },
     },
   });
 });
@@ -302,6 +322,11 @@ export const submitPublicApplication = asyncHandler(async (req, res) => {
     emergencyContact = {},
     previousEducation = {},
     photo = {},
+    qualificationType = 'degree',
+    departmentId,
+    programId,
+    batchId,
+    certificateDocument = {},
   } = req.body;
 
   if (!firstName || !lastName) {
@@ -318,14 +343,20 @@ export const submitPublicApplication = asyncHandler(async (req, res) => {
     throw new AppError(400, 'PHONE_INVALID', 'A valid Ethiopian mobile number (+251 9... or +251 7...) is required.');
   }
 
-  // Prevent duplicate pending/approved submissions in the same portal
+  const fullName = [firstName.trim(), middleName.trim(), lastName.trim()].filter(Boolean).join(' ');
+
+  // Prevent duplicate pending/approved submissions: check full name + phone OR email/phone in this portal
   const duplicate = await StudentApplication.findOne({
     portal: portal._id,
-    $or: [{ email: cleanEmail }, { phone: cleanPhone }],
+    $or: [
+      { fullName: new RegExp(`^${fullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'), phone: cleanPhone },
+      { email: cleanEmail },
+      { phone: cleanPhone },
+    ],
     status: { $in: ['pending', 'approved'] },
   });
   if (duplicate) {
-    throw new AppError(409, 'ALREADY_APPLIED', 'An active application with this email or phone number has already been submitted for this portal.');
+    throw new AppError(409, 'ALREADY_APPLIED', 'You have already submitted an application with this name and phone number.');
   }
 
   // Handle Ethiopian birth date
@@ -339,7 +370,6 @@ export const submitPublicApplication = asyncHandler(async (req, res) => {
     dob = fromEthiopian(y, m, d, 12, 0, 0);
   }
 
-  const fullName = [firstName.trim(), middleName.trim(), lastName.trim()].filter(Boolean).join(' ');
   const ethYear = toEthiopian(new Date()).year;
   const count = await StudentApplication.countDocuments();
   const applicationNumber = `APP-${ethYear}-${String(count + 1).padStart(6, '0')}`;
@@ -358,7 +388,21 @@ export const submitPublicApplication = asyncHandler(async (req, res) => {
     phone: cleanPhone,
     address,
     emergencyContact,
-    previousEducation,
+    previousEducation: {
+      schoolName: previousEducation.schoolName || '',
+      completionYear: previousEducation.completionYear || '',
+    },
+    qualificationType: qualificationType || 'degree',
+    department: departmentId || portal.department,
+    program: programId || portal.program,
+    batch: batchId || portal.batch || (portal.batches?.[0] || null),
+    certificateDocument: {
+      fileName: certificateDocument.fileName || null,
+      fileType: certificateDocument.fileType || null,
+      fileSize: certificateDocument.fileSize || null,
+      url: certificateDocument.url || null,
+      uploadedAt: new Date(),
+    },
     photo: {
       provider: 'imagekit',
       fileId: photo.fileId || null,
@@ -401,6 +445,7 @@ export const listApplications = asyncHandler(async (req, res) => {
     portalId,
     departmentId,
     programId,
+    batchId,
     status,
     search,
     page = 1,
@@ -421,13 +466,34 @@ export const listApplications = asyncHandler(async (req, res) => {
     ];
   }
 
-  // Filter by department or program via portal relation
-  if (departmentId || programId) {
-    const portalFilter = {};
-    if (departmentId) portalFilter.department = departmentId;
-    if (programId) portalFilter.program = programId;
-    const matchingPortals = await RegistrationPortal.find(portalFilter).distinct('_id');
-    filter.portal = { $in: matchingPortals };
+  // Filter by department, program, or batch (direct on application or via portal)
+  const andClauses = [];
+  if (departmentId) {
+    const matchingPortals = await RegistrationPortal.find({
+      $or: [{ department: departmentId }, { departments: departmentId }],
+    }).distinct('_id');
+    andClauses.push({
+      $or: [{ department: departmentId }, { portal: { $in: matchingPortals } }],
+    });
+  }
+  if (programId) {
+    const matchingPortals = await RegistrationPortal.find({
+      $or: [{ program: programId }, { programs: programId }],
+    }).distinct('_id');
+    andClauses.push({
+      $or: [{ program: programId }, { portal: { $in: matchingPortals } }],
+    });
+  }
+  if (batchId) {
+    const matchingPortals = await RegistrationPortal.find({
+      $or: [{ batch: batchId }, { batches: batchId }],
+    }).distinct('_id');
+    andClauses.push({
+      $or: [{ batch: batchId }, { portal: { $in: matchingPortals } }],
+    });
+  }
+  if (andClauses.length > 0) {
+    filter.$and = andClauses;
   }
 
   const skip = (Math.max(1, Number(page)) - 1) * Number(limit);
@@ -441,6 +507,10 @@ export const listApplications = asyncHandler(async (req, res) => {
           { path: 'batch', select: 'name code category' },
         ],
       })
+      .populate('department', 'name code')
+      .populate('program', 'name code qualificationType durationYears')
+      .populate('batch', 'name code category')
+      .populate('student', 'studentId fullName phone email photo department program batch')
       .populate('reviewedBy', 'name email')
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -471,6 +541,9 @@ export const getApplicationDetail = asyncHandler(async (req, res) => {
         { path: 'batch', select: 'name code category admissionAcademicYear' },
       ],
     })
+    .populate('department', 'name code')
+    .populate('program', 'name code qualificationType durationYears')
+    .populate('batch', 'name code category')
     .populate('reviewedBy', 'name email')
     .populate('student')
     .lean();
@@ -487,14 +560,18 @@ export const getApplicationDetail = asyncHandler(async (req, res) => {
 
 // 9. Approve Application & Create Official Student (Registrar)
 export const approveApplication = asyncHandler(async (req, res) => {
-  const application = await StudentApplication.findById(req.params.id).populate({
-    path: 'portal',
-    populate: [
-      { path: 'department' },
-      { path: 'program' },
-      { path: 'batch' },
-    ],
-  });
+  const application = await StudentApplication.findById(req.params.id)
+    .populate({
+      path: 'portal',
+      populate: [
+        { path: 'department' },
+        { path: 'program' },
+        { path: 'batch' },
+      ],
+    })
+    .populate('department')
+    .populate('program')
+    .populate('batch');
 
   if (!application) throw new AppError(404, 'APPLICATION_NOT_FOUND', 'Application record not found.');
 
@@ -512,14 +589,25 @@ export const approveApplication = asyncHandler(async (req, res) => {
   }
 
   const portal = application.portal;
-  if (!portal || !portal.program) {
-    throw new AppError(400, 'PORTAL_INVALID', 'The linked registration portal or programme is invalid.');
+  let program = application.program || portal?.program;
+  let department = application.department || portal?.department;
+  let batch = application.batch || portal?.batch;
+
+  if (!program && portal?.programs?.length > 0) {
+    program = await Program.findById(portal.programs[0]);
+  }
+  if (!department && program?.department) {
+    department = await Department.findById(program.department);
+  }
+  if (!batch && portal?.batches?.length > 0) {
+    batch = await Batch.findById(portal.batches[0]);
   }
 
-  const program = portal.program;
-  const department = portal.department;
-  const batch = portal.batch;
-  const category = portal.category || 'regular';
+  if (!program || !department) {
+    throw new AppError(400, 'PORTAL_INVALID', 'The target programme or department is missing.');
+  }
+
+  const category = batch?.category || portal?.category || 'regular';
 
   // Check if student with this email or phone already exists
   const existingEmail = await Student.findOne({ email: application.email });
@@ -639,22 +727,20 @@ export const rejectApplication = asyncHandler(async (req, res) => {
     throw new AppError(400, 'ALREADY_APPROVED', 'An approved application cannot be rejected after student registration.');
   }
 
-  application.status = 'rejected';
-  application.rejectionReason = reason.trim();
-  application.reviewedBy = req.user.id;
-  application.reviewedAt = new Date();
-  await application.save();
+  // When rejected: remove completely from the database as requested
+  const appNumber = application.applicationNumber;
+  await StudentApplication.findByIdAndDelete(req.params.id);
 
   audit({
     req,
-    action: 'registrar.application_rejected',
+    action: 'registrar.application_rejected_and_deleted',
     targetType: 'StudentApplication',
-    targetId: application._id,
-    meta: { applicationNumber: application.applicationNumber, reason },
+    targetId: req.params.id,
+    meta: { applicationNumber: appNumber, reason },
   });
 
   res.json({
-    application,
-    message: 'Application rejected.',
+    success: true,
+    message: 'Application was rejected and completely removed from the database.',
   });
 });
