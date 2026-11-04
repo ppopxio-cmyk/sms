@@ -1,4 +1,5 @@
 import { Student, Enrollment, ProgressionRecord } from '../models/Student.js';
+import { StudentApplication } from '../models/StudentApplication.js';
 import { Program, Department, Batch, AcademicYear } from '../models/AcademicStructure.js';
 import { CourseRegistration, CourseOffering } from '../models/Offering.js';
 import { Result, AttendanceRecord } from '../models/Records.js';
@@ -211,7 +212,7 @@ export const listStudents = asyncHandler(async (req, res) => {
     ? null
     : query.status
       ? { studentStatus: query.status }
-      : { studentStatus: { $ne: 'graduated' } };
+      : { studentStatus: 'active' };
 
   const filter = mergeFilters(
     statusFilter,
@@ -254,7 +255,7 @@ export const getStudent = asyncHandler(async (req, res) => {
     .lean();
   if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'That student record was not found.');
 
-  const [enrollments, registrations, publishedResults, certificates] = await Promise.all([
+  const [enrollments, registrations, publishedResults, certificates, application] = await Promise.all([
     Enrollment.find({ student: student._id })
       .populate('academicYear', 'label')
       .populate('batch', 'code name')
@@ -263,6 +264,11 @@ export const getStudent = asyncHandler(async (req, res) => {
     CourseRegistration.countDocuments({ student: student._id, status: 'registered' }),
     Result.countDocuments({ student: student._id, status: 'published' }),
     Certificate.find({ student: student._id }).sort({ issuedAt: -1 }).lean(),
+    StudentApplication.findOne({
+      $or: [{ student: student._id }, { email: student.email, status: 'approved' }],
+    })
+      .select('applicationNumber nationalIdFront nationalIdBack emergencyContact previousEducation certificateDocument')
+      .lean(),
   ]);
 
   res.json({
@@ -273,6 +279,7 @@ export const getStudent = asyncHandler(async (req, res) => {
       certificates: certificates.length,
       enrollments: enrollments.length,
     },
+    application: application || null,
     enrollments: enrollments.map((row) => ({
       ...row,
       id: String(row._id),

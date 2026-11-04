@@ -31,7 +31,18 @@ export default function AccountantAcademicFilter({
 
   const batches = useMemo(() => {
     const list = structureData?.batches || [];
-    return list.filter((b) => b.status === 'active' || !b.status);
+    const seen = new Set();
+    const result = [];
+    for (const b of list) {
+      const id = String(b._id || b.id || '');
+      const key = `${b.code || ''}-${b.name || ''}`.trim().toLowerCase() || id;
+      if (!seen.has(id) && !seen.has(key) && (b.status === 'active' || !b.status)) {
+        seen.add(id);
+        seen.add(key);
+        result.push(b);
+      }
+    }
+    return result;
   }, [structureData?.batches]);
 
   const departments = structureData?.departments || [];

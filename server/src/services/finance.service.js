@@ -263,22 +263,40 @@ export async function createPaymentCycle(payload, userId) {
   const cleanAmount = Math.round(Number(amount));
   if (cleanAmount < 0) throw new AppError(400, 'INVALID_AMOUNT', 'Cycle amount must be non-negative.');
 
+  // Guard: If this month already has an active or draft cycle, do not allow duplicate creation
+  const existingCycle = await PaymentCycle.findOne({
+    ethYear: Number(ethYear),
+    ethMonth: Number(ethMonth),
+    status: { $in: ['open', 'draft'] },
+    deletedAt: null,
+  });
+  if (existingCycle) {
+    throw new AppError(
+      409,
+      'CYCLE_EXISTS',
+      `A payment cycle for ${ETH_MONTHS[ethMonth - 1] || 'Month'} ${ethYear} is already ${existingCycle.status}. You cannot create a duplicate cycle for the same month.`
+    );
+  }
+
   const settings = await SystemSetting.findOne({ key: 'global' }).lean();
   const defaultBank = settings?.finance?.defaultBank || {};
 
   const portalHash = crypto.randomBytes(16).toString('hex');
+  const monthName = (ETH_MONTHS[ethMonth - 1] || 'month').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const slug = `${monthName}-${ethYear}`;
 
   const cycle = await PaymentCycle.create({
     title: title || `${ETH_MONTHS[ethMonth - 1] || 'Month'} ${ethYear}`,
+    slug,
     ethYear: Number(ethYear),
     ethMonth: Number(ethMonth),
     opensAt: parseEATDate(opensAt, false),
     dueAt: parseEATDate(dueAt, true),
     amount: cleanAmount,
     bank: {
-      bank: bank?.bank || defaultBank.bank || 'Commercial Bank of Ethiopia',
-      accountNumber: bank?.accountNumber || defaultBank.accountNumber || '1000123456789',
-      holderName: bank?.holderName || defaultBank.holderName || 'HARAMAYA HEALTH SCIENCE COLLEGE',
+      bank: bank?.bank || defaultBank.bank || 'Chapa Payment Gateway',
+      accountNumber: bank?.accountNumber || defaultBank.accountNumber || 'CHAPA',
+      holderName: bank?.holderName || defaultBank.holderName || 'College Online Fee Portal',
     },
     targets: {
       all: targets?.all ?? true,

@@ -7,12 +7,14 @@ const paymentCycleSchema = new mongoose.Schema(
     ethYear: { type: Number, required: true, min: 2000, max: 2150, index: true },
     ethMonth: { type: Number, required: true, min: 1, max: 13, index: true },
     opensAt: { type: Date, required: true },
+    slug: { type: String, trim: true, lowercase: true, index: true }, // e.g. "tikimt-2019"
     dueAt: { type: Date, required: true, index: true },
     amount: { type: Number, required: true, min: 0 }, // Integer santim (e.g. 1500 ETB = 150000 santim)
+    lateFeeEnabled: { type: Boolean, default: true },
     bank: {
-      bank: { type: String, default: 'Commercial Bank of Ethiopia', trim: true },
-      accountNumber: { type: String, required: true, trim: true },
-      holderName: { type: String, required: true, trim: true },
+      bank: { type: String, default: 'Chapa Online Payment (Telebirr / CBEBirr / Cards)', trim: true },
+      accountNumber: { type: String, default: 'CHAPA_PAY', trim: true },
+      holderName: { type: String, default: 'College Online Fee Portal', trim: true },
     },
     targets: {
       all: { type: Boolean, default: true },

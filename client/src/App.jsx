@@ -181,7 +181,9 @@ export default function App() {
         <Route path="/assessments/:hash" element={<PublicAssessment />} />
         <Route path="/assesmets" element={<PublicAssessment />} />
         <Route path="/monthly-payments/:hash" element={<MonthlyPaymentPortal />} />
+        <Route path="/monthly-payment/:hash" element={<MonthlyPaymentPortal />} />
         <Route path="/monthly-payments/done/:doneHash" element={<MonthlyPaymentDone />} />
+        <Route path="/monthly-payment/done/:doneHash" element={<MonthlyPaymentDone />} />
         <Route path="/monthly-payments/chapa-verify" element={<ChapaVerifyPage />} />
         <Route path="/register/:portalId" element={<PublicRegistrationPortal />} />
         <Route path="/application/track" element={<ApplicationTrackingPage />} />
@@ -236,6 +238,8 @@ export default function App() {
               <Route path="/registrar/analytics" element={<RegistrarAnalytics />} />
               <Route path="/registrar/registration-portals" element={<RegistrarRegistrationPortals />} />
               <Route path="/registrar/applications" element={<RegistrarApplications />} />
+              <Route path="/registrar/applications/students/:studentId" element={<RegistrarStudent />} />
+              <Route path="/registrar/applications/studets/:studentId" element={<RegistrarStudent />} />
               <Route path="/registrar/students" element={<RegistrarStudents />} />
               <Route path="/registrar/students/:studentId" element={<RegistrarStudent />} />
               <Route path="/registrar/students/:id/finance" element={<StudentFinanceProfile readOnly />} />

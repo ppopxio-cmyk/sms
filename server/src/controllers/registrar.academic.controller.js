@@ -880,9 +880,15 @@ export const updateBatch = asyncHandler(async (req, res) => {
   if (!batch) throw new AppError(404, 'BATCH_NOT_FOUND', 'That batch was not found.');
   const input = req.body;
 
-  // Allow status to be changed (e.g. to archived).
+  // Allow status to be changed (e.g. to archived or active).
   if (input.status) {
     batch.status = input.status;
+    if (input.status === 'active') {
+      await Student.updateMany(
+        { batch: batch._id, studentStatus: { $in: ['admitted', 'planned'] } },
+        { $set: { studentStatus: 'active', enrollmentStatus: 'active' } }
+      );
+    }
   }
   if (input.category) {
     const program = await Program.findById(batch.program).lean();

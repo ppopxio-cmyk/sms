@@ -35,7 +35,7 @@ import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';
-import { ETH_MONTHS, formatEthiopian } from '../../lib/ethiopianDate';
+import { ETH_MONTHS, formatEthiopian, toEthiopian, fromEthiopian } from '../../lib/ethiopianDate';
 
 const STATUS_TONES = {
   draft: 'neutral',
@@ -81,25 +81,34 @@ export default function FinancePaymentCycles() {
     if (programFilter) {
       list = list.filter((b) => String(b.program?._id || b.program) === programFilter);
     }
-    return list.filter((b) => b.status === 'active' || !b.status);
+    const seen = new Set();
+    const result = [];
+    for (const b of list) {
+      const id = String(b._id || b.id || '');
+      const key = `${b.code || ''}-${b.name || ''}`.trim().toLowerCase() || id;
+      if (!seen.has(id) && !seen.has(key) && (b.status === 'active' || !b.status)) {
+        seen.add(id);
+        seen.add(key);
+        result.push(b);
+      }
+    }
+    return result;
   }, [structureData?.batches, programFilter]);
 
   // Detail Modal & Tabs
   const [selectedCycleId, setSelectedCycleId] = useState(null);
   const [detailTab, setDetailTab] = useState('overview'); // 'overview' | 'students' | 'submissions' | 'settings'
 
-  // Create Cycle Modal
+  // Create Cycle Modal State
+  const curEthDate = useMemo(() => toEthiopian(new Date()), []);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState({
     title: 'Tikimt 2019',
     ethYear: 2019,
     ethMonth: 2,
-    opensAt: new Date().toISOString().slice(0, 10),
-    dueAt: new Date(Date.now() + 15 * 86_400_000).toISOString().slice(0, 10),
+    openDay: 11,
+    dueDay: 18,
     amountEtb: '1500',
-    accountNumber: '1000123456789',
-    holderName: 'HARAMAYA HEALTH SCIENCE COLLEGE',
-    bank: 'Commercial Bank of Ethiopia',
     targetAll: true,
   });
 
@@ -172,18 +181,15 @@ export default function FinancePaymentCycles() {
   const createMutation = useMutation({
     mutationFn: async (payload) => {
       const amountSantim = Math.round(parseFloat(payload.amountEtb) * 100);
+      const openDate = fromEthiopian(payload.ethYear, payload.ethMonth, Number(payload.openDay) || 11);
+      const dueDate = fromEthiopian(payload.ethYear, payload.ethMonth, Number(payload.dueDay) || 18);
       const res = await api.post('/finance/cycles', {
         title: payload.title,
         ethYear: Number(payload.ethYear),
         ethMonth: Number(payload.ethMonth),
-        opensAt: payload.opensAt,
-        dueAt: payload.dueAt,
+        opensAt: openDate ? openDate.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+        dueAt: dueDate ? dueDate.toISOString().slice(0, 10) : new Date(Date.now() + 15 * 86400000).toISOString().slice(0, 10),
         amount: amountSantim,
-        bank: {
-          bank: payload.bank,
-          accountNumber: payload.accountNumber,
-          holderName: payload.holderName,
-        },
         targets: { all: payload.targetAll },
       });
       return res.data;
@@ -615,7 +621,7 @@ export default function FinancePaymentCycles() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
-                Ethiopian Month
+                Ethiopian Month (Current & Upcoming)
               </label>
               <select
                 value={createForm.ethMonth}
@@ -629,11 +635,13 @@ export default function FinancePaymentCycles() {
                 }}
                 className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
               >
-                {ETH_MONTHS.map((m, idx) => (
-                  <option key={m} value={idx + 1}>
-                    {idx + 1}. {m}
-                  </option>
-                ))}
+                {ETH_MONTHS.map((m, idx) => ({ name: m, monthNum: idx + 1 }))
+                  .filter((item) => Number(createForm.ethYear) > curEthDate.year || item.monthNum >= curEthDate.month)
+                  .map((item) => (
+                    <option key={item.name} value={item.monthNum}>
+                      {item.monthNum}. {item.name}
+                    </option>
+                  ))}
               </select>
             </div>
 
@@ -658,7 +666,7 @@ export default function FinancePaymentCycles() {
                 {academicYears.length > 0 ? (
                   academicYears.map((ay) => {
                     const match = ay.label?.match(/\b(20\d\d)\b/);
-                    const yr = match ? Number(match[1]) : 2019;
+                    const yr = match ? Number(match[1]) : curEthDate.year;
                     return (
                       <option key={ay._id || ay.id} value={yr}>
                         {ay.label || `${yr} E.C.`}
@@ -666,7 +674,7 @@ export default function FinancePaymentCycles() {
                     );
                   })
                 ) : (
-                  <option value={2019}>2019 E.C.</option>
+                  <option value={curEthDate.year}>{curEthDate.year} E.C.</option>
                 )}
               </select>
             </div>
@@ -675,34 +683,65 @@ export default function FinancePaymentCycles() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
-                Opening Date (UTC)
+                Opening Day (Ethiopian Calendar)
               </label>
-              <input
-                type="date"
-                value={createForm.opensAt}
-                onChange={(e) => setCreateForm({ ...createForm, opensAt: e.target.value })}
-                className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
-                required
-              />
+              <div className="relative mt-1">
+                <input
+                  type="number"
+                  min="1"
+                  max="30"
+                  value={createForm.openDay}
+                  onChange={(e) => setCreateForm({ ...createForm, openDay: Number(e.target.value) })}
+                  className="block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
+                  placeholder="e.g. 11"
+                  required
+                />
+                <span className="absolute right-3 top-2 text-xs font-semibold text-slate-400">
+                  {ETH_MONTHS[createForm.ethMonth - 1]}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Opens on {ETH_MONTHS[createForm.ethMonth - 1]} {createForm.openDay}, {createForm.ethYear} E.C.
+              </p>
             </div>
 
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
-                Due Date (UTC)
+                Due Day (Ethiopian Calendar)
               </label>
-              <input
-                type="date"
-                value={createForm.dueAt}
-                onChange={(e) => setCreateForm({ ...createForm, dueAt: e.target.value })}
-                className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
-                required
-              />
+              <div className="relative mt-1">
+                <input
+                  type="number"
+                  min="1"
+                  max="30"
+                  value={createForm.dueDay}
+                  onChange={(e) => setCreateForm({ ...createForm, dueDay: Number(e.target.value) })}
+                  className="block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
+                  placeholder="e.g. 18"
+                  required
+                />
+                <span className="absolute right-3 top-2 text-xs font-semibold text-slate-400">
+                  {ETH_MONTHS[createForm.ethMonth - 1]}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Due by {ETH_MONTHS[createForm.ethMonth - 1]} {createForm.dueDay}, {createForm.ethYear} E.C.
+              </p>
             </div>
+          </div>
+
+          <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3.5 space-y-1.5 text-xs text-amber-900">
+            <p className="font-bold uppercase tracking-wider text-[11px] text-amber-800">
+              Automated Overdue Penalty & Portal Persistence
+            </p>
+            <p className="leading-relaxed text-[11px]">
+              After Due Day (Day {createForm.dueDay}), the fee portal remains open indefinitely until explicitly closed. Late payers automatically incur +20 ETB on Day 1, doubling daily up to Day 5 (+320 ETB), and +50 ETB/day thereafter.
+            </p>
           </div>
 
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
-              Amount (ETB)
+              Base Monthly Fee Amount (ETB)
             </label>
             <input
               type="number"
@@ -712,39 +751,6 @@ export default function FinancePaymentCycles() {
               className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
               required
             />
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3.5 space-y-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              College CBE Bank Details (Target for Verifier)
-            </p>
-            <div>
-              <label className="block text-[11px] font-medium text-slate-600">Bank Name</label>
-              <input
-                type="text"
-                value={createForm.bank}
-                onChange={(e) => setCreateForm({ ...createForm, bank: e.target.value })}
-                className="mt-0.5 block w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-medium text-slate-600">Account Number</label>
-              <input
-                type="text"
-                value={createForm.accountNumber}
-                onChange={(e) => setCreateForm({ ...createForm, accountNumber: e.target.value })}
-                className="mt-0.5 block w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-800"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-medium text-slate-600">Holder Name</label>
-              <input
-                type="text"
-                value={createForm.holderName}
-                onChange={(e) => setCreateForm({ ...createForm, holderName: e.target.value })}
-                className="mt-0.5 block w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800"
-              />
-            </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-3">

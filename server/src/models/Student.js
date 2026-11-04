@@ -2,8 +2,8 @@ import mongoose from 'mongoose';
 import { normalizePhone, isValidEthiopianPhone } from '../utils/phone.js';
 
 export const STUDENT_SEXES = ['female', 'male', 'other', 'unspecified'];
-export const STUDENT_STATUSES = ['active', 'suspended', 'graduated', 'withdrawn', 'archived'];
-export const ENROLLMENT_STATUSES = ['pending', 'active', 'completed', 'withdrawn', 'cancelled'];
+export const STUDENT_STATUSES = ['active', 'admitted', 'planned', 'suspended', 'graduated', 'withdrawn', 'archived'];
+export const ENROLLMENT_STATUSES = ['pending', 'admitted', 'active', 'completed', 'withdrawn', 'cancelled'];
 export const STUDENT_CATEGORIES = ['regular', 'extension'];
 
 const photoSchema = new mongoose.Schema(

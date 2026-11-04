@@ -634,7 +634,7 @@ export default function RegistrarApplications() {
                             <Button
                               size="sm"
                               className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1 text-xs"
-                              onClick={() => navigate(`/registrar/students/${studentRecordId}`)}
+                              onClick={() => navigate(`/registrar/applications/students/${studentRecordId}`)}
                             >
                               <ExternalLink className="h-3.5 w-3.5" />
                               Profile
@@ -870,7 +870,7 @@ export default function RegistrarApplications() {
                         activeApplication.student?._id ||
                         activeApplication.student?.id ||
                         activeApplication.student;
-                      navigate(`/registrar/students/${studentId}`);
+                      navigate(`/registrar/applications/students/${studentId}`);
                     }}
                   >
                     <ExternalLink className="mr-1.5 h-4 w-4" /> Go to Official Student Record
@@ -1158,6 +1158,118 @@ export default function RegistrarApplications() {
                     No 12th Grade Result Certificate document uploaded for this applicant.
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* 6. Uploaded National ID Documents */}
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                6. Identity Documents & National ID Cards
+              </h4>
+              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Applicant National ID Front */}
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                  <span className="font-semibold text-slate-700 block mb-1.5">Applicant National ID (Front)</span>
+                  {activeApplication.nationalIdFront?.url ? (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 text-[11px]">ID Card Image</span>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          openDocumentViewer({
+                            type: 'image',
+                            url: activeApplication.nationalIdFront.url,
+                            title: `${activeApplication.fullName} — National ID Front`,
+                          })
+                        }
+                        className="gap-1 text-[11px]"
+                      >
+                        <Eye className="h-3 w-3" /> View ID Front
+                      </Button>
+                    </div>
+                  ) : (
+                    <span className="text-slate-400 italic">No image provided</span>
+                  )}
+                </div>
+
+                {/* Applicant National ID Back */}
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                  <span className="font-semibold text-slate-700 block mb-1.5">Applicant National ID (Back)</span>
+                  {activeApplication.nationalIdBack?.url ? (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 text-[11px]">ID Card Image</span>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          openDocumentViewer({
+                            type: 'image',
+                            url: activeApplication.nationalIdBack.url,
+                            title: `${activeApplication.fullName} — National ID Back`,
+                          })
+                        }
+                        className="gap-1 text-[11px]"
+                      >
+                        <Eye className="h-3 w-3" /> View ID Back
+                      </Button>
+                    </div>
+                  ) : (
+                    <span className="text-slate-400 italic">No image provided</span>
+                  )}
+                </div>
+
+                {/* Emergency Contact National ID Front */}
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                  <span className="font-semibold text-slate-700 block mb-1.5">Emergency Contact ID (Front)</span>
+                  {activeApplication.emergencyContact?.nationalIdFront?.url ? (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 text-[11px]">Contact ID Image</span>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          openDocumentViewer({
+                            type: 'image',
+                            url: activeApplication.emergencyContact.nationalIdFront.url,
+                            title: `Emergency Contact (${activeApplication.emergencyContact.name}) — ID Front`,
+                          })
+                        }
+                        className="gap-1 text-[11px]"
+                      >
+                        <Eye className="h-3 w-3" /> View ID Front
+                      </Button>
+                    </div>
+                  ) : (
+                    <span className="text-slate-400 italic">No image provided</span>
+                  )}
+                </div>
+
+                {/* Emergency Contact National ID Back */}
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                  <span className="font-semibold text-slate-700 block mb-1.5">Emergency Contact ID (Back)</span>
+                  {activeApplication.emergencyContact?.nationalIdBack?.url ? (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 text-[11px]">Contact ID Image</span>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          openDocumentViewer({
+                            type: 'image',
+                            url: activeApplication.emergencyContact.nationalIdBack.url,
+                            title: `Emergency Contact (${activeApplication.emergencyContact.name}) — ID Back`,
+                          })
+                        }
+                        className="gap-1 text-[11px]"
+                      >
+                        <Eye className="h-3 w-3" /> View ID Back
+                      </Button>
+                    </div>
+                  ) : (
+                    <span className="text-slate-400 italic">No image provided</span>
+                  )}
+                </div>
               </div>
             </div>
           </div>

@@ -5,6 +5,7 @@ import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { verifyCbeReceipt } from '../services/cbeVerifier.service.js';
 import { toEthiopian, ETH_MONTHS } from '../utils/ethiopianDate.js';
+import { calculateOverdueLateFee } from '../utils/lateFee.js';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import {
@@ -38,8 +39,13 @@ function checkStudentIdRateLimit(studentId) {
  */
 export const getCyclePublicDetails = asyncHandler(async (req, res) => {
   const { hash } = req.params;
+  const cleanHash = String(hash).toLowerCase().trim();
   const cycle = await PaymentCycle.findOne({
-    portalHash: String(hash).toLowerCase().trim(),
+    $or: [
+      { portalHash: cleanHash },
+      { slug: cleanHash },
+      { slug: cleanHash.replace(/_/g, '-') },
+    ],
     status: 'open',
     deletedAt: null,
   }).lean();
@@ -53,23 +59,31 @@ export const getCyclePublicDetails = asyncHandler(async (req, res) => {
     throw new AppError(404, 'NOT_FOUND', 'This payment portal has not yet opened.');
   }
 
+  // Calculate late fee if overdue
+  const lateFee = calculateOverdueLateFee(cycle.dueAt, cycle.amount);
+
   // Format Ethiopian label
   const ethMonthName = ETH_MONTHS[cycle.ethMonth - 1] || 'Month';
 
   res.json({
     cycle: {
+      portalHash: cycle.portalHash,
+      slug: cycle.slug,
       title: cycle.title,
       ethYear: cycle.ethYear,
       ethMonth: cycle.ethMonth,
       monthName: ethMonthName,
       amount: cycle.amount,
       amountEtb: (cycle.amount / 100).toFixed(2),
+      daysOverdue: lateFee.daysOverdue,
+      overduePenaltyEtb: lateFee.penaltyEtb,
+      totalAmountEtb: (lateFee.totalAmountSantim / 100).toFixed(2),
       opensAt: cycle.opensAt,
       dueAt: cycle.dueAt,
       bank: {
-        bank: cycle.bank.bank,
-        accountNumber: cycle.bank.accountNumber,
-        holderName: cycle.bank.holderName,
+        bank: cycle.bank?.bank || 'Chapa Payment Gateway',
+        accountNumber: cycle.bank?.accountNumber || 'CHAPA',
+        holderName: cycle.bank?.holderName || 'College Online Portal',
       },
     },
   });
@@ -90,8 +104,13 @@ export const loginStudentPortal = asyncHandler(async (req, res) => {
   const normalizedId = String(studentId).toUpperCase().trim();
   checkStudentIdRateLimit(normalizedId);
 
+  const cleanHash = String(hash).toLowerCase().trim();
   const cycle = await PaymentCycle.findOne({
-    portalHash: String(hash).toLowerCase().trim(),
+    $or: [
+      { portalHash: cleanHash },
+      { slug: cleanHash },
+      { slug: cleanHash.replace(/_/g, '-') },
+    ],
     status: 'open',
     deletedAt: null,
   });
@@ -145,6 +164,9 @@ export const loginStudentPortal = asyncHandler(async (req, res) => {
     { expiresIn: '3h' }
   );
 
+  // Compute late fee if overdue
+  const lateFee = calculateOverdueLateFee(charge.dueAt || cycle.dueAt, charge.amountDue);
+
   res.json({
     alreadyPaid: false,
     portalToken,
@@ -153,9 +175,13 @@ export const loginStudentPortal = asyncHandler(async (req, res) => {
       fullName: student.fullName || `${student.firstName} ${student.lastName}`,
     },
     charge: {
-      amountDue: charge.amountDue,
-      amountEtb: (charge.amountDue / 100).toFixed(2),
-      dueAt: charge.dueAt,
+      id: charge._id,
+      amountDue: lateFee.totalAmountSantim,
+      baseAmountEtb: (charge.amountDue / 100).toFixed(2),
+      daysOverdue: lateFee.daysOverdue,
+      overduePenaltyEtb: lateFee.penaltyEtb,
+      amountEtb: (lateFee.totalAmountSantim / 100).toFixed(2),
+      dueAt: charge.dueAt || cycle.dueAt,
     },
     bank: cycle.bank,
   });
@@ -302,8 +328,14 @@ export const initializeChapaPortalPayment = asyncHandler(async (req, res) => {
     throw new AppError(401, 'EXPIRED_SESSION', 'Session expired. Please enter your Student ID again.');
   }
 
-  if (decoded.portalHash !== String(hash).toLowerCase().trim()) {
-    throw new AppError(403, 'INVALID_PORTAL_SCOPE', 'Token scope does not match this payment cycle.');
+  const cleanHash = String(hash).toLowerCase().trim();
+  if (decoded.portalHash !== cleanHash) {
+    const matchingCycle = await PaymentCycle.findOne({
+      $or: [{ portalHash: cleanHash }, { slug: cleanHash }, { slug: cleanHash.replace(/_/g, '-') }],
+    }).select('portalHash slug').lean();
+    if (!matchingCycle || matchingCycle.portalHash !== decoded.portalHash) {
+      throw new AppError(403, 'INVALID_PORTAL_SCOPE', 'Token scope does not match this payment cycle.');
+    }
   }
 
   const [cycle, charge] = await Promise.all([
@@ -330,8 +362,10 @@ export const initializeChapaPortalPayment = asyncHandler(async (req, res) => {
     });
   }
 
+  // Calculate late fee if overdue
+  const lateFee = calculateOverdueLateFee(charge.dueAt || cycle.dueAt, charge.amountDue);
   const txRef = `TX-CHAPA-${charge._id}-${Date.now()}`;
-  const amountEtb = (charge.amountDue / 100).toFixed(2);
+  const amountEtb = (lateFee.totalAmountSantim / 100).toFixed(2);
 
   const clientOrigin = env.CLIENT_ORIGIN || 'https://sms-two-kappa.vercel.app';
   const returnUrl = `${clientOrigin}/monthly-payments/chapa-verify?tx_ref=${encodeURIComponent(txRef)}&hash=${encodeURIComponent(cycle.portalHash)}`;

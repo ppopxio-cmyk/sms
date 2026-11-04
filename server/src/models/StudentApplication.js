@@ -70,6 +70,26 @@ const studentApplicationSchema = new mongoose.Schema(
       name: { type: String, default: '', trim: true },
       phone: { type: String, default: '', trim: true },
       relationship: { type: String, default: '', trim: true },
+      nationalIdFront: {
+        url: { type: String, default: null },
+        fileId: { type: String, default: null },
+        filePath: { type: String, default: null },
+      },
+      nationalIdBack: {
+        url: { type: String, default: null },
+        fileId: { type: String, default: null },
+        filePath: { type: String, default: null },
+      },
+    },
+    nationalIdFront: {
+      url: { type: String, default: null },
+      fileId: { type: String, default: null },
+      filePath: { type: String, default: null },
+    },
+    nationalIdBack: {
+      url: { type: String, default: null },
+      fileId: { type: String, default: null },
+      filePath: { type: String, default: null },
     },
     previousEducation: {
       schoolName: { type: String, default: '', trim: true },

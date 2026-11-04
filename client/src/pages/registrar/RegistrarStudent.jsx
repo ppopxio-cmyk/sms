@@ -13,6 +13,10 @@ import {
   Pencil,
   Trash2,
   UserRound,
+  FileText,
+  IdCard,
+  Eye,
+  ShieldCheck,
 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import {
@@ -60,6 +64,7 @@ export default function RegistrarStudent() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteCode, setDeleteCode] = useState('');
   const [shake, setShake] = useState(0);
+  const [viewingDoc, setViewingDoc] = useState(null); // { type: 'image' | 'pdf', url: string, title: string }
 
   const student = useQuery({
     queryKey: ['registrar', 'student', studentId],
@@ -361,8 +366,205 @@ export default function RegistrarStudent() {
               </CardBody>
             </Card>
           </div>
+
+          {student.data?.application && (
+            <Card>
+              <CardHeader
+                title="Attached Admission Documents & Identity Cards"
+                subtitle={`Original admission application #${student.data.application.applicationNumber} records.`}
+                icon={IdCard}
+              />
+              <CardBody className="space-y-4">
+                {/* 12th Grade Certificate */}
+                {student.data.application.certificateDocument?.url ? (
+                  <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shrink-0">
+                          <FileText className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-slate-900 text-xs">
+                            {student.data.application.certificateDocument.fileName || '12th Grade Result Certificate'}
+                          </p>
+                          <p className="text-[11px] text-slate-500">
+                            {student.data.application.certificateDocument.fileSize
+                              ? `${(student.data.application.certificateDocument.fileSize / 1024 / 1024).toFixed(2)} MB • `
+                              : ''}
+                            Official Entrance Exam / Educational Certificate
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            const isPdf =
+                              student.data.application.certificateDocument?.fileType?.includes('pdf') ||
+                              student.data.application.certificateDocument?.fileName?.toLowerCase().endsWith('.pdf');
+                            setViewingDoc({
+                              type: isPdf ? 'pdf' : 'image',
+                              url: student.data.application.certificateDocument.url,
+                              title: `${record.fullName} — 12th Grade Certificate`,
+                            });
+                          }}
+                          className="gap-1 text-xs"
+                        >
+                          <Eye className="h-3.5 w-3.5" /> View Certificate
+                        </Button>
+                        <a
+                          href={student.data.application.certificateDocument.url}
+                          download={student.data.application.certificateDocument.fileName || 'certificate'}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 transition"
+                        >
+                          <Download className="h-3.5 w-3.5" /> Download
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Identity Cards Grid */}
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {/* Applicant ID Front */}
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                    <span className="font-semibold text-slate-700 block mb-1">Applicant National ID (Front)</span>
+                    {student.data.application.nationalIdFront?.url ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          setViewingDoc({
+                            type: 'image',
+                            url: student.data.application.nationalIdFront.url,
+                            title: `${record.fullName} — National ID Front`,
+                          })
+                        }
+                        className="w-full gap-1 text-[11px] mt-1"
+                      >
+                        <Eye className="h-3 w-3" /> View Front
+                      </Button>
+                    ) : (
+                      <span className="text-slate-400 italic text-[11px]">Not provided</span>
+                    )}
+                  </div>
+
+                  {/* Applicant ID Back */}
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                    <span className="font-semibold text-slate-700 block mb-1">Applicant National ID (Back)</span>
+                    {student.data.application.nationalIdBack?.url ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          setViewingDoc({
+                            type: 'image',
+                            url: student.data.application.nationalIdBack.url,
+                            title: `${record.fullName} — National ID Back`,
+                          })
+                        }
+                        className="w-full gap-1 text-[11px] mt-1"
+                      >
+                        <Eye className="h-3 w-3" /> View Back
+                      </Button>
+                    ) : (
+                      <span className="text-slate-400 italic text-[11px]">Not provided</span>
+                    )}
+                  </div>
+
+                  {/* Emergency Contact ID Front */}
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                    <span className="font-semibold text-slate-700 block mb-1 truncate">
+                      Emergency Contact ID (Front)
+                      {student.data.application.emergencyContact?.name ? ` — ${student.data.application.emergencyContact.name}` : ''}
+                    </span>
+                    {student.data.application.emergencyContact?.nationalIdFront?.url ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          setViewingDoc({
+                            type: 'image',
+                            url: student.data.application.emergencyContact.nationalIdFront.url,
+                            title: `Emergency Contact (${student.data.application.emergencyContact?.name}) — ID Front`,
+                          })
+                        }
+                        className="w-full gap-1 text-[11px] mt-1"
+                      >
+                        <Eye className="h-3 w-3" /> View Contact Front
+                      </Button>
+                    ) : (
+                      <span className="text-slate-400 italic text-[11px]">Not provided</span>
+                    )}
+                  </div>
+
+                  {/* Emergency Contact ID Back */}
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                    <span className="font-semibold text-slate-700 block mb-1 truncate">Emergency Contact ID (Back)</span>
+                    {student.data.application.emergencyContact?.nationalIdBack?.url ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          setViewingDoc({
+                            type: 'image',
+                            url: student.data.application.emergencyContact.nationalIdBack.url,
+                            title: `Emergency Contact (${student.data.application.emergencyContact?.name}) — ID Back`,
+                          })
+                        }
+                        className="w-full gap-1 text-[11px] mt-1"
+                      >
+                        <Eye className="h-3 w-3" /> View Contact Back
+                      </Button>
+                    ) : (
+                      <span className="text-slate-400 italic text-[11px]">Not provided</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Emergency Contact Info details */}
+                {student.data.application.emergencyContact?.name ? (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 text-xs flex flex-wrap items-center gap-4 text-slate-700">
+                    <span className="font-bold text-slate-900 flex items-center gap-1">
+                      <ShieldCheck className="h-3.5 w-3.5 text-brand-600" />
+                      Emergency Contact:
+                    </span>
+                    <span><strong>Name:</strong> {student.data.application.emergencyContact.name}</span>
+                    <span><strong>Relationship:</strong> {student.data.application.emergencyContact.relationship || '—'}</span>
+                    <span><strong>Phone:</strong> {student.data.application.emergencyContact.phone || '—'}</span>
+                  </div>
+                ) : null}
+              </CardBody>
+            </Card>
+          )}
         </>
       ) : null}
+
+      {viewingDoc && (
+        <Modal
+          open={Boolean(viewingDoc)}
+          onClose={() => setViewingDoc(null)}
+          title={viewingDoc.title}
+          size="lg"
+        >
+          <div className="flex flex-col items-center justify-center p-2">
+            {viewingDoc.type === 'pdf' ? (
+              <iframe
+                src={viewingDoc.url}
+                title={viewingDoc.title}
+                className="h-[70vh] w-full rounded-xl border border-slate-200"
+              />
+            ) : (
+              <img
+                src={viewingDoc.url}
+                alt={viewingDoc.title}
+                className="max-h-[75vh] w-auto max-w-full rounded-2xl object-contain shadow-md"
+              />
+            )}
+          </div>
+        </Modal>
+      )}
 
       <StudentFormModal
         open={editing}

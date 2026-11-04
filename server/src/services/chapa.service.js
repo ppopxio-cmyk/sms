@@ -6,6 +6,7 @@ import { logger } from '../utils/logger.js';
 import { PaymentCycle, StudentCharge, Payment, PaymentAttempt } from '../models/Finance.js';
 import { Student } from '../models/Student.js';
 import { toEthiopian } from '../utils/ethiopianDate.js';
+import { calculateOverdueLateFee } from '../utils/lateFee.js';
 
 const CHAPA_BASE_URL = env.CHAPA_API_BASE_URL || 'https://api.chapa.co';
 
@@ -237,8 +238,15 @@ export async function processVerifiedChapaPayment({ txRef, verifiedData, ipAddre
   const chapaStatus = String(verifiedData.status || '').toLowerCase();
   const isSuccess = chapaStatus === 'success';
 
-  // Amount check in ETB (charge.amountDue is in santim)
-  const expectedEtb = (charge.amountDue / 100).toFixed(2);
+  // Amount check in ETB (charge.amountDue is in santim, late fee may apply)
+  const baseExpectedEtb = (charge.amountDue / 100).toFixed(2);
+  let cycleDoc = null;
+  if (charge.cycle) {
+    const query = PaymentCycle.findById(charge.cycle);
+    cycleDoc = query && typeof query.lean === 'function' ? await query.lean() : await query;
+  }
+  const lateFee = calculateOverdueLateFee(charge.dueAt || cycleDoc?.dueAt, charge.amountDue);
+  const overdueExpectedEtb = (lateFee.totalAmountSantim / 100).toFixed(2);
   const receivedEtb = Number(verifiedData.amount).toFixed(2);
 
   if (!isSuccess) {
@@ -261,9 +269,10 @@ export async function processVerifiedChapaPayment({ txRef, verifiedData, ipAddre
     };
   }
 
-  if (expectedEtb !== receivedEtb) {
-    logger.warn({ expectedEtb, receivedEtb, txRef }, 'Chapa payment amount mismatch');
-    throw new AppError(400, 'AMOUNT_MISMATCH', `Payment amount ${receivedEtb} ETB does not match expected fee ${expectedEtb} ETB.`);
+  const amountMatches = (receivedEtb === baseExpectedEtb || receivedEtb === overdueExpectedEtb);
+  if (!amountMatches) {
+    logger.warn({ baseExpectedEtb, overdueExpectedEtb, receivedEtb, txRef }, 'Chapa payment amount mismatch');
+    throw new AppError(400, 'AMOUNT_MISMATCH', `Payment amount ${receivedEtb} ETB does not match expected fee ${overdueExpectedEtb} ETB.`);
   }
 
   const currency = String(verifiedData.currency || '').toUpperCase();

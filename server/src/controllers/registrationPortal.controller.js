@@ -304,6 +304,73 @@ export const getPublicPortal = asyncHandler(async (req, res) => {
 });
 
 // 6. Submit Public Application (Public / Applicant)
+/**
+ * Pre-validate applicant details before advancing in the registration wizard:
+ * Checks email uniqueness, phone uniqueness, and pending application existence for the student's name.
+ */
+export const prevalidateApplicant = asyncHandler(async (req, res) => {
+  const { firstName, middleName = '', lastName, email, phone } = req.body;
+
+  if (!firstName?.trim() || !lastName?.trim()) {
+    throw new AppError(400, 'NAME_REQUIRED', 'First and last names are required.');
+  }
+
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  if (!cleanEmail || !/^[\w.%+-]+@gmail\.com$/i.test(cleanEmail)) {
+    throw new AppError(400, 'GMAIL_REQUIRED', 'A valid Google Gmail address (@gmail.com) is required.');
+  }
+
+  const cleanPhone = normalizePhone(String(phone || ''));
+  if (!isValidEthiopianPhone(cleanPhone)) {
+    throw new AppError(400, 'PHONE_INVALID', 'A valid Ethiopian mobile phone number starting with 9 (+251 9...) is required.');
+  }
+
+  const fullName = [firstName.trim(), middleName.trim(), lastName.trim()].filter(Boolean).join(' ');
+
+  // 1. Check Email uniqueness
+  const studentByEmail = await Student.findOne({ email: cleanEmail }).select('studentId fullName').lean();
+  if (studentByEmail) {
+    throw new AppError(409, 'EMAIL_EXISTS', `The Gmail address "${cleanEmail}" is already registered to an enrolled student (${studentByEmail.studentId}).`);
+  }
+
+  const appByEmail = await StudentApplication.findOne({
+    email: cleanEmail,
+    status: { $in: ['pending', 'approved'] },
+  }).select('applicationNumber status').lean();
+  if (appByEmail) {
+    throw new AppError(409, 'EMAIL_PENDING', `An application with email "${cleanEmail}" is already in ${appByEmail.status} status (Ref: ${appByEmail.applicationNumber}).`);
+  }
+
+  // 2. Check Phone uniqueness
+  const studentByPhone = await Student.findOne({ phone: cleanPhone }).select('studentId fullName').lean();
+  if (studentByPhone) {
+    throw new AppError(409, 'PHONE_EXISTS', `The phone number "${cleanPhone}" is already registered to student ${studentByPhone.fullName} (${studentByPhone.studentId}).`);
+  }
+
+  const appByPhone = await StudentApplication.findOne({
+    phone: cleanPhone,
+    status: { $in: ['pending', 'approved'] },
+  }).select('applicationNumber status').lean();
+  if (appByPhone) {
+    throw new AppError(409, 'PHONE_PENDING', `An application with phone number "${cleanPhone}" is already in ${appByPhone.status} status (Ref: ${appByPhone.applicationNumber}).`);
+  }
+
+  // 3. Check if applicant full name is already in pending status
+  const appByName = await StudentApplication.findOne({
+    fullName: new RegExp(`^${fullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+    status: 'pending',
+  }).select('applicationNumber').lean();
+  if (appByName) {
+    throw new AppError(409, 'NAME_PENDING', `An application for "${fullName}" is currently pending review by the Admissions Committee (Ref: ${appByName.applicationNumber}).`);
+  }
+
+  res.json({
+    success: true,
+    valid: true,
+    message: 'Applicant details verified. Ready for next step.',
+  });
+});
+
 export const submitPublicApplication = asyncHandler(async (req, res) => {
   const { portalId } = req.params;
   const portal = await RegistrationPortal.findOne({ portalId });
@@ -340,6 +407,8 @@ export const submitPublicApplication = asyncHandler(async (req, res) => {
     programId,
     batchId,
     certificateDocument = {},
+    nationalIdFront = {},
+    nationalIdBack = {},
   } = req.body;
 
   if (!firstName || !lastName) {
@@ -473,6 +542,42 @@ export const submitPublicApplication = asyncHandler(async (req, res) => {
     }
   }
 
+  // Upload national ID images to ImageKit if base64 provided
+  const uploadBase64ImageField = async (fieldObj, prefix) => {
+    if (!fieldObj || !fieldObj.url) return { url: null, fileId: null, filePath: null };
+    let url = fieldObj.url;
+    let fileId = fieldObj.fileId || null;
+    let filePath = fieldObj.filePath || null;
+    if (imagekitConfigured() && typeof url === 'string' && url.startsWith('data:')) {
+      try {
+        const match = url.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          const mime = match[1];
+          const buffer = Buffer.from(match[2], 'base64');
+          const ext = mime.includes('png') ? '.png' : mime.includes('webp') ? '.webp' : '.jpg';
+          const ikRes = await uploadImage(buffer, {
+            fileName: `${prefix}_${cleanEmail.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}${ext}`,
+            folder: '/sms/applicants/national_ids',
+            contentType: mime,
+          });
+          url = ikRes.url;
+          fileId = ikRes.fileId;
+          filePath = ikRes.filePath;
+        }
+      } catch (err) {
+        logger.warn({ err: err?.message }, `Could not upload ${prefix} to ImageKit, keeping raw URL`);
+      }
+    }
+    return { url, fileId, filePath };
+  };
+
+  const [applicantIdFrontData, applicantIdBackData, emgIdFrontData, emgIdBackData] = await Promise.all([
+    uploadBase64ImageField(nationalIdFront, 'applicant_nid_front'),
+    uploadBase64ImageField(nationalIdBack, 'applicant_nid_back'),
+    uploadBase64ImageField(emergencyContact.nationalIdFront, 'emergency_nid_front'),
+    uploadBase64ImageField(emergencyContact.nationalIdBack, 'emergency_nid_back'),
+  ]);
+
   const application = await StudentApplication.create({
     portal: portal._id,
     applicationNumber,
@@ -491,7 +596,13 @@ export const submitPublicApplication = asyncHandler(async (req, res) => {
     email: cleanEmail,
     phone: cleanPhone,
     address,
-    emergencyContact,
+    emergencyContact: {
+      name: emergencyContact.name || '',
+      phone: emergencyContact.phone || '',
+      relationship: emergencyContact.relationship || '',
+      nationalIdFront: emgIdFrontData,
+      nationalIdBack: emgIdBackData,
+    },
     previousEducation: {
       schoolName: previousEducation.schoolName || '',
       completionYear: previousEducation.completionYear || '',
@@ -501,6 +612,8 @@ export const submitPublicApplication = asyncHandler(async (req, res) => {
     program: programId || portal.program,
     batch: batchId || portal.batch || (portal.batches?.[0] || null),
     certificateDocument: certDocData,
+    nationalIdFront: applicantIdFrontData,
+    nationalIdBack: applicantIdBackData,
     photo: photoData,
     status: 'pending',
     ip: req.ip || '',
@@ -833,6 +946,10 @@ export const approveApplication = asyncHandler(async (req, res) => {
     academicYearId = currentAy?._id || null;
   }
 
+  const isBatchActive = batch?.status === 'active';
+  const initialStudentStatus = isBatchActive ? 'active' : 'admitted';
+  const initialEnrollmentStatus = isBatchActive ? 'active' : 'admitted';
+
   const student = await Student.create({
     studentId,
     firstName: application.firstName,
@@ -851,8 +968,8 @@ export const approveApplication = asyncHandler(async (req, res) => {
     batch: batch?._id ?? null,
     admissionAcademicYear: academicYearId,
     level: 1,
-    enrollmentStatus: 'active',
-    studentStatus: 'active',
+    enrollmentStatus: initialEnrollmentStatus,
+    studentStatus: initialStudentStatus,
     admissionDate: new Date(),
     photo: application.photo,
     createdBy: req.user.id,
