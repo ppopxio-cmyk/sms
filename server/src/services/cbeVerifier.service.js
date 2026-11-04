@@ -1,4 +1,5 @@
 import { Payment, PaymentAttempt, StudentCharge } from '../models/Finance.js';
+import { checkStudentFinancialHold, notifyAssignedTeachersHoldStatus } from './finance.service.js';
 import { audit } from './audit.service.js';
 import { logger } from '../utils/logger.js';
 import { AppError } from '../utils/AppError.js';
@@ -633,6 +634,15 @@ export async function verifyCbeReceipt({
   charge.isLocked = false;
   charge.lockedAt = null;
   await charge.save();
+
+  // Notify assigned teachers if student is now fully cleared
+  const postHold = await checkStudentFinancialHold(student._id);
+  if (!postHold.hasHold) {
+    void notifyAssignedTeachersHoldStatus(student._id, {
+      isCleared: true,
+      details: { title: cycle.title, amountEtb: ((cycle.amount || 0) / 100).toFixed(2) },
+    });
+  }
 
   // Log successful attempt
   await PaymentAttempt.create({

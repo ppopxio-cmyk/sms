@@ -18,6 +18,7 @@ import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader'
 import RegistrarTable from '../../components/registrar/RegistrarTable';
 import ConfirmDialog from '../../components/registrar/ConfirmDialog';
 import StudentPicker from '../../components/registrar/StudentPicker';
+import FinancialHoldModal from '../../components/registrar/FinancialHoldModal';
 import { TextAreaField } from '../../components/registrar/Fields';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
@@ -355,6 +356,8 @@ function IssueCertificateModal({ open, onClose, onSaved }) {
   const [previewData, setPreviewData] = useState(null);
   const [idempotencyKey, setIdempotencyKey] = useState(newKey());
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [showHoldModal, setShowHoldModal] = useState(false);
+  const [holdInfo, setHoldInfo] = useState(null);
   const photoInputRef = useRef(null);
 
   useEffect(() => {
@@ -423,6 +426,17 @@ function IssueCertificateModal({ open, onClose, onSaved }) {
       onClose?.();
     },
     onError: (err) => {
+      const respData = err.response?.data;
+      if (respData?.code === 'FINANCIAL_CLEARANCE_REQUIRED') {
+        setHoldInfo({
+          message: respData.message,
+          overdueCharges: respData.details?.overdueCharges || respData.overdueCharges || [],
+          totalOutstandingEtb: respData.details?.totalOutstandingEtb || respData.totalOutstandingEtb,
+          paymentLink: respData.details?.paymentLink || respData.paymentLink,
+        });
+        setShowHoldModal(true);
+        return;
+      }
       const message = errorMessage(err, 'The certificate could not be issued.');
       setError(message);
       toast.error(message);
@@ -588,6 +602,13 @@ function IssueCertificateModal({ open, onClose, onSaved }) {
           <span>I have reviewed the student record and confirm they are officially eligible for this certificate.</span>
         </label>
       </div>
+
+      <FinancialHoldModal
+        open={showHoldModal}
+        onClose={() => setShowHoldModal(false)}
+        student={student ? { id: student.id, name: student.fullName, studentId: student.studentId } : null}
+        holdInfo={holdInfo}
+      />
     </Modal>
   );
 }

@@ -303,8 +303,10 @@ export async function courseMarksDetail(teacherId, assignmentId) {
     student: { $in: studentIds },
     status: 'unpaid',
     dueAt: { $lt: new Date() },
-  }).select('student').lean();
-  const holdStudentIds = new Set(overdueCharges.map((c) => String(c.student)));
+  })
+    .populate('cycle', 'title ethYear ethMonth dueAt')
+    .lean();
+  const chargeByStudent = new Map(overdueCharges.map((c) => [String(c.student), c]));
 
   const byStudent = new Map(results.map((row) => [String(row.student), row]));
   const rows = enrollments
@@ -312,7 +314,8 @@ export async function courseMarksDetail(teacherId, assignmentId) {
     .map((row) => {
       const result = byStudent.get(String(row.student._id));
       const scores = resultScores(policy, result);
-      const isHold = holdStudentIds.has(String(row.student._id));
+      const charge = chargeByStudent.get(String(row.student._id));
+      const isHold = Boolean(charge);
       return {
         ...enrollmentDto(row),
         scores,
@@ -323,9 +326,24 @@ export async function courseMarksDetail(teacherId, assignmentId) {
         calculated: result?.totalMark !== null && result?.totalMark !== undefined,
         status: result?.status ?? 'draft',
         hasFinancialHold: isHold,
-        financialHoldMessage: isHold ? 'Financial hold: Unpaid monthly fees' : null,
+        financialHoldDetails: charge
+          ? {
+              title: charge.cycle?.title || 'Monthly Fee',
+              amountDueEtb: ((charge.amountDue || 0) / 100).toFixed(2),
+              dueAt: charge.dueAt,
+              ethYear: charge.cycle?.ethYear,
+              ethMonth: charge.cycle?.ethMonth,
+            }
+          : null,
+        financialHoldMessage: charge
+          ? `Financial hold active: ${charge.cycle?.title || 'Fee'} (${((charge.amountDue || 0) / 100).toFixed(2)} ETB overdue). Marks cannot be submitted.`
+          : null,
       };
     });
+
+  const eligibleRows = rows.filter((r) => !r.hasFinancialHold);
+  const heldRows = rows.filter((r) => r.hasFinancialHold);
+
   return {
     assignment: assignmentDto(assignment),
     policy: policyDto(policy),
@@ -341,6 +359,10 @@ export async function courseMarksDetail(teacherId, assignmentId) {
       calculated: rows.filter((row) => row.calculated).length,
       missing: rows.filter((row) => !row.calculated).length,
       submitted: rows.filter((row) => row.status === 'submitted').length,
+      eligibleTotal: eligibleRows.length,
+      eligibleCalculated: eligibleRows.filter((row) => row.calculated).length,
+      eligibleMissing: eligibleRows.filter((row) => !row.calculated).length,
+      heldTotal: heldRows.length,
     },
   };
 }
@@ -448,13 +470,6 @@ async function prepareSubmission(teacherId, assignmentId) {
   const studentIds = registrations.map((row) => row.student);
   const results = await Result.find(ownFilter({ offering: assignmentId, student: { $in: studentIds } })).lean();
   if (!registrations.length) throw new AppError(409, 'NO_STUDENTS', 'There are no registered students in this course.');
-  if (results.length !== registrations.length) {
-    throw new AppError(409, 'MARKS_INCOMPLETE', 'Enter marks for every registered student before submitting.');
-  }
-  const incomplete = results.filter((row) => !completeResult(policy, row) || row.totalMark === null);
-  if (incomplete.length) {
-    throw new AppError(409, 'MARKS_INCOMPLETE', 'Calculate every student’s total before submitting.');
-  }
 
   // Block result submission for students with active financial holds
   const overdueCharges = await StudentCharge.find({
@@ -463,9 +478,30 @@ async function prepareSubmission(teacherId, assignmentId) {
     dueAt: { $lt: new Date() },
   }).select('student').lean();
   const holdSet = new Set(overdueCharges.map((c) => String(c.student)));
-  const resultsEligible = results.filter((row) => !holdSet.has(String(row.student)));
 
-  return { assignment, results: resultsEligible, grading, heldCount: holdSet.size };
+  const eligibleResults = results.filter((row) => !holdSet.has(String(row.student)));
+  const eligibleStudentIds = studentIds.filter((id) => !holdSet.has(String(id)));
+
+  if (!eligibleStudentIds.length) {
+    throw new AppError(409, 'NO_ELIGIBLE_STUDENTS', 'All students in this class currently have active financial holds. Marks cannot be submitted until fees are settled.');
+  }
+
+  if (eligibleResults.length !== eligibleStudentIds.length) {
+    throw new AppError(409, 'MARKS_INCOMPLETE', 'Enter marks for every eligible student before submitting.');
+  }
+
+  const incompleteEligible = eligibleResults.filter((row) => !completeResult(policy, row) || row.totalMark === null);
+  if (incompleteEligible.length) {
+    throw new AppError(409, 'MARKS_INCOMPLETE', 'Calculate every eligible student’s total before submitting.');
+  }
+
+  return {
+    assignment,
+    results: eligibleResults,
+    grading,
+    totalRegistered: registrations.length,
+    heldCount: holdSet.size,
+  };
 }
 
 export async function submitCourseMarks(teacherId, offeringIds) {
@@ -474,7 +510,7 @@ export async function submitCourseMarks(teacherId, offeringIds) {
     prepared.push(await prepareSubmission(teacherId, offeringId));
   }
   const submittedAt = new Date();
-  for (const { assignment, results, grading } of prepared) {
+  for (const { assignment, results, grading, totalRegistered, heldCount } of prepared) {
     await Result.updateMany(
       ownFilter({ _id: { $in: results.map((row) => row._id) } }),
       {
@@ -486,18 +522,21 @@ export async function submitCourseMarks(teacherId, offeringIds) {
         },
       },
     );
+    const allSubmitted = (results.length === totalRegistered);
+    const nextStatus = allSubmitted ? 'completed' : 'in_progress';
     await CourseOffering.updateOne(
       { _id: assignment._id },
-      { $set: { status: 'completed', completedAt: submittedAt, updatedBy: teacherId } },
+      { $set: { status: nextStatus, completedAt: allSubmitted ? submittedAt : null, updatedBy: teacherId } },
     );
     const course = [assignment.course?.code, assignment.course?.title].filter(Boolean).join(' · ');
+    const note = heldCount > 0 ? ` (${heldCount} deferred due to financial hold)` : '';
     await notifyRole('REGISTRAR', {
       type: 'course_marks_submitted',
       title: 'Course marks submitted',
-      body: `${course || 'A course'} · ${results.length} student${results.length === 1 ? '' : 's'} ready for review.`,
+      body: `${course || 'A course'} · ${results.length} student${results.length === 1 ? '' : 's'} submitted for review${note}.`,
       actorId: teacherId,
       actorName: '',
-      meta: { offeringId: String(assignment._id), course: course, students: results.length },
+      meta: { offeringId: String(assignment._id), course: course, students: results.length, deferred: heldCount },
     });
   }
   return {

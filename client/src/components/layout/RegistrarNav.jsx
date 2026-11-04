@@ -13,7 +13,9 @@ import {
   FileCheck2,
   FileText,
   Fingerprint,
+  Globe,
   GraduationCap,
+  Inbox,
   LayoutDashboard,
   Megaphone,
   ScrollText,
@@ -28,6 +30,8 @@ const GROUPS = [
     label: 'People',
     icon: Users,
     items: [
+      { to: '/registrar/registration-portals', label: 'Registration Portals', icon: Globe },
+      { to: '/registrar/applications', label: 'Admissions Queue', icon: Inbox },
       { to: '/registrar/students', label: 'Students', icon: Users },
       { to: '/registrar/batches', label: 'Batches', icon: UserSquare2 },
       { to: '/registrar/graduated', label: 'Graduated', icon: GraduationCap },

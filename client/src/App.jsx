@@ -71,12 +71,15 @@ const RegistrarGradingPolicy = lazy(() => import('./pages/registrar/RegistrarGra
 const RegistrarTranscripts = lazy(() => import('./pages/registrar/RegistrarTranscripts.jsx'));
 const RegistrarCertificates = lazy(() => import('./pages/registrar/RegistrarCertificates.jsx'));
 const RegistrarIdCards = lazy(() => import('./pages/registrar/RegistrarIdCards.jsx'));
+const RegistrarRegistrationPortals = lazy(() => import('./pages/registrar/RegistrarRegistrationPortals.jsx'));
+const RegistrarApplications = lazy(() => import('./pages/registrar/RegistrarApplications.jsx'));
 const RegistrarReports = lazy(() => import('./pages/registrar/RegistrarReports.jsx'));
 const RegistrarAnnouncements = lazy(() => import('./pages/registrar/RegistrarAnnouncements.jsx'));
 const RegistrarNotifications = lazy(() => import('./pages/registrar/RegistrarNotifications.jsx'));
 const PublicVerification = lazy(() => import('./pages/PublicVerification.jsx'));
 const MonthlyPaymentPortal = lazy(() => import('./pages/portal/MonthlyPaymentPortal.jsx'));
 const MonthlyPaymentDone = lazy(() => import('./pages/portal/MonthlyPaymentDone.jsx'));
+const PublicRegistrationPortal = lazy(() => import('./pages/portal/PublicRegistrationPortal.jsx'));
 const FinanceDashboard = lazy(() => import('./pages/finance/FinanceDashboard.jsx'));
 const FinancePaymentCycles = lazy(() => import('./pages/finance/FinancePaymentCycles.jsx'));
 const FinanceCollections = lazy(() => import('./pages/finance/FinanceCollections.jsx'));
@@ -177,6 +180,7 @@ export default function App() {
         <Route path="/assesmets" element={<PublicAssessment />} />
         <Route path="/monthly-payments/:hash" element={<MonthlyPaymentPortal />} />
         <Route path="/monthly-payments/done/:doneHash" element={<MonthlyPaymentDone />} />
+        <Route path="/register/:portalId" element={<PublicRegistrationPortal />} />
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>
@@ -226,8 +230,11 @@ export default function App() {
               <Route path="/registrar" element={<Navigate to="/registrar/dashboard" replace />} />
               <Route path="/registrar/dashboard" element={<RegistrarDashboard />} />
               <Route path="/registrar/analytics" element={<RegistrarAnalytics />} />
+              <Route path="/registrar/registration-portals" element={<RegistrarRegistrationPortals />} />
+              <Route path="/registrar/applications" element={<RegistrarApplications />} />
               <Route path="/registrar/students" element={<RegistrarStudents />} />
               <Route path="/registrar/students/:studentId" element={<RegistrarStudent />} />
+              <Route path="/registrar/students/:id/finance" element={<StudentFinanceProfile readOnly />} />
               <Route path="/registrar/graduated" element={<RegistrarGraduated />} />
               <Route path="/registrar/academic-structure" element={<RegistrarAcademicStructure />} />
               <Route path="/registrar/academic-structure/departments" element={<RegistrarAcademicStructure defaultTab="departments" />} />

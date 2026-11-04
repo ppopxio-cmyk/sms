@@ -36,6 +36,7 @@ import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
+import FinancialHoldModal from '../../components/registrar/FinancialHoldModal';
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -74,6 +75,9 @@ export default function RegistrarIdCards() {
   const [bulkPrinting, setBulkPrinting] = useState(false);
   const [uploadingStudent, setUploadingStudent] = useState(null);
   const [uploadLoading, setUploadLoading] = useState(false);
+  const [showHoldModal, setShowHoldModal] = useState(false);
+  const [holdInfo, setHoldInfo] = useState(null);
+  const [holdStudent, setHoldStudent] = useState(null);
   const fileInputRef = useRef(null);
 
   const handleTriggerUpload = (student) => {
@@ -220,7 +224,19 @@ export default function RegistrarIdCards() {
       toast.success(data.message || 'Student ID Card issued successfully!');
       queryClient.invalidateQueries({ queryKey: ['registrar', 'id-cards-cohort-summary'] });
     },
-    onError: (err) => {
+    onError: (err, variables) => {
+      const respData = err.response?.data;
+      if (respData?.code === 'FINANCIAL_CLEARANCE_REQUIRED') {
+        setHoldInfo({
+          message: respData.message,
+          overdueCharges: respData.details?.overdueCharges || respData.overdueCharges || [],
+          totalOutstandingEtb: respData.details?.totalOutstandingEtb || respData.totalOutstandingEtb,
+          paymentLink: respData.details?.paymentLink || respData.paymentLink,
+        });
+        setHoldStudent(variables?.student || { id: variables?.studentId, name: 'Student', studentId: variables?.studentId });
+        setShowHoldModal(true);
+        return;
+      }
       toast.error(errorMessage(err, 'Failed to issue student ID card.'));
     },
   });
@@ -482,7 +498,10 @@ export default function RegistrarIdCards() {
               <Button
                 size="sm"
                 variant={row.issueCount > 0 ? 'secondary' : 'primary'}
-                onClick={() => issueMutation.mutate({ studentId: row.id })}
+                onClick={() => issueMutation.mutate({
+                  studentId: row.id,
+                  student: { id: row.id, name: row.fullName, studentId: row.studentId },
+                })}
                 loading={issueMutation.isPending && issueMutation.variables?.studentId === row.id}
                 disabled={!row.hasPhoto}
                 className="gap-1 text-xs font-bold"
@@ -1068,6 +1087,13 @@ export default function RegistrarIdCards() {
         accept="image/jpeg,image/png,image/webp"
         className="hidden"
         onChange={handleFileSelected}
+      />
+
+      <FinancialHoldModal
+        open={showHoldModal}
+        onClose={() => setShowHoldModal(false)}
+        student={holdStudent}
+        holdInfo={holdInfo}
       />
     </div>
   );

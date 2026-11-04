@@ -6,7 +6,12 @@ import { checkGmailApi, sendViaGmailApi } from './gmailTransport.js';
 
 // How the mail leaves the building: the Gmail API over HTTPS when the Google values are
 // present, otherwise the app password over SMTP. Both send from the same school address.
-export const MAIL_TRANSPORT = 'smtp';
+export function getActiveTransport() {
+  if (gmailApiReady && !gmailApiDisabled) return 'gmail-api';
+  return 'smtp';
+}
+
+export const MAIL_TRANSPORT = gmailApiReady ? 'gmail-api' : 'smtp';
 
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
@@ -149,56 +154,49 @@ async function deliver({ to, subject, html, text, priority = 'normal' }) {
       return true;
     } catch (apiErr) {
       logger.error({ err: apiErr.message, to, subject }, 'Gmail API failed');
-      if (/expired|revoked|invalid_grant|unauthorized/i.test(apiErr.message)) {
-        gmailApiDisabled = true;
-      }
       throw apiErr;
     }
   };
 
-  // On Render, outbound SMTP ports (25, 465, 587) are blocked by the platform,
-  // so Gmail API (HTTPS 443) must be the primary transport to avoid connection timeouts.
-  // Locally or on self-hosted environments with open ports, SMTP is preferred.
-  if (isRender && gmailApiReady && !gmailApiDisabled) {
+  // When Gmail API credentials are configured, prioritize Gmail API over HTTPS (port 443)
+  // because cloud hosts and local networks frequently block or throttle SMTP ports (465, 587).
+  if (gmailApiReady && !gmailApiDisabled) {
     try {
       return await sendGmail();
-    } catch (err) {
-      logger.warn({ err: err.message }, 'Gmail API failed on Render; attempting SMTP fallback');
+    } catch (apiErr) {
+      logger.warn({ err: apiErr.message, to, subject }, 'Gmail API delivery attempt failed; falling back to SMTP');
       try {
         return await sendSmtp();
       } catch (smtpErr) {
-        logger.error({ err: smtpErr.message }, 'Both Gmail API and SMTP failed on Render');
-        return false;
+        logger.error({ apiErr: apiErr.message, smtpErr: smtpErr.message, to, subject }, 'Both Gmail API and SMTP delivery failed');
+        throw new Error(`Email delivery failed: Gmail API (${apiErr.message}), SMTP (${smtpErr.message})`);
       }
     }
   }
 
-  // Default: Try SMTP first, fallback to Gmail API
+  // Fallback: SMTP directly when Gmail API is not configured
   try {
     return await sendSmtp();
   } catch (smtpErr) {
-    logger.warn({ err: smtpErr.message, to, subject }, 'SMTP failed; checking Gmail API fallback');
-    if (gmailApiReady && !gmailApiDisabled) {
-      try {
-        return await sendGmail();
-      } catch (apiErr) {
-        logger.error({ err: apiErr.message, to, subject }, 'Both SMTP and Gmail API failed');
-      }
-    }
-    return false;
+    logger.error({ err: smtpErr.message, to, subject }, 'SMTP delivery failed');
+    throw new Error(`Email delivery failed: SMTP (${smtpErr.message})`);
   }
 }
 
 export const verifyMail = async () => {
-  try {
-    await transporter.verify();
-    return true;
-  } catch (err) {
-    if (gmailApiReady && !gmailApiDisabled) {
-      return checkGmailApi();
+  if (gmailApiReady && !gmailApiDisabled) {
+    try {
+      const check = await checkGmailApi();
+      return { address: env.SMTP_USER, scope: check.scope, transport: 'gmail-api' };
+    } catch (apiErr) {
+      logger.warn({ err: apiErr.message }, 'Gmail API verification failed; testing SMTP');
+      await transporter.verify();
+      return { address: env.SMTP_USER, transport: 'smtp' };
     }
-    throw err;
   }
+
+  await transporter.verify();
+  return { address: env.SMTP_USER, transport: 'smtp' };
 };
 
 const COPY = {

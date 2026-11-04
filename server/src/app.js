@@ -6,7 +6,7 @@ import cookieParser from 'cookie-parser';
 import pinoHttp from 'pino-http';
 import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
-import { MAIL_TRANSPORT, verifyMail } from './services/mail.service.js';
+import { MAIL_TRANSPORT, getActiveTransport, verifyMail } from './services/mail.service.js';
 import { isAllowedOrigin } from './utils/origin.js';
 import { resolveClient } from './utils/device.js';
 import { isPrivateAddress } from './utils/geo.js';
@@ -148,12 +148,12 @@ export function createApp() {
     try {
       const info = await verifyMail();
       const account = info?.address ? info.address.replace(/^(.).*?(@.*)$/, '$1***$2') : null;
-      res.json({ ok: true, transport: MAIL_TRANSPORT, account, missingGoogleVars: missing });
+      res.json({ ok: true, transport: getActiveTransport?.() || MAIL_TRANSPORT, account, missingGoogleVars: missing });
     } catch (err) {
       logger.error({ err: err.message }, 'mail health check failed');
       res.status(503).json({
         ok: false,
-        transport: MAIL_TRANSPORT,
+        transport: getActiveTransport?.() || MAIL_TRANSPORT,
         reason: String(err.message).slice(0, 160),
         missingGoogleVars: missing,
       });

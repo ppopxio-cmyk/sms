@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Calculator, CheckCircle2, Lock, Save, Send, TriangleAlert } from 'lucide-react';
+import { Calculator, CheckCircle2, Lock, Save, Send, TriangleAlert, AlertCircle, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../../lib/api';
 import { classMeta, classTitle, displayDate } from '../../lib/teacher';
+import { formatEthiopian } from '../../lib/ethiopianDate';
 import TeacherPageHeader from '../../components/teacher/TeacherPageHeader';
 import Alert from '../../components/ui/Alert';
 import Badge from '../../components/ui/Badge';
@@ -35,6 +36,7 @@ export default function TeacherCourseMarkDetail() {
   const [draft, setDraft] = useState({ key: '', values: {} });
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [submitCode, setSubmitCode] = useState('');
+  const [activeTab, setActiveTab] = useState('eligible');
 
   const query = useQuery({
     queryKey: ['teacher', 'course-marks', assignmentId],
@@ -196,8 +198,15 @@ export default function TeacherCourseMarkDetail() {
     );
   }
 
+  const eligibleRows = useMemo(() => rows.filter((r) => !r.hasFinancialHold), [rows]);
+  const incompleteRows = useMemo(() => rows.filter((r) => r.hasFinancialHold || !r.calculated), [rows]);
+  const heldRows = useMemo(() => rows.filter((r) => r.hasFinancialHold), [rows]);
+
   const summary = query.data.summary;
-  const ready = summary.total > 0 && summary.missing === 0 && summary.calculated === summary.total;
+  const eligibleTotal = summary.eligibleTotal ?? eligibleRows.length;
+  const eligibleCalculated = summary.eligibleCalculated ?? eligibleRows.filter((r) => r.calculated).length;
+  const eligibleMissing = summary.eligibleMissing ?? eligibleRows.filter((r) => !r.calculated).length;
+  const ready = eligibleTotal > 0 && eligibleMissing === 0 && eligibleCalculated === eligibleTotal;
 
   return (
     <div className="space-y-6">
@@ -257,104 +266,226 @@ export default function TeacherCourseMarkDetail() {
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard icon={CheckCircle2} label="Calculated" value={summary.calculated} hint={`of ${summary.total} students`} tone="emerald" />
-        <StatCard icon={TriangleAlert} label="Incomplete" value={summary.missing} tone="amber" />
-        <StatCard icon={Calculator} label="Policy total" value={policy.total} hint="marks" tone="indigo" />
+        <StatCard
+          icon={CheckCircle2}
+          label="Calculated (Eligible)"
+          value={eligibleCalculated}
+          hint={`of ${eligibleTotal} eligible`}
+          tone="emerald"
+        />
+        <StatCard
+          icon={Lock}
+          label="Financial Holds"
+          value={heldRows.length}
+          hint="submission restricted"
+          tone={heldRows.length > 0 ? 'rose' : 'neutral'}
+        />
+        <StatCard
+          icon={TriangleAlert}
+          label="Incomplete (Eligible)"
+          value={eligibleMissing}
+          hint="uncalculated marks"
+          tone={eligibleMissing > 0 ? 'amber' : 'neutral'}
+        />
         <StatCard icon={Send} label="Submitted" value={summary.submitted} hint="students" tone="violet" />
       </div>
 
-      <Card>
-        <CardHeader
-          title="Mark sheet"
-          subtitle="Enter each component out of its policy maximum. Totals and letter grades use the registrar grading policy."
-          icon={Calculator}
-          action={
-            !locked ? (
-              <Button
-                onClick={() => {
-                  if (dirty) return toast.info('Save or calculate your latest changes first.');
-                  setConfirmSubmit(true);
-                }}
-                disabled={!ready || dirty}
-              >
-                <Send className="h-4 w-4" />
-                Send to registrar
-              </Button>
-            ) : null
-          }
-        />
-        <CardBody>
-          {!rows.length ? (
-            <EmptyState icon={Calculator} title="No registered students" message="The registrar has not registered students in this course." />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px] border-collapse text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                    <th className="pb-3 pr-4">Student</th>
-                    {policy.components.map((component) => (
-                      <th key={component.key} className="pb-3 pr-3 text-center">
-                        {COMPONENT_LABELS[component.key] || component.label}
-                        <span className="ml-1 font-mono text-[10px] text-slate-400">/{component.max}</span>
-                      </th>
-                    ))}
-                    <th className="pb-3 pl-2 pr-3 text-right">Total</th>
-                    <th className="pb-3 text-center">Grade</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {rows.map((row) => (
-                    <tr key={row.studentId}>
-                      <td className="py-2.5 pr-4">
-                        <div className="flex items-center gap-2">
+      {/* Tabs */}
+      <div className="flex items-center gap-2 border-b border-slate-200">
+        <button
+          type="button"
+          onClick={() => setActiveTab('eligible')}
+          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold transition ${
+            activeTab === 'eligible'
+              ? 'border-brand-600 text-brand-600'
+              : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800'
+          }`}
+        >
+          <CheckCircle2 className="h-4 w-4" />
+          <span>Eligible Mark Sheet ({eligibleRows.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('incomplete')}
+          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold transition ${
+            activeTab === 'incomplete'
+              ? 'border-brand-600 text-brand-600'
+              : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800'
+          }`}
+        >
+          <TriangleAlert className="h-4 w-4 text-amber-500" />
+          <span>Incomplete & Holds ({incompleteRows.length})</span>
+          {heldRows.length > 0 && (
+            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-bold text-rose-700">
+              {heldRows.length} hold
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeTab === 'eligible' ? (
+        <Card>
+          <CardHeader
+            title="Eligible Students Mark Sheet"
+            subtitle="Marks entered and calculated here can be submitted to the registrar without waiting for deferred students on hold."
+            icon={Calculator}
+            action={
+              !locked ? (
+                <Button
+                  onClick={() => {
+                    if (dirty) return toast.info('Save or calculate your latest changes first.');
+                    setConfirmSubmit(true);
+                  }}
+                  disabled={!ready || dirty}
+                >
+                  <Send className="h-4 w-4" />
+                  Send to registrar
+                </Button>
+              ) : null
+            }
+          />
+          <CardBody>
+            {!eligibleRows.length ? (
+              <EmptyState
+                icon={Calculator}
+                title="No eligible students"
+                message="All registered students in this course are currently on financial hold or missing."
+              />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                      <th className="pb-3 pr-4">Student</th>
+                      {policy.components.map((component) => (
+                        <th key={component.key} className="pb-3 pr-3 text-center">
+                          {COMPONENT_LABELS[component.key] || component.label}
+                          <span className="ml-1 font-mono text-[10px] text-slate-400">/{component.max}</span>
+                        </th>
+                      ))}
+                      <th className="pb-3 pl-2 pr-3 text-right">Total</th>
+                      <th className="pb-3 text-center">Grade</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {eligibleRows.map((row) => (
+                      <tr key={row.studentId}>
+                        <td className="py-2.5 pr-4">
                           <Link to={`/teacher/students/${row.studentId}`} className="font-medium text-slate-800 hover:text-brand-700">
                             {row.name}
                           </Link>
-                          {row.hasFinancialHold ? (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-800 border border-amber-200"
-                              title="Financial hold: Unpaid monthly fees. Result submission is blocked for this student."
-                            >
-                              <Lock className="h-3 w-3 text-amber-600" />
-                              Hold
-                            </span>
-                          ) : null}
-                        </div>
-                        <p className="font-mono text-[11px] text-slate-500">{row.studentNumber}</p>
-                      </td>
-                      {policy.components.map((component) => (
-                        <td key={component.key} className="py-2.5 pr-3 text-center">
-                          <input
-                            type="number"
-                            min="0"
-                            max={component.max}
-                            step="0.01"
-                            value={scores[row.studentId]?.[component.key] ?? ''}
-                            disabled={locked}
-                            onChange={(event) => setScore(row.studentId, component.key, event.target.value)}
-                            className="focus-ring h-9 w-20 rounded-lg border border-slate-200 bg-white px-2 text-right font-mono text-xs text-slate-800 disabled:bg-slate-50 disabled:text-slate-500"
-                            aria-label={`${COMPONENT_LABELS[component.key] || component.label} for ${row.name}`}
-                          />
+                          <p className="font-mono text-[11px] text-slate-500">{row.studentNumber}</p>
                         </td>
-                      ))}
-                      <td className="py-2.5 pl-2 pr-3 text-right font-mono text-sm font-semibold text-slate-800">
-                        {row.total === null || row.total === undefined ? 'â€”' : row.total}
-                      </td>
-                      <td className="py-2.5 text-center">
-                        {row.letter ? (
-                          <Badge tone={row.passed ? 'success' : 'danger'}>{row.letter}</Badge>
-                        ) : (
-                          <span className="text-xs text-slate-400">â€”</span>
-                        )}
-                      </td>
+                        {policy.components.map((component) => (
+                          <td key={component.key} className="py-2.5 pr-3 text-center">
+                            <input
+                              type="number"
+                              min="0"
+                              max={component.max}
+                              step="0.01"
+                              value={scores[row.studentId]?.[component.key] ?? ''}
+                              disabled={locked}
+                              onChange={(event) => setScore(row.studentId, component.key, event.target.value)}
+                              className="focus-ring h-9 w-20 rounded-lg border border-slate-200 bg-white px-2 text-right font-mono text-xs text-slate-800 disabled:bg-slate-50 disabled:text-slate-500"
+                              aria-label={`${COMPONENT_LABELS[component.key] || component.label} for ${row.name}`}
+                            />
+                          </td>
+                        ))}
+                        <td className="py-2.5 pl-2 pr-3 text-right font-mono text-sm font-semibold text-slate-800">
+                          {row.total === null || row.total === undefined ? '—' : row.total}
+                        </td>
+                        <td className="py-2.5 text-center">
+                          {row.letter ? (
+                            <Badge tone={row.passed ? 'success' : 'danger'}>{row.letter}</Badge>
+                          ) : (
+                            <span className="text-xs text-slate-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardBody>
+        </Card>
+      ) : (
+        <Card>
+          <CardHeader
+            title="Incomplete & Financial Holds"
+            subtitle="Students on financial hold or with missing marks. Eligible students can still be submitted independently."
+            icon={TriangleAlert}
+          />
+          <CardBody className="p-0">
+            {!incompleteRows.length ? (
+              <p className="p-8 text-center text-xs text-slate-400">
+                All students in this class are financially cleared and have complete marks!
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 bg-slate-50/50 text-[11px] font-semibold uppercase text-slate-400">
+                      <th className="py-3 px-6">Student</th>
+                      <th className="py-3 px-4">Financial Status</th>
+                      <th className="py-3 px-4">Reason / Outstanding Cycle</th>
+                      <th className="py-3 px-4">Due Date</th>
+                      <th className="py-3 px-4 text-center">Marks Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardBody>
-      </Card>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {incompleteRows.map((row) => (
+                      <tr key={row.studentId} className={row.hasFinancialHold ? 'bg-rose-50/20' : ''}>
+                        <td className="py-3.5 px-6">
+                          <p className="font-semibold text-slate-800">{row.name}</p>
+                          <p className="font-mono text-xs text-slate-500">{row.studentNumber}</p>
+                        </td>
+                        <td className="py-3.5 px-4">
+                          {row.hasFinancialHold ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-semibold text-rose-800">
+                              <Lock className="h-3 w-3 text-rose-600" />
+                              HOLD ACTIVE
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
+                              <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                              CLEARED
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-xs">
+                          {row.hasFinancialHold ? (
+                            <div>
+                              <p className="font-semibold text-rose-700">
+                                {row.financialHoldDetails?.title || 'Monthly Fee'}
+                              </p>
+                              <p className="font-mono text-slate-600">
+                                {row.financialHoldDetails?.amountDueEtb || '0.00'} ETB Overdue
+                              </p>
+                            </div>
+                          ) : (
+                            <span className="text-amber-700 font-medium">Marks entry pending</span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-xs text-slate-600">
+                          {row.financialHoldDetails?.dueAt ? formatEthiopian(row.financialHoldDetails.dueAt) : '—'}
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          {row.calculated ? (
+                            <Badge tone="success">Calculated ({row.total})</Badge>
+                          ) : (
+                            <Badge tone="warning">Incomplete</Badge>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardBody>
+        </Card>
+      )}
 
       <Modal
         open={confirmSubmit}
@@ -378,8 +509,12 @@ export default function TeacherCourseMarkDetail() {
         }
       >
         <p className="text-sm leading-6 text-slate-600">
-          {summary.total} students will be submitted with their calculated totals and letter grades. The registrar
-          receives a notification, and this mark sheet becomes read-only.
+          {eligibleCalculated} eligible student{eligibleCalculated === 1 ? '' : 's'} will be submitted with their calculated totals and letter grades.
+          {heldRows.length > 0 ? (
+            <span className="mt-2 block text-xs font-medium text-amber-700">
+              Note: {heldRows.length} student(s) currently on active financial hold are deferred in draft status and will not be submitted until cleared by finance.
+            </span>
+          ) : null}
         </p>
         <p className="mt-3 text-xs text-slate-500">Prepared {displayDate(new Date().toISOString().slice(0, 10))}</p>
         <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-4">

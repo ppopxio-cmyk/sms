@@ -93,7 +93,10 @@ export default function MonthlyPaymentPortal() {
     try {
       const res = await fetch(`/api/portal/monthly-payments/${hash}/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'sms-web',
+        },
         body: JSON.stringify({ studentId: studentIdInput.trim() }),
       });
 
@@ -138,7 +141,10 @@ export default function MonthlyPaymentPortal() {
     try {
       const res = await fetch(`/api/portal/monthly-payments/${hash}/verify`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'sms-web',
+        },
         body: JSON.stringify({
           portalToken,
           receiptUrl: receiptUrl.trim(),

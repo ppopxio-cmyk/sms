@@ -1,5 +1,6 @@
 import { Student } from '../models/Student.js';
 import { StudentIdCard } from '../models/IdCard.js';
+import { StudentCharge } from '../models/Finance.js';
 import { Result } from '../models/Records.js';
 import { CourseOffering } from '../models/Offering.js';
 import { Program, Batch, Department } from '../models/AcademicStructure.js';
@@ -277,6 +278,13 @@ export const getProgrammeCardCohortSummary = asyncHandler(async (req, res) => {
     cardsByStudent.get(sId).push(c);
   }
 
+  const overdueCharges = await StudentCharge.find({
+    student: { $in: studentIds },
+    status: 'unpaid',
+    dueAt: { $lt: new Date() },
+  }).select('student amountDue').lean();
+  const holdSet = new Set(overdueCharges.map((c) => String(c.student)));
+
   let photoCount = 0;
   let issuedCount = 0;
   let maxCohortIssues = 0;
@@ -289,6 +297,7 @@ export const getProgrammeCardCohortSummary = asyncHandler(async (req, res) => {
     const printCount = latestCard?.printCount || 0;
     const pv = photoView(s.photo);
     const hasPhoto = Boolean(s.photo?.url || s.photo?.filePath);
+    const hasHold = holdSet.has(sId);
 
     if (hasPhoto) photoCount++;
     if (issueCount > 0) issuedCount++;
@@ -303,10 +312,11 @@ export const getProgrammeCardCohortSummary = asyncHandler(async (req, res) => {
       photo: pv,
       photoUrl: pv?.thumbnailUrl || pv?.url || null,
       hasPhoto,
+      financialHold: hasHold,
       issueCount,
       printCount,
-      canIssue: issueCount < 2 && hasPhoto,
-      canPrint: issueCount > 0 && printCount < 2,
+      canIssue: issueCount < 2 && hasPhoto && !hasHold,
+      canPrint: issueCount > 0 && printCount < 2 && !hasHold,
       limitReached: issueCount >= 2 || printCount >= 2,
       latestCard: latestCard
         ? {
@@ -436,8 +446,21 @@ export const bulkIssueIdCards = asyncHandler(async (req, res) => {
   const offerings = await CourseOffering.find({ program: programId }).select('_id level').lean();
   const offLevelMap = new Map(offerings.map((o) => [String(o._id), o.level]));
 
+  const overdueCharges = await StudentCharge.find({
+    student: { $in: students.map((s) => s._id) },
+    status: 'unpaid',
+    dueAt: { $lt: new Date() },
+  }).select('student').lean();
+  const holdSet = new Set(overdueCharges.map((c) => String(c.student)));
+  let deferredHoldCount = 0;
+
   const createdCards = [];
   for (const student of students) {
+    if (holdSet.has(String(student._id))) {
+      deferredHoldCount++;
+      continue;
+    }
+
     const hasPhoto = Boolean(student.photo?.url || student.photo?.filePath);
     if (!hasPhoto) continue;
 
@@ -490,7 +513,8 @@ export const bulkIssueIdCards = asyncHandler(async (req, res) => {
   res.status(201).json({
     success: true,
     issuedCount: createdCards.length,
-    message: `Successfully issued ${createdCards.length} student ID cards in bulk.`,
+    deferredHoldCount,
+    message: `Successfully issued ${createdCards.length} student ID cards in bulk${deferredHoldCount > 0 ? ` (${deferredHoldCount} deferred due to financial hold)` : ''}.`,
   });
 });
 

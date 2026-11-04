@@ -2,6 +2,7 @@ import { AttendanceSheet } from '../models/AttendanceSheet.js';
 import { AttendanceRecord, Result } from '../models/Records.js';
 import { CourseOffering, CourseRegistration } from '../models/Offering.js';
 import { CourseMarkPolicy } from '../models/CourseMarkPolicy.js';
+import { StudentCharge } from '../models/Finance.js';
 import { buildExport } from './export.service.js';
 import {
   ASSIGNMENT_POPULATE,
@@ -361,16 +362,30 @@ export async function attendanceRoster(teacherId, assignmentId, query) {
     AttendanceRecord.find({ offering: assignmentId, date, period }).lean(),
   ]);
 
+  const studentIds = enrollments.map((r) => r.student?._id).filter(Boolean);
+  const overdueCharges = await StudentCharge.find({
+    student: { $in: studentIds },
+    status: 'unpaid',
+    dueAt: { $lt: new Date() },
+  }).select('student amountDue dueAt').lean();
+  const holdByStudent = new Map(overdueCharges.map((c) => [String(c.student), c]));
+
   const recordByStudent = new Map(records.map((record) => [String(record.student), record]));
   const students = enrollments
     .filter((row) => row.student)
     .map((row) => {
       const record = recordByStudent.get(String(row.student._id));
+      const hold = holdByStudent.get(String(row.student._id));
       return {
         ...enrollmentDto(row),
         attendanceStatus: record?.status ?? null,
         note: record?.notes ?? '',
         markedAt: record?.markedAt ?? null,
+        financialHold: Boolean(hold),
+        canMarkPresent: !hold,
+        financialHoldMessage: hold
+          ? 'Financial hold active: Unpaid monthly fees. Student cannot be marked present until cleared by finance.'
+          : null,
       };
     });
 
@@ -406,6 +421,28 @@ export async function saveAttendance(teacherId, assignmentId, payload) {
   for (const record of payload.records) {
     if (!allowed.has(record.studentId)) {
       throw new AppError(404, 'STUDENT_NOT_FOUND', 'One of those students is not registered in this class.');
+    }
+  }
+
+  // Financial Clearance: Check students being marked present or late
+  const presentStudentIds = payload.records
+    .filter((r) => r.status === 'present' || r.status === 'late')
+    .map((r) => r.studentId);
+
+  if (presentStudentIds.length) {
+    const overdueCharges = await StudentCharge.find({
+      student: { $in: presentStudentIds },
+      status: 'unpaid',
+      dueAt: { $lt: new Date() },
+    }).select('student').lean();
+
+    if (overdueCharges.length > 0) {
+      throw new AppError(
+        403,
+        'STUDENT_FINANCIAL_HOLD',
+        'One or more students have active financial holds and cannot be marked present until cleared by finance.',
+        { heldStudents: overdueCharges.map((c) => String(c.student)) }
+      );
     }
   }
 

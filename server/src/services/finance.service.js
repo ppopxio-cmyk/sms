@@ -9,42 +9,153 @@ import {
   StudentNotification,
 } from '../models/Finance.js';
 import { Student } from '../models/Student.js';
+import { CourseOffering, CourseRegistration } from '../models/Offering.js';
 import { SystemSetting } from '../models/SystemSetting.js';
 import { audit } from './audit.service.js';
+import { notifyUsers } from './notification.service.js';
 import { AppError } from '../utils/AppError.js';
-import { toEthiopian, ETH_MONTHS, fromEthiopian } from '../utils/ethiopianDate.js';
+import { toEthiopian, ETH_MONTHS, fromEthiopian, parseEATDate } from '../utils/ethiopianDate.js';
+
+/**
+ * Authoritative Centralized Financial Eligibility Service
+ * Supports 6 discrete states:
+ * 1. PAID - All assigned cycles/charges are fully settled
+ * 2. UNPAID - Has active charges within due date, not yet overdue
+ * 3. OVERDUE - Has unpaid charges past due date (+ grace period); ACADEMIC HOLD ACTIVE
+ * 4. WAIVED - All charges waived by scholarship / admin
+ * 5. PENDING - Cycle created, but opensAt is in the future
+ * 6. NOT_APPLICABLE - No charges assigned to student
+ */
+export async function getStudentFinancialStatus(studentId) {
+  if (!studentId) {
+    return {
+      state: 'NOT_APPLICABLE',
+      hasHold: false,
+      canAttend: true,
+      canSubmitAssessments: true,
+      canSubmitMarks: true,
+      canIssueDocuments: true,
+      overdueCount: 0,
+      overdueCharges: [],
+      totalOutstandingSantim: 0,
+      totalOutstandingEtb: '0.00',
+      totalPaidSantim: 0,
+      totalPaidEtb: '0.00',
+    };
+  }
+
+  const [settings, charges] = await Promise.all([
+    SystemSetting.findOne({ key: 'global' }).lean(),
+    StudentCharge.find({ student: studentId })
+      .populate('cycle', 'title ethYear ethMonth portalHash dueAt opensAt amount status deletedAt')
+      .sort({ dueAt: 1 })
+      .lean(),
+  ]);
+
+  const graceDays = Number(settings?.finance?.graceDays || 0);
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - graceDays * 86_400_000);
+
+  // Filter charges for active/valid cycles
+  const validCharges = charges.filter((c) => c.cycle && !c.cycle.deletedAt && c.cycle.status !== 'cancelled');
+
+  if (!validCharges.length) {
+    return {
+      state: 'NOT_APPLICABLE',
+      hasHold: false,
+      canAttend: true,
+      canSubmitAssessments: true,
+      canSubmitMarks: true,
+      canIssueDocuments: true,
+      overdueCount: 0,
+      overdueCharges: [],
+      totalOutstandingSantim: 0,
+      totalOutstandingEtb: '0.00',
+      totalPaidSantim: 0,
+      totalPaidEtb: '0.00',
+    };
+  }
+
+  const overdueCharges = [];
+  let unpaidCount = 0;
+  let paidCount = 0;
+  let waivedCount = 0;
+  let pendingCount = 0;
+  let totalOutstandingSantim = 0;
+  let totalPaidSantim = 0;
+
+  for (const c of validCharges) {
+    if (c.status === 'paid') {
+      paidCount++;
+      totalPaidSantim += (c.amountDue || 0);
+    } else if (c.status === 'waived') {
+      waivedCount++;
+    } else if (c.status === 'unpaid') {
+      unpaidCount++;
+      totalOutstandingSantim += (c.amountDue || 0);
+      const isOverdue = new Date(c.dueAt) < cutoff;
+      const isPending = c.cycle.opensAt && new Date(c.cycle.opensAt) > now;
+
+      if (isOverdue) {
+        overdueCharges.push({
+          chargeId: String(c._id),
+          cycleId: String(c.cycle._id),
+          title: c.cycle.title || `Month ${c.cycle.ethMonth} ${c.cycle.ethYear}`,
+          amountDue: c.amountDue,
+          amountDueEtb: ((c.amountDue || 0) / 100).toFixed(2),
+          dueAt: c.dueAt,
+          ethYear: c.cycle.ethYear,
+          ethMonth: c.cycle.ethMonth,
+          portalHash: c.cycle.portalHash,
+        });
+      } else if (isPending) {
+        pendingCount++;
+      }
+    }
+  }
+
+  let state = 'NOT_APPLICABLE';
+  const hasHold = overdueCharges.length > 0;
+
+  if (hasHold) {
+    state = 'OVERDUE';
+  } else if (unpaidCount > 0) {
+    state = (pendingCount === unpaidCount) ? 'PENDING' : 'UNPAID';
+  } else if (waivedCount > 0 && paidCount === 0) {
+    state = 'WAIVED';
+  } else if (paidCount > 0 || (paidCount + waivedCount === validCharges.length)) {
+    state = 'PAID';
+  }
+
+  return {
+    state,
+    hasHold,
+    canAttend: !hasHold,
+    canSubmitAssessments: !hasHold,
+    canSubmitMarks: !hasHold,
+    canIssueDocuments: !hasHold,
+    overdueCount: overdueCharges.length,
+    overdueCharges,
+    totalOutstandingSantim,
+    totalOutstandingEtb: (totalOutstandingSantim / 100).toFixed(2),
+    totalPaidSantim,
+    totalPaidEtb: (totalPaidSantim / 100).toFixed(2),
+  };
+}
 
 /**
  * Live instant database check for financial hold.
  * Blocked if the student has ANY unpaid charge where dueAt < now (past due).
  */
 export async function checkStudentFinancialHold(studentId) {
-  if (!studentId) return { hasHold: false, overdueCount: 0, overdueCharges: [] };
-
-  const settings = await SystemSetting.findOne({ key: 'global' }).lean();
-  const graceDays = Number(settings?.finance?.graceDays || 0);
-  const cutoff = new Date(Date.now() - graceDays * 86_400_000);
-
-  const overdueCharges = await StudentCharge.find({
-    student: studentId,
-    status: 'unpaid',
-    dueAt: { $lt: cutoff },
-  })
-    .populate('cycle', 'title ethYear ethMonth portalHash dueAt amount')
-    .sort({ dueAt: 1 })
-    .lean();
-
-  const hasHold = overdueCharges.length > 0;
+  const status = await getStudentFinancialStatus(studentId);
   return {
-    hasHold,
-    overdueCount: overdueCharges.length,
-    overdueCharges: overdueCharges.map((c) => ({
-      chargeId: String(c._id),
-      cycleTitle: c.cycle?.title || 'Monthly Fee',
-      dueAt: c.dueAt,
-      amountDue: c.amountDue,
-      portalHash: c.cycle?.portalHash,
-    })),
+    hasHold: status.hasHold,
+    overdueCount: status.overdueCount,
+    overdueCharges: status.overdueCharges,
+    totalOutstandingSantim: status.totalOutstandingSantim,
+    totalOutstandingEtb: status.totalOutstandingEtb,
+    state: status.state,
   };
 }
 
@@ -52,16 +163,85 @@ export async function checkStudentFinancialHold(studentId) {
  * Assertion helper: throws AppError(403) if the student is on financial hold
  */
 export async function assertNoFinancialHold(studentId, actionName = 'this action') {
-  const { hasHold, overdueCharges } = await checkStudentFinancialHold(studentId);
-  if (hasHold) {
-    const portalHash = overdueCharges[0]?.portalHash;
+  const status = await getStudentFinancialStatus(studentId);
+  if (status.hasHold) {
+    const firstOverdue = status.overdueCharges[0];
+    const portalHash = firstOverdue?.portalHash;
     const paymentLink = portalHash ? `/monthly-payments/${portalHash}` : '/monthly-payments';
     throw new AppError(
       403,
-      'FINANCIAL_HOLD',
-      `Academic hold active: You have unpaid monthly fees. Please complete your fee payment at ${paymentLink} to proceed with ${actionName}.`,
-      { paymentLink, overdueCount: overdueCharges.length }
+      'FINANCIAL_CLEARANCE_REQUIRED',
+      `Financial clearance required: Student has unpaid monthly fees (${firstOverdue?.title || 'Monthly Fee'} - ${firstOverdue?.amountDueEtb || '0.00'} ETB). Please complete payment at ${paymentLink} to proceed with ${actionName}.`,
+      {
+        paymentLink,
+        overdueCount: status.overdueCount,
+        totalOutstandingEtb: status.totalOutstandingEtb,
+        overdueCharges: status.overdueCharges,
+      }
     );
+  }
+  return status;
+}
+
+/**
+ * Find teacher user IDs assigned to a student's active registered courses
+ */
+export async function getAssignedTeacherUserIdsForStudent(studentId) {
+  if (!studentId) return [];
+  const registrations = await CourseRegistration.find({
+    student: studentId,
+    status: 'registered',
+  }).select('offering').lean();
+
+  if (!registrations.length) return [];
+  const offeringIds = registrations.map((r) => r.offering);
+
+  const offerings = await CourseOffering.find({
+    _id: { $in: offeringIds },
+    teacher: { $ne: null },
+  }).select('teacher').lean();
+
+  return [...new Set(offerings.map((o) => String(o.teacher)).filter(Boolean))];
+}
+
+/**
+ * Send targeted notifications to assigned teachers when hold status changes
+ */
+export async function notifyAssignedTeachersHoldStatus(studentId, { isCleared, details }) {
+  try {
+    const teacherIds = await getAssignedTeacherUserIdsForStudent(studentId);
+    if (!teacherIds.length) return;
+
+    const student = await Student.findById(studentId)
+      .select('studentId firstName lastName middleName department program batch')
+      .populate('department', 'name code')
+      .populate('program', 'name code')
+      .populate('batch', 'name code')
+      .lean();
+    if (!student) return;
+
+    const studentName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(' ') || student.studentId;
+    const deptName = student.department?.name || student.department?.code || '';
+    const progName = student.program?.name || student.program?.code || '';
+    const batchName = student.batch?.name || student.batch?.code || '';
+
+    if (isCleared) {
+      await notifyUsers(teacherIds, {
+        title: 'Financial Hold Cleared',
+        message: `Financial clearance confirmed for ${studentName} (${student.studentId}) - ${deptName} / ${progName} ${batchName}. Academic restrictions have been lifted.`,
+        type: 'financial_clearance',
+        link: '/teacher/classes',
+      });
+    } else {
+      await notifyUsers(teacherIds, {
+        title: 'Financial Hold Active',
+        message: `Academic hold active for ${studentName} (${student.studentId}) - ${deptName} / ${progName} ${batchName}. Outstanding fee: ${details?.title || 'Monthly Fee'} (${details?.amountEtb || '0.00'} ETB). Attendance marking and assessment submissions are restricted.`,
+        type: 'financial_hold',
+        link: '/teacher/classes',
+      });
+    }
+  } catch (err) {
+    // Non-blocking notice error
   }
 }
 
@@ -92,8 +272,8 @@ export async function createPaymentCycle(payload, userId) {
     title: title || `${ETH_MONTHS[ethMonth - 1] || 'Month'} ${ethYear}`,
     ethYear: Number(ethYear),
     ethMonth: Number(ethMonth),
-    opensAt: new Date(opensAt),
-    dueAt: new Date(dueAt),
+    opensAt: parseEATDate(opensAt, false),
+    dueAt: parseEATDate(dueAt, true),
     amount: cleanAmount,
     bank: {
       bank: bank?.bank || defaultBank.bank || 'Commercial Bank of Ethiopia',
@@ -221,7 +401,7 @@ export async function updatePaymentCycle(cycleId, updates, userId) {
   if (cycle.status === 'open') {
     // Once open, only due date can change. Amount is locked if any payment exists.
     if (updates.dueAt) {
-      cycle.dueAt = new Date(updates.dueAt);
+      cycle.dueAt = parseEATDate(updates.dueAt, true);
       // Update dueAt on all unpaid charges
       await StudentCharge.updateMany(
         { cycle: cycle._id, status: 'unpaid' },
@@ -379,6 +559,15 @@ export async function recordManualPayment({
   charge.payment = payment._id;
   await charge.save();
 
+  // Notify assigned teachers if student is now fully cleared
+  const postHold = await checkStudentFinancialHold(charge.student?._id || charge.student);
+  if (!postHold.hasHold) {
+    void notifyAssignedTeachersHoldStatus(charge.student?._id || charge.student, {
+      isCleared: true,
+      details: { title: charge.cycle?.title, amountEtb: (payment.amount / 100).toFixed(2) },
+    });
+  }
+
   audit({
     actorId: userId,
     actorRole: 'ACCOUNTANT',
@@ -474,6 +663,15 @@ export async function createWaiver({ chargeId, amount, type = 'full', reason, us
   }
   await charge.save();
 
+  // Notify assigned teachers if student is now fully cleared
+  const postHold = await checkStudentFinancialHold(charge.student);
+  if (!postHold.hasHold) {
+    void notifyAssignedTeachersHoldStatus(charge.student, {
+      isCleared: true,
+      details: { title: 'Tuition Fee Exemption', amountEtb: (waiverAmount / 100).toFixed(2) },
+    });
+  }
+
   audit({
     actorId: userId,
     actorRole: 'ACCOUNTANT',
@@ -507,6 +705,15 @@ export async function revokeWaiver(waiverId, reason, userId) {
     charge.waiver = null;
     if (charge.cycle) charge.amountDue = charge.cycle.amount;
     await charge.save();
+
+    // Check if student now has an active hold and notify assigned teachers
+    const postHold = await checkStudentFinancialHold(charge.student);
+    if (postHold.hasHold) {
+      void notifyAssignedTeachersHoldStatus(charge.student, {
+        isCleared: false,
+        details: { title: 'Waiver Revoked', amountEtb: ((charge.amountDue || 0) / 100).toFixed(2) },
+      });
+    }
   }
 
   return waiver;
@@ -531,6 +738,15 @@ export async function extendStudentDeadline({ chargeId, extendedDueAt, reason, u
 
   charge.dueAt = new Date(extendedDueAt);
   await charge.save();
+
+  // If deadline extension lifted an active hold, notify assigned teachers
+  const postHold = await checkStudentFinancialHold(charge.student);
+  if (!postHold.hasHold) {
+    void notifyAssignedTeachersHoldStatus(charge.student, {
+      isCleared: true,
+      details: { title: 'Deadline Extended', amountEtb: ((charge.amountDue || 0) / 100).toFixed(2) },
+    });
+  }
 
   audit({
     actorId: userId,

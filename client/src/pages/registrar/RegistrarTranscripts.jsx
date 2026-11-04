@@ -16,6 +16,7 @@ import { useDebounced } from '../../lib/useDebounced';
 import RegistrarPageHeader from '../../components/registrar/RegistrarPageHeader';
 import RegistrarTable from '../../components/registrar/RegistrarTable';
 import StudentPicker from '../../components/registrar/StudentPicker';
+import FinancialHoldModal from '../../components/registrar/FinancialHoldModal';
 import { TextAreaField } from '../../components/registrar/Fields';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
@@ -325,6 +326,8 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
   const [purpose, setPurpose] = useState('');
   const [selectedLevels, setSelectedLevels] = useState([]);
   const [error, setError] = useState('');
+  const [showHoldModal, setShowHoldModal] = useState(false);
+  const [holdInfo, setHoldInfo] = useState(null);
 
   const countQuery = useQuery({
     queryKey: ['registrar', 'transcript-count', student?.id],
@@ -395,6 +398,17 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
       onClose?.();
     },
     onError: (err) => {
+      const respData = err.response?.data;
+      if (respData?.code === 'FINANCIAL_CLEARANCE_REQUIRED') {
+        setHoldInfo({
+          message: respData.message,
+          overdueCharges: respData.details?.overdueCharges || respData.overdueCharges || [],
+          totalOutstandingEtb: respData.details?.totalOutstandingEtb || respData.totalOutstandingEtb,
+          paymentLink: respData.details?.paymentLink || respData.paymentLink,
+        });
+        setShowHoldModal(true);
+        return;
+      }
       const message = errorMessage(err, 'The transcript could not be issued.');
       setError(message);
       toast.error(message);
@@ -544,6 +558,13 @@ function IssueTranscriptModal({ open, onClose, onSaved }) {
           The transcript seals all verified stage GPAs, cumulative CGPA, and course grades into a tamper-evident record with an official verification hash.
         </p>
       </div>
+
+      <FinancialHoldModal
+        open={showHoldModal}
+        onClose={() => setShowHoldModal(false)}
+        student={student ? { id: student.id, name: student.fullName, studentId: student.studentId } : null}
+        holdInfo={holdInfo}
+      />
     </Modal>
   );
 }

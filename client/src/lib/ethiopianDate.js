@@ -86,6 +86,27 @@ export function formatEthiopianShort(input = new Date()) {
   return `${ETH_MONTHS[month - 1].slice(0, 3)} ${day}`;
 }
 
+export function toEATDateKey(input = new Date()) {
+  if (!input) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(input));
+}
+
+export function parseEATDate(input, isEndOfDay = false) {
+  if (!input) return null;
+  if (input instanceof Date) return input;
+  const str = String(input).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const timePart = isEndOfDay ? '23:59:59.999' : '00:00:00.000';
+    return new Date(`${str}T${timePart}+03:00`);
+  }
+  return new Date(input);
+}
+
 export function timeAgo(input) {
   if (!input) return '—';
   const diff = Date.now() - new Date(input).getTime();

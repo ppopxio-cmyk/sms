@@ -40,10 +40,60 @@ export const getDashboard = asyncHandler(async (req, res) => {
 
 // 2. List Cycles
 export const listCycles = asyncHandler(async (req, res) => {
-  const { status, ethYear, page = 1, limit = 20 } = req.query;
+  const {
+    status,
+    ethYear,
+    ethMonth,
+    departmentId,
+    programId,
+    batchId,
+    search,
+    page = 1,
+    limit = 20,
+  } = req.query;
+
   const filter = { deletedAt: null };
   if (status) filter.status = status;
   if (ethYear) filter.ethYear = Number(ethYear);
+  if (ethMonth) filter.ethMonth = Number(ethMonth);
+
+  const andConditions = [];
+
+  if (departmentId) {
+    andConditions.push({
+      $or: [{ 'targets.all': true }, { 'targets.departments': departmentId }],
+    });
+  }
+
+  if (programId) {
+    andConditions.push({
+      $or: [{ 'targets.all': true }, { 'targets.programmes': programId }],
+    });
+  }
+
+  if (batchId) {
+    andConditions.push({
+      $or: [{ 'targets.all': true }, { 'targets.batches': batchId }],
+    });
+  }
+
+  if (search && search.trim()) {
+    const term = search.trim();
+    const matchingCharges = await StudentCharge.find({
+      studentId: { $regex: term, $options: 'i' },
+    }).distinct('cycle');
+
+    andConditions.push({
+      $or: [
+        { title: { $regex: term, $options: 'i' } },
+        { _id: { $in: matchingCharges } },
+      ],
+    });
+  }
+
+  if (andConditions.length > 0) {
+    filter.$and = andConditions;
+  }
 
   const skip = (Math.max(1, Number(page)) - 1) * Number(limit);
   const [cycles, total] = await Promise.all([
@@ -569,6 +619,47 @@ export const getStudentProfile = asyncHandler(async (req, res) => {
     .filter((w) => w.status === 'approved')
     .reduce((acc, w) => acc + (w.amount || 0), 0);
 
+  const currentEthYear = toEthiopian(new Date()).year;
+  const chargeYears = charges.map((c) => c.cycle?.ethYear).filter(Boolean);
+  const years = [...new Set([currentEthYear, ...chargeYears])].sort((a, b) => b - a);
+
+  const ethiopianMatrix = {};
+  for (const y of years) {
+    ethiopianMatrix[y] = ETH_MONTHS.map((monthName, idx) => {
+      const m = idx + 1; // 1 to 13
+      const charge = charges.find((c) => c.cycle?.ethYear === y && c.cycle?.ethMonth === m);
+      if (!charge) {
+        return {
+          month: m,
+          name: monthName,
+          status: 'none',
+          label: 'No Cycle',
+          amountEtb: null,
+        };
+      }
+      const isOverdue = charge.status === 'unpaid' && new Date(charge.dueAt) < new Date();
+      return {
+        month: m,
+        name: monthName,
+        chargeId: String(charge._id),
+        status: isOverdue ? 'overdue' : charge.status,
+        label: isOverdue
+          ? 'Overdue'
+          : charge.status === 'paid'
+          ? 'Paid'
+          : charge.status === 'waived'
+          ? 'Waived'
+          : 'Unpaid',
+        amountDueEtb: (charge.amountDue / 100).toFixed(2),
+        dueAt: charge.dueAt,
+        paidAt: charge.paidAt,
+        receiptNumber: charge.payment?.receiptNumber || null,
+        waiverReason: charge.waiver?.reason || null,
+        portalHash: charge.cycle?.portalHash || null,
+      };
+    });
+  }
+
   res.json({
     student: {
       ...student,
@@ -581,6 +672,7 @@ export const getStudentProfile = asyncHandler(async (req, res) => {
       outstandingEtb: (Math.max(0, totalBilled - totalPaid - totalWaived) / 100).toFixed(2),
       holdStatus,
     },
+    ethiopianMatrix,
     charges: charges.map((c) => ({
       ...c,
       id: String(c._id),

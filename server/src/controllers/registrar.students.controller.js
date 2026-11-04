@@ -109,7 +109,7 @@ function validateLevel(program, level) {
   if (level !== 1) throw new AppError(400, 'LEVEL_INVALID', 'A short-term programme only has level 1.');
 }
 
-async function nextStudentId({ program, batch }) {
+export async function nextStudentId({ program, batch }) {
   if (!batch) {
     // If no batch was explicitly selected, find the latest batch for this program (any status)
     const existingBatch = await Batch.findOne(ownFilter({ program: program._id }))

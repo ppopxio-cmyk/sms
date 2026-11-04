@@ -9,6 +9,7 @@ import {
   Download,
   Filter,
   History,
+  Lock,
   LockKeyhole,
   Mail,
   Save,
@@ -206,7 +207,11 @@ export default function TeacherAttendanceMark() {
       const next = {};
       students.forEach((student) => {
         const currentStatus = values[student.id] || '';
-        next[student.id] = currentStatus === excludeStatus ? currentStatus : DEFAULT_STATUS;
+        if (student.financialHold) {
+          next[student.id] = currentStatus || 'absent';
+        } else {
+          next[student.id] = currentStatus === excludeStatus ? currentStatus : DEFAULT_STATUS;
+        }
       });
       return { key: dataKey, values: next };
     });
@@ -217,6 +222,11 @@ export default function TeacherAttendanceMark() {
   };
 
   const setStatus = (studentId, status) => {
+    const student = students.find((s) => s.id === studentId);
+    if (student?.financialHold && (status === 'present' || status === 'late')) {
+      toast.error('This student has an active financial hold and cannot be marked present until cleared by finance.');
+      return;
+    }
     setDraft((current) => {
       const values = current.key === dataKey ? current.values : baseStatuses;
       const nextStatus = values[studentId] === status ? '' : status;
@@ -450,7 +460,18 @@ export default function TeacherAttendanceMark() {
                             </span>
                           )}
                           <div>
-                            <p className="truncate text-sm font-semibold text-slate-800">{student.name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="truncate text-sm font-semibold text-slate-800">{student.name}</p>
+                              {student.financialHold ? (
+                                <span
+                                  className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 border border-amber-200"
+                                  title="Academic hold: Unpaid monthly fees. Student cannot be marked present."
+                                >
+                                  <Lock className="h-2.5 w-2.5 text-amber-600" />
+                                  Hold
+                                </span>
+                              ) : null}
+                            </div>
                             <p className="mt-0.5 text-xs text-slate-500">
                               {student.studentNumber || 'No ID'}
                               {student.program ? ` · ${student.program}` : ''}
@@ -466,14 +487,19 @@ export default function TeacherAttendanceMark() {
                             {STATUSES.map((item) => {
                               const active = value === item.key;
                               const Icon = item.icon;
+                              const isRestricted = student.financialHold && (item.key === 'present' || item.key === 'late');
                               return (
                                 <button
                                   key={item.key}
                                   type="button"
                                   aria-pressed={active}
+                                  disabled={isRestricted}
+                                  title={isRestricted ? 'Cannot mark present: Student on financial hold' : undefined}
                                   onClick={() => setStatus(student.id, active ? '' : item.key)}
                                   className={`focus-ring rounded-lg border px-2.5 py-2 text-[11px] font-semibold transition flex items-center gap-1 ${
-                                    active
+                                    isRestricted
+                                      ? 'cursor-not-allowed opacity-40 border-slate-200 bg-slate-100 text-slate-400'
+                                      : active
                                       ? item.active
                                       : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-800'
                                   }`}

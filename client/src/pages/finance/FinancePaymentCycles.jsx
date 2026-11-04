@@ -47,7 +47,35 @@ const STATUS_TONES = {
 export default function FinancePaymentCycles() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState('');
+  const [departmentFilter, setDepartmentFilter] = useState('');
+  const [programFilter, setProgramFilter] = useState('');
+  const [batchFilter, setBatchFilter] = useState('');
+  const [yearFilter, setYearFilter] = useState('');
+  const [monthFilter, setMonthFilter] = useState('');
+  const [searchFilter, setSearchFilter] = useState('');
   const [page, setPage] = useState(1);
+
+  // Cascading Academic Structure Data
+  const { data: structureData } = useQuery({
+    queryKey: ['academic-structure'],
+    queryFn: async () => (await api.get('/registrar/academic-structure')).data,
+  });
+
+  const departments = structureData?.departments || [];
+  const programs = useMemo(() => {
+    if (!departmentFilter) return structureData?.programs || [];
+    return (structureData?.programs || []).filter(
+      (p) => String(p.department?._id || p.department) === departmentFilter
+    );
+  }, [structureData?.programs, departmentFilter]);
+
+  const batches = useMemo(() => {
+    let list = structureData?.batches || [];
+    if (programFilter) {
+      list = list.filter((b) => String(b.program?._id || b.program) === programFilter);
+    }
+    return list.filter((b) => b.status === 'active' || !b.status);
+  }, [structureData?.batches, programFilter]);
 
   // Detail Modal & Tabs
   const [selectedCycleId, setSelectedCycleId] = useState(null);
@@ -79,12 +107,35 @@ export default function FinancePaymentCycles() {
   // Copy feedback
   const [copiedId, setCopiedId] = useState(null);
 
-  // 1. Fetch Cycles List
+  // 1. Fetch Cycles List with Cascading Filters
   const { data: cyclesData, isLoading, refetch } = useQuery({
-    queryKey: ['finance', 'cycles', { status: statusFilter, page }],
+    queryKey: [
+      'finance',
+      'cycles',
+      {
+        status: statusFilter,
+        departmentId: departmentFilter,
+        programId: programFilter,
+        batchId: batchFilter,
+        ethYear: yearFilter,
+        ethMonth: monthFilter,
+        search: searchFilter,
+        page,
+      },
+    ],
     queryFn: async () => {
       const res = await api.get('/finance/cycles', {
-        params: { status: statusFilter || undefined, page, limit: 15 },
+        params: {
+          status: statusFilter || undefined,
+          departmentId: departmentFilter || undefined,
+          programId: programFilter || undefined,
+          batchId: batchFilter || undefined,
+          ethYear: yearFilter || undefined,
+          ethMonth: monthFilter || undefined,
+          search: searchFilter || undefined,
+          page,
+          limit: 15,
+        },
       });
       return res.data;
     },
@@ -229,31 +280,179 @@ export default function FinancePaymentCycles() {
         }
       />
 
-      {/* Filter Tabs */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
-        <div className="flex items-center gap-1">
-          {['', 'draft', 'open', 'closed', 'cancelled'].map((st) => (
-            <button
-              key={st}
-              onClick={() => {
-                setStatusFilter(st);
-                setPage(1);
-              }}
-              className={`rounded-xl px-3 py-1.5 text-xs font-semibold capitalize transition ${
-                statusFilter === st
-                  ? 'bg-slate-900 text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              {st || 'All Cycles'}
-            </button>
-          ))}
+      {/* Cascading Filter Bar */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div className="flex flex-wrap items-center gap-1">
+            {['', 'draft', 'open', 'closed', 'cancelled'].map((st) => (
+              <button
+                key={st}
+                onClick={() => {
+                  setStatusFilter(st);
+                  setPage(1);
+                }}
+                className={`rounded-xl px-3 py-1.5 text-xs font-semibold capitalize transition ${
+                  statusFilter === st
+                    ? 'bg-slate-900 text-white shadow-sm'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {st || 'All Statuses'}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {(departmentFilter || programFilter || batchFilter || yearFilter || monthFilter || searchFilter || statusFilter) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setDepartmentFilter('');
+                  setProgramFilter('');
+                  setBatchFilter('');
+                  setYearFilter('');
+                  setMonthFilter('');
+                  setSearchFilter('');
+                  setStatusFilter('');
+                  setPage(1);
+                }}
+              >
+                Reset Filters
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={() => refetch()}>
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>Refresh</span>
+            </Button>
+          </div>
         </div>
 
-        <Button variant="ghost" size="sm" onClick={() => refetch()}>
-          <RefreshCw className="h-3.5 w-3.5" />
-          <span>Refresh</span>
-        </Button>
+        {/* Cascading Dropdowns */}
+        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+              Department
+            </label>
+            <select
+              value={departmentFilter}
+              onChange={(e) => {
+                setDepartmentFilter(e.target.value);
+                setProgramFilter('');
+                setBatchFilter('');
+                setPage(1);
+              }}
+              className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="">All Departments</option>
+              {departments.map((d) => (
+                <option key={d._id || d.id} value={d._id || d.id}>
+                  {d.name || d.code}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+              Programme
+            </label>
+            <select
+              value={programFilter}
+              onChange={(e) => {
+                setProgramFilter(e.target.value);
+                setBatchFilter('');
+                setPage(1);
+              }}
+              className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="">All Programmes</option>
+              {programs.map((p) => (
+                <option key={p._id || p.id} value={p._id || p.id}>
+                  {p.name || p.code}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+              Active Batch
+            </label>
+            <select
+              value={batchFilter}
+              onChange={(e) => {
+                setBatchFilter(e.target.value);
+                setPage(1);
+              }}
+              className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="">All Active Batches</option>
+              {batches.map((b) => (
+                <option key={b._id || b.id} value={b._id || b.id}>
+                  {b.name || b.code} ({b.category || 'Regular'})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+              Ethiopian Year
+            </label>
+            <select
+              value={yearFilter}
+              onChange={(e) => {
+                setYearFilter(e.target.value);
+                setPage(1);
+              }}
+              className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="">All Years</option>
+              <option value="2017">2017</option>
+              <option value="2018">2018</option>
+              <option value="2019">2019</option>
+              <option value="2020">2020</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+              Ethiopian Month
+            </label>
+            <select
+              value={monthFilter}
+              onChange={(e) => {
+                setMonthFilter(e.target.value);
+                setPage(1);
+              }}
+              className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="">All 13 Months</option>
+              {ETH_MONTHS.map((name, idx) => (
+                <option key={name} value={idx + 1}>
+                  {idx + 1}. {name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+              Search / Student ID
+            </label>
+            <input
+              type="text"
+              placeholder="Title or Student ID..."
+              value={searchFilter}
+              onChange={(e) => {
+                setSearchFilter(e.target.value);
+                setPage(1);
+              }}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
+        </div>
       </div>
 
       {/* Cycles Table Card */}

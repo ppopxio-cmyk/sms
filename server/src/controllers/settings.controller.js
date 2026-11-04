@@ -3,7 +3,7 @@ import { User } from '../models/User.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
 import { audit } from '../services/audit.service.js';
-import { MAIL_TRANSPORT, sendTestEmail } from '../services/mail.service.js';
+import { MAIL_TRANSPORT, getActiveTransport, sendTestEmail } from '../services/mail.service.js';
 import { revokeAllExceptUsers } from '../services/session.service.js';
 import { closeNonAdmins } from '../services/stream.service.js';
 import { logger } from '../utils/logger.js';
@@ -155,11 +155,13 @@ export const updateMaintenance = asyncHandler(async (req, res) => {
 export const testMail = asyncHandler(async (req, res) => {
   const admin = await User.findById(req.user.id);
   if (!admin?.email) throw new AppError(400, 'NO_EMAIL', 'Your account has no email address.');
-  const ok = await sendTestEmail({ to: admin.email, name: admin.name, transport: MAIL_TRANSPORT });
-  if (!ok) {
-    audit({ req, action: 'admin.settings_email_test', status: 'fail', targetType: 'settings', meta: { transport: MAIL_TRANSPORT } });
-    throw new AppError(502, 'MAIL_FAILED', 'The mail service did not accept the test message. Check the server credentials.');
+  const transport = getActiveTransport?.() || MAIL_TRANSPORT;
+  try {
+    await sendTestEmail({ to: admin.email, name: admin.name, transport });
+    audit({ req, action: 'admin.settings_email_test', targetType: 'settings', meta: { transport } });
+    res.json({ message: `Test message sent to ${maskEmail(admin.email)}.`, transport });
+  } catch (err) {
+    audit({ req, action: 'admin.settings_email_test', status: 'fail', targetType: 'settings', meta: { transport, error: err.message } });
+    throw new AppError(502, 'MAIL_FAILED', `The mail service failed to send test email: ${err.message}`);
   }
-  audit({ req, action: 'admin.settings_email_test', targetType: 'settings', meta: { transport: MAIL_TRANSPORT } });
-  res.json({ message: `Test message sent to ${maskEmail(admin.email)}.`, transport: MAIL_TRANSPORT });
 });

@@ -1,4 +1,4 @@
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   User,
@@ -14,6 +14,7 @@ import {
   Phone,
   Building2,
   Printer,
+  ShieldAlert,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import PageHeader from '../../components/ui/PageHeader';
@@ -23,8 +24,10 @@ import Button from '../../components/ui/Button';
 import { SkeletonPage } from '../../components/ui/Skeleton';
 import { formatEthiopian } from '../../lib/ethiopianDate';
 
-export default function StudentFinanceProfile() {
+export default function StudentFinanceProfile({ readOnly = false }) {
   const { id } = useParams();
+  const location = useLocation();
+  const isRegistrar = readOnly || location.pathname.startsWith('/registrar');
 
   const { data, isLoading } = useQuery({
     queryKey: ['finance', 'student', id],
@@ -40,17 +43,26 @@ export default function StudentFinanceProfile() {
 
   const student = data?.student || {};
   const summary = data?.summary || {};
+  const ethiopianMatrix = data?.ethiopianMatrix || {};
   const charges = data?.charges || [];
   const payments = data?.payments || [];
   const waivers = data?.waivers || [];
   const holdStatus = summary.holdStatus || {};
 
+  const backLink = isRegistrar ? `/registrar/students/${id}` : '/accountant/collections';
+  const backLabel = isRegistrar ? '← Back to Student Record' : '← Back to Collections';
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2 text-xs text-slate-500">
-        <Link to="/accountant/collections" className="hover:text-slate-800">
-          ← Back to Collections
-        </Link>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <Link to={backLink} className="hover:text-slate-800 font-medium">
+            {backLabel}
+          </Link>
+        </div>
+        {isRegistrar && (
+          <Badge tone="indigo">Registrar View (Academic Clearance)</Badge>
+        )}
       </div>
 
       {/* Student Banner */}
@@ -143,6 +155,88 @@ export default function StudentFinanceProfile() {
           </p>
         </div>
       </div>
+
+      {/* 13 Ethiopian Months Payment Matrix */}
+      <Card>
+        <CardHeader
+          title="13 Ethiopian Months Payment Matrix"
+          subtitle="Full historical payment standing across all 13 Ethiopian calendar months (Meskerem to Pagume) for each academic year."
+          icon={Calendar}
+        />
+        <CardBody className="space-y-6">
+          {Object.keys(ethiopianMatrix).length === 0 ? (
+            <p className="text-center py-6 text-xs text-slate-400">No payment cycles or records found for this student.</p>
+          ) : (
+            Object.entries(ethiopianMatrix).map(([year, months]) => (
+              <div key={year} className="space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <h3 className="text-sm font-bold text-slate-800">
+                    Ethiopian Academic Year {year}
+                  </h3>
+                  <span className="text-xs text-slate-500 font-medium">13 Calendar Months</span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 lg:grid-cols-13 gap-2">
+                  {months.map((m) => {
+                    const isPaid = m.status === 'paid';
+                    const isWaived = m.status === 'waived';
+                    const isOverdue = m.status === 'overdue';
+                    const isUnpaid = m.status === 'unpaid';
+                    const isNone = m.status === 'none';
+
+                    return (
+                      <div
+                        key={m.month}
+                        className={`rounded-xl border p-2 text-center flex flex-col justify-between min-h-[90px] transition ${
+                          isPaid
+                            ? 'border-emerald-200 bg-emerald-50/60 text-emerald-900'
+                            : isWaived
+                            ? 'border-purple-200 bg-purple-50/60 text-purple-900'
+                            : isOverdue
+                            ? 'border-rose-300 bg-rose-50 text-rose-900 shadow-sm'
+                            : isUnpaid
+                            ? 'border-amber-200 bg-amber-50/60 text-amber-900'
+                            : 'border-slate-100 bg-slate-50/40 text-slate-400'
+                        }`}
+                        title={m.receiptNumber ? `Receipt #${m.receiptNumber}` : m.waiverReason || undefined}
+                      >
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            {m.month}. {m.name}
+                          </p>
+                          <span
+                            className={`inline-block mt-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                              isPaid
+                                ? 'bg-emerald-200/70 text-emerald-800'
+                                : isWaived
+                                ? 'bg-purple-200/70 text-purple-800'
+                                : isOverdue
+                                ? 'bg-rose-200 text-rose-800'
+                                : isUnpaid
+                                ? 'bg-amber-200/70 text-amber-800'
+                                : 'bg-slate-200/50 text-slate-500'
+                            }`}
+                          >
+                            {m.label}
+                          </span>
+                        </div>
+
+                        {m.amountDueEtb ? (
+                          <p className="mt-2 font-mono text-[11px] font-semibold">
+                            {m.amountDueEtb} ETB
+                          </p>
+                        ) : (
+                          <p className="mt-2 text-[10px] text-slate-400">—</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </CardBody>
+      </Card>
 
       {/* Charges Ledger Table */}
       <Card>
