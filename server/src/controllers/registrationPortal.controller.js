@@ -18,6 +18,7 @@ export const createPortal = asyncHandler(async (req, res) => {
     department,
     program,
     batch,
+    batches = [],
     category = 'regular',
     opensAt,
     closesAt,
@@ -26,8 +27,48 @@ export const createPortal = asyncHandler(async (req, res) => {
     maxApplications = 500,
   } = req.body;
 
-  if (!title || !department || !program || !opensAt || !closesAt) {
-    throw new AppError(400, 'FIELDS_REQUIRED', 'Title, department, programme, and valid opening/closing dates are required.');
+  if (!tutorialVideoUrl || !tutorialVideoUrl.trim()) {
+    throw new AppError(400, 'TUTORIAL_REQUIRED', 'YouTube Tutorial Video URL is required.');
+  }
+
+  if (!opensAt || !closesAt) {
+    throw new AppError(400, 'DATES_REQUIRED', 'Valid opening and closing dates are required.');
+  }
+
+  // Resolve multiple batches or single batch
+  const batchIdList = Array.isArray(batches) && batches.length > 0 ? batches : (batch ? [batch] : []);
+  let resolvedBatches = [];
+  let resolvedPrograms = [];
+  let resolvedDepartments = [];
+  let primaryBatch = batch || null;
+  let primaryProgram = program || null;
+  let primaryDept = department || null;
+
+  if (batchIdList.length > 0) {
+    resolvedBatches = await Batch.find({ _id: { $in: batchIdList } }).populate('program').lean();
+    resolvedPrograms = [...new Set(resolvedBatches.map((b) => String(b.program?._id || b.program)).filter(Boolean))];
+    const programDocs = await Program.find({ _id: { $in: resolvedPrograms } }).lean();
+    resolvedDepartments = [...new Set(programDocs.map((p) => String(p.department)).filter(Boolean))];
+
+    if (!primaryBatch && resolvedBatches.length > 0) primaryBatch = resolvedBatches[0]._id;
+    if (!primaryProgram && resolvedPrograms.length > 0) primaryProgram = resolvedPrograms[0];
+    if (!primaryDept && resolvedDepartments.length > 0) primaryDept = resolvedDepartments[0];
+  }
+
+  if (!primaryProgram && program) primaryProgram = program;
+  if (!primaryDept && department) primaryDept = department;
+
+  if (!primaryDept || !primaryProgram) {
+    throw new AppError(400, 'STRUCTURE_REQUIRED', 'Target department, programme or batches must be selected.');
+  }
+
+  // Auto-generate title if missing or empty
+  let portalTitle = (title || '').trim();
+  if (!portalTitle) {
+    const batchCodes = resolvedBatches.map((b) => b.code).filter(Boolean).join(', ');
+    const progDocs = await Program.find({ _id: { $in: resolvedPrograms.length ? resolvedPrograms : [primaryProgram] } }).lean();
+    const progNames = progDocs.map((p) => p.name).filter(Boolean).join(', ');
+    portalTitle = `${batchCodes ? `${batchCodes} — ` : ''}${progNames || 'Academic'} Intake`;
   }
 
   const portalId = crypto.randomBytes(16).toString('hex');
@@ -39,11 +80,14 @@ export const createPortal = asyncHandler(async (req, res) => {
   }
 
   const portal = await RegistrationPortal.create({
-    title: title.trim(),
+    title: portalTitle,
     portalId,
-    department,
-    program,
-    batch: batch || null,
+    department: primaryDept,
+    program: primaryProgram,
+    batch: primaryBatch,
+    departments: resolvedDepartments.length ? resolvedDepartments : [primaryDept],
+    programs: resolvedPrograms.length ? resolvedPrograms : [primaryProgram],
+    batches: batchIdList,
     category,
     opensAt: parsedOpensAt,
     closesAt: parsedClosesAt,
@@ -80,6 +124,9 @@ export const listPortals = asyncHandler(async (req, res) => {
       .populate('department', 'name code')
       .populate('program', 'name code qualificationType')
       .populate('batch', 'name code category')
+      .populate('departments', 'name code')
+      .populate('programs', 'name code qualificationType')
+      .populate('batches', 'name code category')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limit))
@@ -132,6 +179,9 @@ export const getPortalDetail = asyncHandler(async (req, res) => {
     .populate('department', 'name code')
     .populate('program', 'name code qualificationType')
     .populate('batch', 'name code category')
+    .populate('departments', 'name code')
+    .populate('programs', 'name code qualificationType durationYears')
+    .populate('batches', 'name code category')
     .lean();
 
   if (!portal) throw new AppError(404, 'PORTAL_NOT_FOUND', 'Registration portal not found.');
@@ -186,6 +236,9 @@ export const getPublicPortal = asyncHandler(async (req, res) => {
     .populate('department', 'name code')
     .populate('program', 'name code qualificationType durationYears')
     .populate('batch', 'name code category')
+    .populate('departments', 'name code')
+    .populate('programs', 'name code qualificationType durationYears')
+    .populate('batches', 'name code category')
     .lean();
 
   if (!portal || portal.status === 'archived') {
@@ -204,6 +257,9 @@ export const getPublicPortal = asyncHandler(async (req, res) => {
       qualificationType: portal.program?.qualificationType || 'degree',
       category: portal.category,
       batch: portal.batch?.name || portal.batch?.code || null,
+      departments: portal.departments || [],
+      programs: portal.programs || [],
+      batches: portal.batches || [],
       opensAt: portal.opensAt,
       closesAt: portal.closesAt,
       isOpen,

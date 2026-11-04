@@ -4,13 +4,16 @@ const registrationPortalSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true, maxlength: 200 },
     portalId: { type: String, required: true, unique: true, index: true, lowercase: true, trim: true },
-    department: { type: mongoose.Schema.Types.ObjectId, ref: 'Department', required: true, index: true },
-    program: { type: mongoose.Schema.Types.ObjectId, ref: 'Program', required: true, index: true },
+    department: { type: mongoose.Schema.Types.ObjectId, ref: 'Department', default: null, index: true },
+    program: { type: mongoose.Schema.Types.ObjectId, ref: 'Program', default: null, index: true },
     batch: { type: mongoose.Schema.Types.ObjectId, ref: 'Batch', default: null },
-    category: { type: String, enum: ['regular', 'extension'], default: 'regular', index: true },
+    departments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Department' }],
+    programs: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Program' }],
+    batches: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Batch' }],
+    category: { type: String, enum: ['regular', 'extension', 'evening', 'weekend', 'distance'], default: 'regular', index: true },
     opensAt: { type: Date, required: true },
     closesAt: { type: Date, required: true },
-    tutorialVideoUrl: { type: String, default: '', trim: true }, // e.g. YouTube tutorial URL
+    tutorialVideoUrl: { type: String, required: true, trim: true }, // e.g. YouTube tutorial URL
     instructions: { type: String, default: '', trim: true, maxlength: 3000 },
     status: { type: String, enum: ['draft', 'open', 'closed', 'archived'], default: 'open', index: true },
     maxApplications: { type: Number, default: 500 },

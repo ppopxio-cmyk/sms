@@ -355,7 +355,7 @@ export default function PublicRegistrationPortal() {
             </span>
             <h1 className="mt-2 text-2xl font-black">{portal.title}</h1>
             <p className="mt-1 text-xs text-brand-100">
-              Department of {portal.department} • {portal.program} ({portal.category.toUpperCase()})
+              Department of {portal.departments?.length > 1 ? portal.departments.map((d) => d.name || d.code).join(', ') : (portal.department || 'All Departments')} • {portal.programs?.length > 1 ? portal.programs.map((p) => p.name || p.code).join(', ') : (portal.program || 'All Programmes')} ({String(portal.category || 'regular').toUpperCase()})
             </p>
           </div>
 

@@ -40,6 +40,7 @@ const INITIAL_FORM = {
   department: '',
   program: '',
   batch: '',
+  batches: [],
   category: 'regular',
   opensAt: new Date().toISOString().slice(0, 10),
   closesAt: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
@@ -63,8 +64,9 @@ export default function RegistrarRegistrationPortals() {
   const [copiedId, setCopiedId] = useState(null);
 
   const [form, setForm] = useState(INITIAL_FORM);
+  const [selectedBatchIds, setSelectedBatchIds] = useState([]);
 
-  // 1. Fetch options (departments, programs, batches)
+  // 1. Fetch options (departments, programs, batches, academicYears)
   const optionsQuery = useQuery({
     queryKey: ['registrar', 'student-options'],
     queryFn: async () => (await api.get(`${REGISTRAR}/students/options`)).data,
@@ -73,18 +75,76 @@ export default function RegistrarRegistrationPortals() {
   const departments = optionsQuery.data?.departments || [];
   const programs = optionsQuery.data?.programs || [];
   const batches = optionsQuery.data?.batches || [];
+  const academicYears = optionsQuery.data?.academicYears || [];
 
-  // Filter programs by selected department
-  const availablePrograms = useMemo(() => {
-    if (!form.department) return programs;
-    return programs.filter((p) => String(p.department) === String(form.department));
-  }, [programs, form.department]);
+  // Filter for planned academic years and their batches
+  const plannedYears = useMemo(() => academicYears.filter((y) => y.status === 'planned'), [academicYears]);
+  const plannedYearIds = useMemo(() => new Set(plannedYears.map((y) => String(y.id))), [plannedYears]);
 
-  // Filter batches by selected program
-  const availableBatches = useMemo(() => {
-    if (!form.program) return batches;
-    return batches.filter((b) => String(b.program) === String(form.program));
-  }, [batches, form.program]);
+  const plannedBatches = useMemo(() => {
+    if (!batches.length) return [];
+    const filtered = batches.filter((b) => {
+      const isYearPlanned = b.admissionAcademicYear && plannedYearIds.has(String(b.admissionAcademicYear));
+      const isBatchPlanned = b.status === 'planned';
+      return isYearPlanned || isBatchPlanned;
+    });
+    return filtered.length > 0 ? filtered : batches;
+  }, [batches, plannedYearIds]);
+
+  // Auto-derived programmes from selected batches
+  const autoPrograms = useMemo(() => {
+    if (!selectedBatchIds.length) return [];
+    const selectedDocs = plannedBatches.filter((b) => selectedBatchIds.includes(b.id));
+    const progIdSet = new Set(selectedDocs.map((b) => String(b.program)).filter(Boolean));
+    return programs.filter((p) => progIdSet.has(String(p.id)));
+  }, [selectedBatchIds, plannedBatches, programs]);
+
+  // Auto-derived departments from auto-derived programmes
+  const autoDepartments = useMemo(() => {
+    if (!autoPrograms.length) return [];
+    const deptIdSet = new Set(autoPrograms.map((p) => String(p.department)).filter(Boolean));
+    return departments.filter((d) => deptIdSet.has(String(d.id)));
+  }, [autoPrograms, departments]);
+
+  const toggleBatch = (batchId) => {
+    setSelectedBatchIds((prev) =>
+      prev.includes(batchId) ? prev.filter((id) => id !== batchId) : [...prev, batchId],
+    );
+  };
+
+  const selectAllBatches = () => {
+    setSelectedBatchIds(plannedBatches.map((b) => b.id));
+  };
+
+  const deselectAllBatches = () => {
+    setSelectedBatchIds([]);
+  };
+
+  // Auto-generate title based on selected batches, departments, and programmes
+  useEffect(() => {
+    if (!createOpen || !selectedBatchIds.length) return;
+    const selectedDocs = plannedBatches.filter((b) => selectedBatchIds.includes(b.id));
+    const batchCodes = selectedDocs.map((b) => b.code).join(', ');
+    const progNames = autoPrograms.map((p) => p.name).join(', ');
+    const deptNames = autoDepartments.map((d) => d.name).join(', ');
+
+    const autoTitle = [
+      batchCodes ? `${batchCodes}` : '',
+      deptNames ? `${deptNames}` : '',
+      progNames ? `${progNames}` : '',
+    ]
+      .filter(Boolean)
+      .join(' — ');
+
+    setForm((prev) => ({
+      ...prev,
+      title: autoTitle ? `${autoTitle} Intake` : prev.title,
+      batch: selectedBatchIds[0] || '',
+      batches: selectedBatchIds,
+      program: autoPrograms[0]?.id || '',
+      department: autoDepartments[0]?.id || '',
+    }));
+  }, [selectedBatchIds, autoPrograms, autoDepartments, plannedBatches, createOpen]);
 
   // 2. Fetch Portals
   const portalsQuery = useQuery({
@@ -208,6 +268,7 @@ export default function RegistrarRegistrationPortals() {
           <Button
             onClick={() => {
               setForm(INITIAL_FORM);
+              setSelectedBatchIds([]);
               setCreateOpen(true);
             }}
             className="gap-2"
@@ -314,7 +375,14 @@ export default function RegistrarRegistrationPortals() {
           <p className="mt-1 text-sm text-slate-500 max-w-md mx-auto">
             Create an intake portal to start receiving online student applications for degree, TVET, or short courses.
           </p>
-          <Button onClick={() => setCreateOpen(true)} className="mt-5 gap-2">
+          <Button
+            onClick={() => {
+              setForm(INITIAL_FORM);
+              setSelectedBatchIds([]);
+              setCreateOpen(true);
+            }}
+            className="mt-5 gap-2"
+          >
             <Plus className="h-4 w-4" /> Create First Portal
           </Button>
         </Card>
@@ -487,7 +555,7 @@ export default function RegistrarRegistrationPortals() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="Create Student Registration Portal"
-        subtitle="Configure a public admissions link for prospective students."
+        subtitle="Configure a public intake portal for planned year batches with auto-detected academic structure."
         size="lg"
         footer={
           <div className="flex justify-end gap-2">
@@ -496,10 +564,22 @@ export default function RegistrarRegistrationPortals() {
             </Button>
             <Button
               onClick={() => {
-                if (!form.title.trim()) return toast.error('Enter a title for this intake portal.');
-                if (!form.department) return toast.error('Choose a target department.');
-                if (!form.program) return toast.error('Choose a target programme.');
-                createMutation.mutate(form);
+                if (!selectedBatchIds.length) {
+                  return toast.error('Choose at least one planned year batch for this intake portal.');
+                }
+                if (!form.title.trim()) {
+                  return toast.error('Enter an intake campaign title.');
+                }
+                if (!form.tutorialVideoUrl || !form.tutorialVideoUrl.trim()) {
+                  return toast.error('YouTube Tutorial Video URL is required.');
+                }
+                createMutation.mutate({
+                  ...form,
+                  batches: selectedBatchIds,
+                  batch: selectedBatchIds[0],
+                  department: autoDepartments[0]?.id || form.department,
+                  program: autoPrograms[0]?.id || form.program,
+                });
               }}
               loading={createMutation.isPending}
             >
@@ -509,76 +589,113 @@ export default function RegistrarRegistrationPortals() {
         }
       >
         <div className="space-y-4">
+          {/* Planned Batches Multi-Select (Required) */}
           <div>
-            <label className="text-xs font-semibold text-slate-700">Intake Campaign Title *</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-semibold text-slate-700">
+                1. Select Planned Intake Batches <span className="text-rose-600">*</span>
+              </label>
+              <div className="flex items-center gap-2">
+                {plannedBatches.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={selectedBatchIds.length === plannedBatches.length ? deselectAllBatches : selectAllBatches}
+                    className="text-xs font-bold text-brand-600 hover:text-brand-700 underline"
+                  >
+                    {selectedBatchIds.length === plannedBatches.length ? 'Deselect All' : 'Select All Planned'}
+                  </button>
+                ) : null}
+                <span className="text-xs text-slate-400">
+                  ({selectedBatchIds.length} of {plannedBatches.length} selected)
+                </span>
+              </div>
+            </div>
+
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/50 p-2">
+              {plannedBatches.map((b) => {
+                const prog = programs.find((p) => String(p.id) === String(b.program));
+                const isChecked = selectedBatchIds.includes(b.id);
+                return (
+                  <label
+                    key={b.id}
+                    className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs transition ${
+                      isChecked ? 'bg-brand-50/80 text-brand-900 font-semibold' : 'hover:bg-white text-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleBatch(b.id)}
+                      className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                    />
+                    <span className="font-mono font-bold text-slate-800">{b.code}</span>
+                    <span className="text-slate-600 truncate">{b.name}</span>
+                    {prog ? (
+                      <span className="ml-auto shrink-0 rounded bg-white px-2 py-0.5 text-[10px] text-slate-500 border border-slate-200">
+                        {prog.name}
+                      </span>
+                    ) : null}
+                  </label>
+                );
+              })}
+              {!plannedBatches.length ? (
+                <p className="p-3 text-center text-xs text-slate-500">
+                  No batches found in planned status or planned academic year.
+                </p>
+              ) : null}
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Only batches belonging to a planned academic year are enabled for intake portal self-registration.
+            </p>
+          </div>
+
+          {/* Auto-Derived Programmes & Departments */}
+          {selectedBatchIds.length > 0 && (
+            <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-3 text-xs space-y-2">
+              <div className="flex items-start gap-2">
+                <Building2 className="h-4 w-4 text-brand-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-semibold text-slate-700">Auto-Detected Department{autoDepartments.length === 1 ? '' : 's'}:</span>{' '}
+                  <span className="font-bold text-brand-900">
+                    {autoDepartments.map((d) => `${d.name} (${d.code})`).join(', ') || 'None'}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <BookOpen className="h-4 w-4 text-brand-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-semibold text-slate-700">Auto-Detected Programme{autoPrograms.length === 1 ? '' : 's'}:</span>{' '}
+                  <span className="font-bold text-brand-900">
+                    {autoPrograms.map((p) => `${p.name} (${p.code})`).join(', ') || 'None'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Auto-Generated Intake Campaign Title */}
+          <div>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-700">2. Intake Campaign Title *</label>
+              <span className="text-[11px] text-slate-400">Auto-generated from selected batches</span>
+            </div>
             <input
               type="text"
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
-              placeholder="e.g. Fall 2019 Regular Admissions — Clinical Nursing"
+              placeholder="e.g. REG-2019 — Clinical Nursing Intake"
               className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="text-xs font-semibold text-slate-700">Department *</label>
-              <select
-                value={form.department}
-                onChange={(e) => setForm({ ...form, department: e.target.value, program: '', batch: '' })}
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
-              >
-                <option value="">Select Department...</option>
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name} ({d.code})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-700">Programme *</label>
-              <select
-                value={form.program}
-                onChange={(e) => setForm({ ...form, program: e.target.value, batch: '' })}
-                disabled={!form.department}
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none disabled:bg-slate-100"
-              >
-                <option value="">Select Programme...</option>
-                {availablePrograms.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.code})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="text-xs font-semibold text-slate-700">Target Batch (Optional)</label>
-              <select
-                value={form.batch}
-                onChange={(e) => setForm({ ...form, batch: e.target.value })}
-                disabled={!form.program}
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none disabled:bg-slate-100"
-              >
-                <option value="">Auto-assign or choose batch...</option>
-                {availableBatches.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.code} — {b.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
+          {/* Dates & Study Category */}
+          <div className="grid gap-3 sm:grid-cols-4">
             <div>
               <label className="text-xs font-semibold text-slate-700">Study Category</label>
               <select
                 value={form.category}
                 onChange={(e) => setForm({ ...form, category: e.target.value })}
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-xs focus:border-brand-500 focus:outline-none"
               >
                 <option value="regular">Regular</option>
                 <option value="extension">Extension</option>
@@ -587,18 +704,15 @@ export default function RegistrarRegistrationPortals() {
                 <option value="distance">Distance</option>
               </select>
             </div>
-          </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
             <div>
               <label className="text-xs font-semibold text-slate-700">Opening Date *</label>
               <input
                 type="date"
                 value={form.opensAt}
                 onChange={(e) => setForm({ ...form, opensAt: e.target.value })}
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
-              >
-              </input>
+                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-xs focus:border-brand-500 focus:outline-none"
+              />
             </div>
 
             <div>
@@ -607,9 +721,8 @@ export default function RegistrarRegistrationPortals() {
                 type="date"
                 value={form.closesAt}
                 onChange={(e) => setForm({ ...form, closesAt: e.target.value })}
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
-              >
-              </input>
+                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-xs focus:border-brand-500 focus:outline-none"
+              />
             </div>
 
             <div>
@@ -620,27 +733,30 @@ export default function RegistrarRegistrationPortals() {
                 max="5000"
                 value={form.maxApplications}
                 onChange={(e) => setForm({ ...form, maxApplications: Number(e.target.value) })}
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-xs focus:border-brand-500 focus:outline-none"
               />
             </div>
           </div>
 
+          {/* YouTube Tutorial Video URL (Strictly Required) */}
           <div>
             <label className="text-xs font-semibold text-slate-700">
-              YouTube Tutorial Video URL (Optional)
+              YouTube Tutorial Video URL <span className="text-rose-600 font-bold">* (Required)</span>
             </label>
             <input
               type="url"
+              required
               value={form.tutorialVideoUrl}
               onChange={(e) => setForm({ ...form, tutorialVideoUrl: e.target.value })}
               placeholder="e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ"
               className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
             />
             <p className="mt-1 text-[11px] text-slate-500">
-              Prospective students can click "Watch Tutorial" to view step-by-step registration instructions in a modal.
+              Required. Prospective students can click "Watch Tutorial" on the registration portal to follow your video guide.
             </p>
           </div>
 
+          {/* Admission Instructions */}
           <div>
             <label className="text-xs font-semibold text-slate-700">
               Admission Instructions & Requirements (Optional)

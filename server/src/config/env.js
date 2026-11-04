@@ -64,14 +64,19 @@ const schema = z.object({
   IMAGEKIT_PHOTO_MAX_BYTES: z.coerce.number().int().min(100_000).max(15_000_000).default(5_000_000),
   IMAGEKIT_PHOTO_MIN_PX: z.coerce.number().int().min(100).max(4000).default(300),
   CERTIFICATE_PHOTO_MIN_PX: z.coerce.number().int().min(100).max(4000).default(472),
+  BREVO_API_KEY: optionalText(z.string().min(10)),
+  BREVO_SENDER_NAME: optionalText(z.string().min(1)),
+  BREVO_SENDER_EMAIL: optionalText(z.string().email()),
+  BREVO_WEBHOOK_SECRET: optionalText(z.string().min(1)),
 }).superRefine((value, ctx) => {
+  const brevo = Boolean(value.BREVO_API_KEY);
   const smtp = Boolean(value.SMTP_APP_PASSWORD);
   const api = Boolean(value.GOOGLE_CLIENT_ID && value.GOOGLE_CLIENT_SECRET && value.GOOGLE_REFRESH_TOKEN);
-  if (!smtp && !api) {
+  if (!brevo && !smtp && !api) {
     ctx.addIssue({
       code: 'custom',
       message:
-        'No way to send email. Set SMTP_APP_PASSWORD, or set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN.',
+        'No way to send email. Set BREVO_API_KEY, SMTP_APP_PASSWORD, or set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN.',
     });
   }
 });
@@ -88,6 +93,9 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 export const isProd = env.NODE_ENV === 'production';
+// Brevo API (Sendinblue) is prioritized when configured as it delivers transactional
+// email reliably over HTTPS without port blocking issues.
+export const brevoReady = Boolean(env.BREVO_API_KEY);
 // True when all three Google values are present. The Gmail API is preferred whenever it
 // is available, because it works on hosts that block the SMTP ports.
 export const gmailApiReady = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REFRESH_TOKEN);

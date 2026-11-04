@@ -1,17 +1,18 @@
 import nodemailer from 'nodemailer';
-import { env, gmailApiReady } from '../config/env.js';
+import { env, gmailApiReady, brevoReady } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { formatEthiopian } from '../utils/ethiopianDate.js';
 import { checkGmailApi, sendViaGmailApi } from './gmailTransport.js';
 
-// How the mail leaves the building: the Gmail API over HTTPS when the Google values are
-// present, otherwise the app password over SMTP. Both send from the same school address.
+// How the mail leaves the building: Brevo transactional API (HTTPS) is preferred whenever
+// BREVO_API_KEY is present, followed by Gmail API over HTTPS, and finally SMTP.
 export function getActiveTransport() {
+  if (brevoReady) return 'brevo';
   if (gmailApiReady && !gmailApiDisabled) return 'gmail-api';
   return 'smtp';
 }
 
-export const MAIL_TRANSPORT = gmailApiReady ? 'gmail-api' : 'smtp';
+export const MAIL_TRANSPORT = brevoReady ? 'brevo' : gmailApiReady ? 'gmail-api' : 'smtp';
 
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
@@ -35,6 +36,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ENTITIES[c]);
 const MONO = 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
 
 function layout({ preheader, title, accent, body }) {
+  const senderName = env.BREVO_SENDER_NAME || env.MAIL_FROM_NAME || 'Student Management System';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -44,30 +46,46 @@ function layout({ preheader, title, accent, body }) {
 <meta name="color-scheme" content="light">
 <title>${esc(title)}</title>
 </head>
-<body style="margin:0;padding:0;background:#eef2f7;">
-<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;color:#eef2f7;">${esc(preheader)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef2f7;">
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;color:#f1f5f9;">${esc(preheader)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f1f5f9;">
 <tr><td align="center" style="padding:40px 16px;">
 
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:520px;background:#ffffff;border-radius:24px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 18px 40px -26px rgba(15,23,42,.45);">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:540px;background:#ffffff;border-radius:24px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 20px 45px -20px rgba(15,23,42,0.18);">
 
-    <tr><td style="background:#4f46e5;background-image:linear-gradient(135deg,#4f46e5 0%,#7c3aed 48%,#0ea5e9 100%);padding:26px 32px;">
-      <div style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:2.6px;text-transform:uppercase;color:rgba(255,255,255,.72);">${esc(env.MAIL_FROM_NAME)}</div>
-      <div style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin-top:8px;font-size:21px;font-weight:700;color:#ffffff;letter-spacing:-.2px;">${esc(accent)}</div>
+    <!-- Cool Gradient Header -->
+    <tr><td style="background:#0f172a;background-image:linear-gradient(135deg,#0f172a 0%,#1e1b4b 45%,#312e81 85%,#4338ca 100%);border-top:4px solid #6366f1;padding:28px 32px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td style="padding-bottom:10px;">
+            <div style="display:inline-block;padding:5px 12px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.22);border-radius:9999px;font-size:11px;font-weight:700;letter-spacing:1.5px;color:#e0e7ff;text-transform:uppercase;">🏛️ ${esc(senderName)}</div>
+          </td>
+        </tr>
+      </table>
+      <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.4px;margin-top:2px;">${esc(accent)}</div>
     </td></tr>
 
-    <tr><td style="padding:32px;">
-      <h1 style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0 0 14px;font-size:24px;line-height:1.25;font-weight:700;color:#0f172a;letter-spacing:-.3px;">${esc(title)}</h1>
+    <!-- Body Content Card -->
+    <tr><td style="padding:34px 32px 30px;">
+      <h1 style="margin:0 0 16px;font-size:22px;line-height:1.3;font-weight:800;color:#0f172a;letter-spacing:-0.4px;">${esc(title)}</h1>
       ${body}
     </td></tr>
 
-    <tr><td style="padding:18px 32px 24px;background:#f8fafc;border-top:1px solid #eef2f7;">
-      <p style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;font-size:12px;line-height:1.65;color:#64748b;">This message was sent automatically. If it was not meant for you, you can safely ignore it.</p>
+    <!-- Elegant Footer -->
+    <tr><td style="padding:22px 32px 24px;background:#f8fafc;border-top:1px solid #e2e8f0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td>
+            <p style="margin:0 0 6px;font-size:12px;line-height:1.6;font-weight:600;color:#475569;">${esc(senderName)} · Official Notification</p>
+            <p style="margin:0;font-size:11px;line-height:1.6;color:#94a3b8;">This is an automated institutional message. If this was not meant for you, no action is needed.</p>
+          </td>
+        </tr>
+      </table>
     </td></tr>
 
   </table>
 
-  <div style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin-top:18px;font-size:11px;color:#94a3b8;">Please do not reply to this email.</div>
+  <div style="margin-top:20px;font-size:11px;color:#94a3b8;text-align:center;">Please do not reply directly to this automated mailbox.</div>
 
 </td></tr>
 </table>
@@ -80,13 +98,15 @@ function layout({ preheader, title, accent, body }) {
 const hi = (name) => esc(name || 'there');
 
 const para = (html, { muted = false, last = false } = {}) =>
-  `<p style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0 0 ${last ? '0' : '16px'};font-size:15px;line-height:1.65;color:${muted ? '#64748b' : '#334155'};">${html}</p>`;
+  `<p style="margin:0 0 ${last ? '0' : '16px'};font-size:14px;line-height:1.7;color:${muted ? '#64748b' : '#334155'};">${html}</p>`;
 
 function codeBlock(code, minutes) {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:22px 0 24px;">
-  <tr><td align="center" style="background:#eef2ff;background-image:linear-gradient(135deg,#eef2ff,#e0f2fe);border:1px dashed #c7d2fe;border-radius:18px;padding:22px 16px;">
-    <div style="font-family:${MONO};font-size:40px;line-height:1;font-weight:700;letter-spacing:12px;text-indent:12px;color:#3730a3;">${esc(code)}</div>
-    <div style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin-top:12px;font-size:11px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#6366f1;">expires in ${esc(minutes)} minutes</div>
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;">
+  <tr><td align="center" style="background:#f5f3ff;background-image:linear-gradient(135deg,#f5f3ff 0%,#ede9fe 100%);border:2px dashed #a78bfa;border-radius:20px;padding:24px 16px;">
+    <div style="font-family:${MONO};font-size:42px;line-height:1;font-weight:800;letter-spacing:10px;text-indent:10px;color:#4338ca;">${esc(code)}</div>
+    <div style="margin-top:14px;">
+      <span style="display:inline-block;padding:4px 12px;background:#ddd6fe;border-radius:9999px;font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:#5b21b6;">⏱️ EXPIRES IN ${esc(minutes)} MINUTES</span>
+    </div>
   </td></tr>
 </table>`;
 }
@@ -94,28 +114,28 @@ function codeBlock(code, minutes) {
 // A real button, plus the plain URL underneath: some mail clients strip styles, and
 // a verification link that cannot be tapped is a link that cannot be used.
 function button(href, label, subline) {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 20px;">
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:10px 0 24px;">
   <tr><td align="center">
-    <a href="${esc(href)}" style="display:inline-block;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#4f46e5;background-image:linear-gradient(135deg,#4f46e5,#7c3aed);color:#ffffff;text-decoration:none;font-size:16px;font-weight:700;letter-spacing:.2px;padding:15px 34px;border-radius:14px;">${esc(label)}</a>
-    ${subline ? `<div style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin-top:12px;font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:#6366f1;">${esc(subline)}</div>` : ''}
+    <a href="${esc(href)}" style="display:inline-block;background:#4f46e5;background-image:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;letter-spacing:0.2px;padding:15px 36px;border-radius:14px;box-shadow:0 8px 20px -4px rgba(79,70,229,0.45);">${esc(label)}</a>
+    ${subline ? `<div style="margin-top:12px;font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:#6366f1;">${esc(subline)}</div>` : ''}
   </td></tr>
 </table>
-<p style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0 0 18px;font-size:12px;line-height:1.6;color:#64748b;word-break:break-all;">If the button does not work, copy this address into your browser:<br><span style="font-family:${MONO};color:#4338ca;">${esc(href)}</span></p>`;
+<p style="margin:0 0 18px;font-size:12px;line-height:1.6;color:#64748b;word-break:break-all;">If the button does not work, copy this address into your browser:<br><span style="font-family:${MONO};color:#4f46e5;font-weight:600;">${esc(href)}</span></p>`;
 }
 
 function note(html) {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0;">
-  <tr><td style="background:#fff7ed;border-left:3px solid #fb923c;border-radius:10px;padding:14px 16px;">
-    <p style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;font-size:13px;line-height:1.6;color:#9a3412;">${html}</p>
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:16px 0 0;">
+  <tr><td style="background:#fffbeb;border-left:4px solid #f59e0b;border-radius:12px;padding:14px 18px;">
+    <p style="margin:0;font-size:13px;line-height:1.6;color:#92400e;">${html}</p>
   </td></tr>
 </table>`;
 }
 
 const row = (k, v) =>
-  `<tr><td style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:9px 16px 9px 0;font-size:13px;color:#64748b;white-space:nowrap;vertical-align:top;">${k}</td><td style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:9px 0;font-size:13px;font-weight:600;color:#0f172a;">${esc(v)}</td></tr>`;
+  `<tr><td style="padding:9px 16px 9px 0;font-size:13px;color:#64748b;white-space:nowrap;vertical-align:top;border-bottom:1px solid #edf2f7;">${k}</td><td style="padding:9px 0;font-size:13px;font-weight:600;color:#0f172a;border-bottom:1px solid #edf2f7;">${esc(v)}</td></tr>`;
 
 function detailCard(rows) {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fafc;border:1px solid #e8eef5;border-radius:16px;padding:6px 18px;margin:0 0 20px;">
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:6px 20px;margin:18px 0;">
   ${rows}
 </table>`;
 }
@@ -125,6 +145,40 @@ const isRender = Boolean(process.env.RENDER);
 async function deliver({ to, subject, html, text, priority = 'normal' }) {
   const isHighPriority = priority === 'high' || /code|verification|sign-in|reset|security|confirm/i.test(subject);
 
+  // 1. Brevo Transactional REST API (HTTPS port 443)
+  const sendBrevo = async () => {
+    if (!brevoReady) return false;
+    const senderEmail = env.BREVO_SENDER_EMAIL || env.SMTP_USER;
+    const senderName = env.BREVO_SENDER_NAME || env.MAIL_FROM_NAME || 'Student Management System';
+
+    const resp = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'api-key': env.BREVO_API_KEY,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        sender: { name: senderName, email: senderEmail },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html,
+        textContent: text || undefined,
+        tags: [isHighPriority ? 'transactional-urgent' : 'transactional-general'],
+      }),
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const err = new Error(data.message || `Brevo HTTP ${resp.status}`);
+      logger.error({ err: err.message, to, subject }, 'Brevo email delivery error');
+      throw err;
+    }
+    logger.info({ to, subject, messageId: data.messageId, transport: 'brevo' }, 'Email delivered successfully via Brevo');
+    return true;
+  };
+
+  // 2. SMTP fallback
   const sendSmtp = async () => {
     await transporter.sendMail({
       from: `"${env.MAIL_FROM_NAME}" <${env.SMTP_USER}>`,
@@ -146,6 +200,7 @@ async function deliver({ to, subject, html, text, priority = 'normal' }) {
     return true;
   };
 
+  // 3. Gmail API fallback
   const sendGmail = async () => {
     if (!gmailApiReady || gmailApiDisabled) return false;
     try {
@@ -158,8 +213,29 @@ async function deliver({ to, subject, html, text, priority = 'normal' }) {
     }
   };
 
-  // When Gmail API credentials are configured, prioritize Gmail API over HTTPS (port 443)
-  // because cloud hosts and local networks frequently block or throttle SMTP ports (465, 587).
+  // Primary: Brevo API
+  if (brevoReady) {
+    try {
+      return await sendBrevo();
+    } catch (brevoErr) {
+      logger.warn({ err: brevoErr.message, to, subject }, 'Brevo delivery failed; trying Gmail API / SMTP fallback');
+      if (gmailApiReady && !gmailApiDisabled) {
+        try {
+          return await sendGmail();
+        } catch (apiErr) {
+          logger.warn({ err: apiErr.message, to, subject }, 'Gmail API fallback failed; trying SMTP');
+        }
+      }
+      try {
+        return await sendSmtp();
+      } catch (smtpErr) {
+        logger.error({ brevoErr: brevoErr.message, smtpErr: smtpErr.message, to, subject }, 'All email delivery transports failed');
+        throw new Error(`Email delivery failed: Brevo (${brevoErr.message}), SMTP (${smtpErr.message})`);
+      }
+    }
+  }
+
+  // Secondary: Gmail API over HTTPS (port 443)
   if (gmailApiReady && !gmailApiDisabled) {
     try {
       return await sendGmail();
@@ -174,7 +250,7 @@ async function deliver({ to, subject, html, text, priority = 'normal' }) {
     }
   }
 
-  // Fallback: SMTP directly when Gmail API is not configured
+  // Tertiary: SMTP directly
   try {
     return await sendSmtp();
   } catch (smtpErr) {
@@ -184,6 +260,25 @@ async function deliver({ to, subject, html, text, priority = 'normal' }) {
 }
 
 export const verifyMail = async () => {
+  if (brevoReady) {
+    try {
+      const resp = await fetch('https://api.brevo.com/v3/account', {
+        headers: { 'api-key': env.BREVO_API_KEY },
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok) {
+        return {
+          address: env.BREVO_SENDER_EMAIL || env.SMTP_USER,
+          transport: 'brevo',
+          company: data.companyName,
+          credits: data.plan?.[0]?.credits,
+        };
+      }
+    } catch (err) {
+      logger.warn({ err: err.message }, 'Brevo account verification failed');
+    }
+  }
+
   if (gmailApiReady && !gmailApiDisabled) {
     try {
       const check = await checkGmailApi();

@@ -71,6 +71,9 @@ export default function TeacherCourseMarkDetail() {
       ),
     [rows, scores, baseScores, query.data?.components],
   );
+  const eligibleRows = useMemo(() => rows.filter((r) => !r.hasFinancialHold), [rows]);
+  const incompleteRows = useMemo(() => rows.filter((r) => r.hasFinancialHold || !r.calculated), [rows]);
+  const heldRows = useMemo(() => rows.filter((r) => r.hasFinancialHold), [rows]);
   const submitted = rows.length > 0 && rows.every((row) => row.status === 'submitted');
   const locked = rows.some((row) => LOCKED_STATUSES.includes(row.status));
   const lockLabel = submitted
@@ -198,11 +201,7 @@ export default function TeacherCourseMarkDetail() {
     );
   }
 
-  const eligibleRows = useMemo(() => rows.filter((r) => !r.hasFinancialHold), [rows]);
-  const incompleteRows = useMemo(() => rows.filter((r) => r.hasFinancialHold || !r.calculated), [rows]);
-  const heldRows = useMemo(() => rows.filter((r) => r.hasFinancialHold), [rows]);
-
-  const summary = query.data.summary;
+  const summary = query.data?.summary || {};
   const eligibleTotal = summary.eligibleTotal ?? eligibleRows.length;
   const eligibleCalculated = summary.eligibleCalculated ?? eligibleRows.filter((r) => r.calculated).length;
   const eligibleMissing = summary.eligibleMissing ?? eligibleRows.filter((r) => !r.calculated).length;
@@ -213,8 +212,8 @@ export default function TeacherCourseMarkDetail() {
       <TeacherPageHeader
         backTo="/teacher/course-marks"
         eyebrow="Course marks"
-        title={classTitle(query.data.assignment)}
-        subtitle={`${classMeta(query.data.assignment)} Â· Grading policy v${query.data.grading.version}`}
+        title={classTitle(query.data?.assignment)}
+        subtitle={`${classMeta(query.data?.assignment)} · Grading policy v${query.data?.grading?.version || '1'}`}
         actions={
           <>
             <ExportMenu

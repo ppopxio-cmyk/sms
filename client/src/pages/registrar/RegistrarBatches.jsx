@@ -349,16 +349,19 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
           status: editBatch.status || 'planned',
         });
       } else {
-        const currentYear = options?.academicYears?.find((y) => y.isCurrent) || options?.academicYears?.[0];
-        const yearNum = currentYear
-          ? (String(currentYear.label || '').match(/\d{4}/)?.[0] || String(new Date(currentYear.startDate).getFullYear()))
+        const defaultYear =
+          (options?.academicYears || []).find((y) => y.status === 'planned') ||
+          (options?.academicYears || []).find((y) => y.isCurrent) ||
+          options?.academicYears?.[0];
+        const yearNum = defaultYear
+          ? (String(defaultYear.label || '').match(/\d{4}/)?.[0] || String(new Date(defaultYear.startDate).getFullYear()))
           : '';
         setForm({
           code: yearNum ? `REG-${yearNum}` : '',
           name: yearNum ? `${yearNum} Regular Students` : '',
           programs: [],
           category: 'regular',
-          admissionAcademicYear: currentYear?.id || '',
+          admissionAcademicYear: defaultYear?.id || '',
           status: 'planned',
         });
       }
@@ -429,6 +432,20 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
         programs,
       };
     });
+  };
+
+  const selectAllPrograms = () => {
+    setForm((current) => ({
+      ...current,
+      programs: availablePrograms.map((p) => p.id),
+    }));
+  };
+
+  const deselectAllPrograms = () => {
+    setForm((current) => ({
+      ...current,
+      programs: [],
+    }));
   };
 
   const getStreamPrefix = (stream) => (stream === 'extension' ? 'EXT' : 'REG');
@@ -518,8 +535,12 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
             {categories.map((value) => <option key={value} value={value}>{humanStatus(value)}</option>)}
           </SelectField>
           <SelectField label="Admission academic year" value={form.admissionAcademicYear || ''} onChange={(e) => handleAdmissionYearChange(e.target.value)} required>
-            <option value="">Choose a year</option>
-            {(options?.academicYears || []).map((year) => <option key={year.id} value={year.id}>{year.label}{year.isCurrent ? ' · current' : ''}</option>)}
+            <option value="">Choose an academic year (Planned or Current)...</option>
+            {(options?.academicYears || []).map((year) => (
+              <option key={year.id} value={year.id}>
+                {year.label} {year.isCurrent ? '· Current' : year.status === 'planned' ? '· Planned' : year.status ? `· ${year.status}` : ''}
+              </option>
+            ))}
           </SelectField>
         </FormGrid>
 
@@ -528,7 +549,20 @@ function BatchFormModal({ open, options, onClose, onSaved, editBatch }) {
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
               {isEdit ? 'Programmes in this batch' : 'Programmes to include'}
             </p>
-            <span className="text-xs text-slate-400">{(form.programs || []).length} selected</span>
+            <div className="flex items-center gap-2">
+              {availablePrograms.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={(form.programs || []).length === availablePrograms.length ? deselectAllPrograms : selectAllPrograms}
+                  className="text-xs font-bold text-brand-600 hover:text-brand-700 underline"
+                >
+                  {(form.programs || []).length === availablePrograms.length ? 'Deselect All' : 'Select All'}
+                </button>
+              ) : null}
+              <span className="text-xs text-slate-400">
+                ({(form.programs || []).length} of {availablePrograms.length} selected)
+              </span>
+            </div>
           </div>
           <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-100 bg-white p-2">
             {availablePrograms.map((row) => (
