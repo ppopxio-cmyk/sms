@@ -20,9 +20,17 @@ import Modal from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';
 import { formatEthiopian } from '../../lib/ethiopianDate';
+import AccountantAcademicFilter, { SelectToViewCard } from '../../components/finance/AccountantAcademicFilter';
 
 export default function FinanceWaivers() {
   const queryClient = useQueryClient();
+
+  // Academic Filter (Batch -> Department -> Course)
+  const [selectedBatch, setSelectedBatch] = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState('');
+  const [selectedCourse, setSelectedCourse] = useState('');
+  const [isFilterApplied, setIsFilterApplied] = useState(false);
+
   const [status, setStatus] = useState('approved');
   const [page, setPage] = useState(1);
 
@@ -30,14 +38,39 @@ export default function FinanceWaivers() {
   const [revokingWaiver, setRevokingWaiver] = useState(null);
   const [revokeReason, setRevokeReason] = useState('');
 
+  const handleApplyFilter = () => {
+    setIsFilterApplied(true);
+    setPage(1);
+  };
+
+  const handleResetFilter = () => {
+    setSelectedBatch('');
+    setSelectedDepartment('');
+    setSelectedCourse('');
+    setIsFilterApplied(false);
+    setPage(1);
+  };
+
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ['finance', 'waivers', { status, page }],
+    queryKey: [
+      'finance',
+      'waivers',
+      { status, batchId: selectedBatch, departmentId: selectedDepartment, courseId: selectedCourse, page, isFilterApplied },
+    ],
     queryFn: async () => {
       const res = await api.get('/finance/waivers', {
-        params: { status: status || undefined, page, limit: 25 },
+        params: {
+          status: status || undefined,
+          batchId: selectedBatch || undefined,
+          departmentId: selectedDepartment || undefined,
+          courseId: selectedCourse || undefined,
+          page,
+          limit: 25,
+        },
       });
       return res.data;
     },
+    enabled: isFilterApplied,
   });
 
   const revokeMutation = useMutation({
@@ -62,8 +95,28 @@ export default function FinanceWaivers() {
         icon={Gift}
       />
 
-      {/* Filter Tabs */}
-      <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+      {/* Cascading Academic Filter: Batch -> Department -> Course */}
+      <AccountantAcademicFilter
+        selectedBatch={selectedBatch}
+        setSelectedBatch={setSelectedBatch}
+        selectedDepartment={selectedDepartment}
+        setSelectedDepartment={setSelectedDepartment}
+        selectedCourse={selectedCourse}
+        setSelectedCourse={setSelectedCourse}
+        isApplied={isFilterApplied}
+        onApply={handleApplyFilter}
+        onReset={handleResetFilter}
+      />
+
+      {!isFilterApplied ? (
+        <SelectToViewCard
+          title="Select to View Fee Waivers"
+          message="Please select a Batch, Department, and Course above, then click View Records to display student fee waivers."
+        />
+      ) : (
+        <>
+          {/* Filter Tabs */}
+          <div className="flex items-center justify-between border-b border-slate-200 pb-3">
         <div className="flex gap-2">
           {['approved', 'revoked', ''].map((st) => (
             <button
@@ -192,6 +245,8 @@ export default function FinanceWaivers() {
           )}
         </CardBody>
       </Card>
+      </>
+      )}
 
       {/* REVOKE WAIVER MODAL */}
       <Modal

@@ -25,9 +25,17 @@ import { EmptyState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';
 import { formatEthiopian } from '../../lib/ethiopianDate';
 import Brand from '../../components/ui/Brand';
+import AccountantAcademicFilter, { SelectToViewCard } from '../../components/finance/AccountantAcademicFilter';
 
 export default function FinanceLedger() {
   const queryClient = useQueryClient();
+
+  // Academic Filter (Batch -> Department -> Course)
+  const [selectedBatch, setSelectedBatch] = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState('');
+  const [selectedCourse, setSelectedCourse] = useState('');
+  const [isFilterApplied, setIsFilterApplied] = useState(false);
+
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [method, setMethod] = useState('');
@@ -40,20 +48,41 @@ export default function FinanceLedger() {
   const [reversingPayment, setReversingPayment] = useState(null);
   const [reversalReason, setReversalReason] = useState('');
 
+  const handleApplyFilter = () => {
+    setIsFilterApplied(true);
+    setPage(1);
+  };
+
+  const handleResetFilter = () => {
+    setSelectedBatch('');
+    setSelectedDepartment('');
+    setSelectedCourse('');
+    setIsFilterApplied(false);
+    setPage(1);
+  };
+
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ['finance', 'ledger', { search, status, method, page }],
+    queryKey: [
+      'finance',
+      'ledger',
+      { search, status, method, batchId: selectedBatch, departmentId: selectedDepartment, courseId: selectedCourse, page, isFilterApplied },
+    ],
     queryFn: async () => {
       const res = await api.get('/finance/ledger', {
         params: {
           search: search || undefined,
           status: status || undefined,
           method: method || undefined,
+          batchId: selectedBatch || undefined,
+          departmentId: selectedDepartment || undefined,
+          courseId: selectedCourse || undefined,
           page,
           limit: 25,
         },
       });
       return res.data;
     },
+    enabled: isFilterApplied,
   });
 
   const reverseMutation = useMutation({
@@ -82,8 +111,28 @@ export default function FinanceLedger() {
         icon={BookOpen}
       />
 
-      {/* Filter toolbar */}
-      <Card>
+      {/* Cascading Academic Filter: Batch -> Department -> Course */}
+      <AccountantAcademicFilter
+        selectedBatch={selectedBatch}
+        setSelectedBatch={setSelectedBatch}
+        selectedDepartment={selectedDepartment}
+        setSelectedDepartment={setSelectedDepartment}
+        selectedCourse={selectedCourse}
+        setSelectedCourse={setSelectedCourse}
+        isApplied={isFilterApplied}
+        onApply={handleApplyFilter}
+        onReset={handleResetFilter}
+      />
+
+      {!isFilterApplied ? (
+        <SelectToViewCard
+          title="Select to View Payments Ledger"
+          message="Please select a Batch, Department, and Course above, then click View Records to display confirmed payments."
+        />
+      ) : (
+        <>
+          {/* Filter toolbar */}
+          <Card>
         <CardBody className="p-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[220px]">
@@ -284,6 +333,8 @@ export default function FinanceLedger() {
           )}
         </CardBody>
       </Card>
+      </>
+      )}
 
       {/* OFFICIAL RECEIPT VIEW / PRINT MODAL */}
       <Modal

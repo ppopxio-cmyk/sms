@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   CalendarDays,
@@ -36,6 +36,7 @@ import Modal from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';
 import { ETH_MONTHS, formatEthiopian } from '../../lib/ethiopianDate';
+import AccountantAcademicFilter, { SelectToViewCard } from '../../components/finance/AccountantAcademicFilter';
 
 const STATUS_TONES = {
   draft: 'neutral',
@@ -46,6 +47,13 @@ const STATUS_TONES = {
 
 export default function FinancePaymentCycles() {
   const queryClient = useQueryClient();
+
+  // Academic Filter (Batch -> Department -> Course)
+  const [selectedBatch, setSelectedBatch] = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState('');
+  const [selectedCourse, setSelectedCourse] = useState('');
+  const [isFilterApplied, setIsFilterApplied] = useState(false);
+
   const [statusFilter, setStatusFilter] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('');
   const [programFilter, setProgramFilter] = useState('');
@@ -54,6 +62,22 @@ export default function FinancePaymentCycles() {
   const [monthFilter, setMonthFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
   const [page, setPage] = useState(1);
+
+  const handleApplyFilter = () => {
+    setIsFilterApplied(true);
+    setPage(1);
+  };
+
+  const handleResetFilter = () => {
+    setSelectedBatch('');
+    setSelectedDepartment('');
+    setSelectedCourse('');
+    setIsFilterApplied(false);
+    setDepartmentFilter('');
+    setProgramFilter('');
+    setBatchFilter('');
+    setPage(1);
+  };
 
   // Cascading Academic Structure Data
   const { data: structureData } = useQuery({
@@ -114,22 +138,25 @@ export default function FinancePaymentCycles() {
       'cycles',
       {
         status: statusFilter,
-        departmentId: departmentFilter,
+        departmentId: selectedDepartment || departmentFilter,
         programId: programFilter,
-        batchId: batchFilter,
+        batchId: selectedBatch || batchFilter,
+        courseId: selectedCourse,
         ethYear: yearFilter,
         ethMonth: monthFilter,
         search: searchFilter,
         page,
+        isFilterApplied,
       },
     ],
     queryFn: async () => {
       const res = await api.get('/finance/cycles', {
         params: {
           status: statusFilter || undefined,
-          departmentId: departmentFilter || undefined,
+          departmentId: selectedDepartment || departmentFilter || undefined,
           programId: programFilter || undefined,
-          batchId: batchFilter || undefined,
+          batchId: selectedBatch || batchFilter || undefined,
+          courseId: selectedCourse || undefined,
           ethYear: yearFilter || undefined,
           ethMonth: monthFilter || undefined,
           search: searchFilter || undefined,
@@ -139,6 +166,7 @@ export default function FinancePaymentCycles() {
       });
       return res.data;
     },
+    enabled: isFilterApplied,
   });
 
   // 2. Fetch Selected Cycle Detail
@@ -280,8 +308,34 @@ export default function FinancePaymentCycles() {
         }
       />
 
-      {/* Cascading Filter Bar */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+      {/* Cascading Academic Filter: Batch -> Department -> Course */}
+      <AccountantAcademicFilter
+        selectedBatch={selectedBatch}
+        setSelectedBatch={(b) => {
+          setSelectedBatch(b);
+          setBatchFilter(b);
+        }}
+        selectedDepartment={selectedDepartment}
+        setSelectedDepartment={(d) => {
+          setSelectedDepartment(d);
+          setDepartmentFilter(d);
+        }}
+        selectedCourse={selectedCourse}
+        setSelectedCourse={setSelectedCourse}
+        isApplied={isFilterApplied}
+        onApply={handleApplyFilter}
+        onReset={handleResetFilter}
+      />
+
+      {!isFilterApplied ? (
+        <SelectToViewCard
+          title="Select to View Payment Cycles"
+          message="Please select a Batch, Department, and Course above, then click View Records to display monthly fee cycles."
+        />
+      ) : (
+        <>
+          {/* Cascading Filter Bar */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
           <div className="flex flex-wrap items-center gap-1">
             {['', 'draft', 'open', 'closed', 'cancelled'].map((st) => (
@@ -599,6 +653,8 @@ export default function FinancePaymentCycles() {
           )}
         </CardBody>
       </Card>
+      </>
+      )}
 
       {/* CREATE CYCLE MODAL */}
       <Modal

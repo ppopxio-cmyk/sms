@@ -17,6 +17,7 @@ import {
   getFinanceDashboardData,
   checkStudentFinancialHold,
 } from '../services/finance.service.js';
+import mongoose from 'mongoose';
 import {
   PaymentCycle,
   StudentCharge,
@@ -27,10 +28,47 @@ import {
   StudentNotification,
 } from '../models/Finance.js';
 import { Student } from '../models/Student.js';
+import { Batch, Department, Course } from '../models/AcademicStructure.js';
+import { CourseRegistration } from '../models/Offering.js';
 import { SystemSetting } from '../models/SystemSetting.js';
 import { parseCbeReceiptInput, queryCbeJsonBackend, queryCbePdfBackend, extractCbeTransactionFields } from '../services/cbeVerifier.service.js';
 import { ETH_MONTHS } from '../utils/ethiopianDate.js';
 import crypto from 'node:crypto';
+
+async function resolveStudentIdsForAcademicFilter({ batchId, departmentId, courseId }) {
+  if (!batchId && !departmentId && !courseId) return null;
+  const filter = {};
+  if (batchId) {
+    if (mongoose.Types.ObjectId.isValid(batchId)) {
+      filter.batch = batchId;
+    } else {
+      const bDoc = await Batch.findOne({ $or: [{ code: batchId }, { name: batchId }] });
+      if (bDoc) filter.batch = bDoc._id;
+    }
+  }
+  if (departmentId) {
+    if (mongoose.Types.ObjectId.isValid(departmentId)) {
+      filter.department = departmentId;
+    } else {
+      const dDoc = await Department.findOne({ $or: [{ code: departmentId }, { name: departmentId }] });
+      if (dDoc) filter.department = dDoc._id;
+    }
+  }
+  if (courseId) {
+    let targetCourseId = courseId;
+    if (!mongoose.Types.ObjectId.isValid(courseId)) {
+      const cDoc = await Course.findOne({ $or: [{ code: courseId }, { name: courseId }] });
+      if (cDoc) targetCourseId = cDoc._id;
+    }
+    const studentIdsInCourse = await CourseRegistration.find({
+      course: targetCourseId,
+      status: { $ne: 'cancelled' },
+    }).distinct('student');
+    filter._id = { $in: studentIdsInCourse };
+  }
+  const students = await Student.find(filter).distinct('_id');
+  return students;
+}
 
 // 1. Dashboard
 export const getDashboard = asyncHandler(async (req, res) => {
@@ -47,6 +85,7 @@ export const listCycles = asyncHandler(async (req, res) => {
     departmentId,
     programId,
     batchId,
+    courseId,
     search,
     page = 1,
     limit = 20,
@@ -75,6 +114,16 @@ export const listCycles = asyncHandler(async (req, res) => {
     andConditions.push({
       $or: [{ 'targets.all': true }, { 'targets.batches': batchId }],
     });
+  }
+
+  if (courseId) {
+    const matchingStudentIds = await resolveStudentIdsForAcademicFilter({ courseId });
+    if (matchingStudentIds !== null) {
+      const cycleIdsWithCharges = await StudentCharge.find({
+        student: { $in: matchingStudentIds },
+      }).distinct('cycle');
+      andConditions.push({ _id: { $in: cycleIdsWithCharges } });
+    }
   }
 
   if (search && search.trim()) {
@@ -256,6 +305,9 @@ export const listCollections = asyncHandler(async (req, res) => {
     status,
     search,
     overdueOnly,
+    batchId,
+    departmentId,
+    courseId,
     page = 1,
     limit = 25,
   } = req.query;
@@ -279,6 +331,16 @@ export const listCollections = asyncHandler(async (req, res) => {
       { studentId: new RegExp(s, 'i') },
       { studentName: new RegExp(s, 'i') },
     ];
+  }
+
+  const matchingStudentIds = await resolveStudentIdsForAcademicFilter({
+    batchId: batchId || (mongoose.Types.ObjectId.isValid(batch) ? batch : undefined),
+    departmentId: departmentId || (mongoose.Types.ObjectId.isValid(department) ? department : undefined),
+    courseId,
+  });
+
+  if (matchingStudentIds !== null) {
+    filter.student = { $in: matchingStudentIds };
   }
 
   const skip = (Math.max(1, Number(page)) - 1) * Number(limit);
@@ -344,9 +406,14 @@ export const revokeWaiverHandler = asyncHandler(async (req, res) => {
 });
 
 export const listWaivers = asyncHandler(async (req, res) => {
-  const { status, page = 1, limit = 25 } = req.query;
+  const { status, batchId, departmentId, courseId, page = 1, limit = 25 } = req.query;
   const filter = {};
   if (status) filter.status = status;
+
+  const matchingStudentIds = await resolveStudentIdsForAcademicFilter({ batchId, departmentId, courseId });
+  if (matchingStudentIds !== null) {
+    filter.student = { $in: matchingStudentIds };
+  }
 
   const skip = (Math.max(1, Number(page)) - 1) * Number(limit);
   const [waivers, total] = await Promise.all([
@@ -388,7 +455,7 @@ export const extendDeadlineHandler = asyncHandler(async (req, res) => {
 
 // 12. Payments Ledger
 export const listLedger = asyncHandler(async (req, res) => {
-  const { status, method, search, page = 1, limit = 25 } = req.query;
+  const { status, method, search, batchId, departmentId, courseId, page = 1, limit = 25 } = req.query;
   const filter = {};
   if (status) filter.status = status;
   if (method) filter.method = method;
@@ -400,6 +467,11 @@ export const listLedger = asyncHandler(async (req, res) => {
       { bankReference: new RegExp(s, 'i') },
       { payerName: new RegExp(s, 'i') },
     ];
+  }
+
+  const matchingStudentIds = await resolveStudentIdsForAcademicFilter({ batchId, departmentId, courseId });
+  if (matchingStudentIds !== null) {
+    filter.student = { $in: matchingStudentIds };
   }
 
   const skip = (Math.max(1, Number(page)) - 1) * Number(limit);
@@ -437,9 +509,14 @@ export const reversePaymentHandler = asyncHandler(async (req, res) => {
 
 // 13. Review Queue
 export const listReviewQueue = asyncHandler(async (req, res) => {
-  const { result = 'review_required', page = 1, limit = 25 } = req.query;
+  const { result = 'review_required', batchId, departmentId, courseId, page = 1, limit = 25 } = req.query;
   const filter = {};
   if (result) filter.result = result;
+
+  const matchingStudentIds = await resolveStudentIdsForAcademicFilter({ batchId, departmentId, courseId });
+  if (matchingStudentIds !== null) {
+    filter.student = { $in: matchingStudentIds };
+  }
 
   const skip = (Math.max(1, Number(page)) - 1) * Number(limit);
   const [attempts, total] = await Promise.all([

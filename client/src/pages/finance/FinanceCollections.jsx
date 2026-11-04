@@ -27,9 +27,16 @@ import Modal from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';
 import { formatEthiopian } from '../../lib/ethiopianDate';
+import AccountantAcademicFilter, { SelectToViewCard } from '../../components/finance/AccountantAcademicFilter';
 
 export default function FinanceCollections() {
   const queryClient = useQueryClient();
+
+  // Academic Filter (Batch -> Department -> Course)
+  const [selectedBatch, setSelectedBatch] = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState('');
+  const [selectedCourse, setSelectedCourse] = useState('');
+  const [isFilterApplied, setIsFilterApplied] = useState(false);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -62,21 +69,42 @@ export default function FinanceCollections() {
   const [extendDate, setExtendDate] = useState('');
   const [extendReason, setExtendReason] = useState('Personal extension granted');
 
-  // Fetch collections
+  const handleApplyFilter = () => {
+    setIsFilterApplied(true);
+    setPage(1);
+  };
+
+  const handleResetFilter = () => {
+    setSelectedBatch('');
+    setSelectedDepartment('');
+    setSelectedCourse('');
+    setIsFilterApplied(false);
+    setPage(1);
+  };
+
+  // Fetch collections - only when filter applied
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ['finance', 'collections', { search, status, overdueOnly, page }],
+    queryKey: [
+      'finance',
+      'collections',
+      { search, status, overdueOnly, batchId: selectedBatch, departmentId: selectedDepartment, courseId: selectedCourse, page, isFilterApplied },
+    ],
     queryFn: async () => {
       const res = await api.get('/finance/collections', {
         params: {
           search: search || undefined,
           status: status || undefined,
           overdueOnly: overdueOnly ? 'true' : undefined,
+          batchId: selectedBatch || undefined,
+          departmentId: selectedDepartment || undefined,
+          courseId: selectedCourse || undefined,
           page,
           limit: 25,
         },
       });
       return res.data;
     },
+    enabled: isFilterApplied,
   });
 
   // Record Payment Mutation
@@ -138,8 +166,28 @@ export default function FinanceCollections() {
         icon={Receipt}
       />
 
-      {/* Filter Toolbar */}
-      <Card>
+      {/* Cascading Academic Filter: Batch -> Department -> Course */}
+      <AccountantAcademicFilter
+        selectedBatch={selectedBatch}
+        setSelectedBatch={setSelectedBatch}
+        selectedDepartment={selectedDepartment}
+        setSelectedDepartment={setSelectedDepartment}
+        selectedCourse={selectedCourse}
+        setSelectedCourse={setSelectedCourse}
+        isApplied={isFilterApplied}
+        onApply={handleApplyFilter}
+        onReset={handleResetFilter}
+      />
+
+      {!isFilterApplied ? (
+        <SelectToViewCard
+          title="Select to View Fee Collections"
+          message="Please select a Batch, Department, and Course above, then click View Records to display student fee charges."
+        />
+      ) : (
+        <>
+          {/* Filter Toolbar */}
+          <Card>
         <CardBody className="p-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[220px]">
@@ -379,6 +427,8 @@ export default function FinanceCollections() {
           )}
         </CardBody>
       </Card>
+      </>
+      )}
 
       {/* RECORD PAYMENT MODAL */}
       <Modal
