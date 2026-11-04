@@ -40,6 +40,7 @@ export default function MonthlyPaymentPortal() {
   const [portalToken, setPortalToken] = useState(null);
   const [studentData, setStudentData] = useState(null);
   const [chargeData, setChargeData] = useState(null);
+  const [initializingChapa, setInitializingChapa] = useState(false);
 
   // Submit receipt form
   const [receiptUrl, setReceiptUrl] = useState('');
@@ -178,6 +179,33 @@ export default function MonthlyPaymentPortal() {
       setStep('failed');
     } finally {
       setVerifying(false);
+    }
+  };
+
+  const handleChapaPay = async () => {
+    if (!portalToken) return;
+    setInitializingChapa(true);
+    try {
+      const res = await fetch(`/api/portal/monthly-payments/${hash}/chapa/initialize`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'sms-web',
+        },
+        body: JSON.stringify({ portalToken }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.message || 'Unable to connect to Chapa gateway.');
+        return;
+      }
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+      }
+    } catch {
+      toast.error('Network error. Unable to reach Chapa checkout.');
+    } finally {
+      setInitializingChapa(false);
     }
   };
 
@@ -324,6 +352,35 @@ export default function MonthlyPaymentPortal() {
                   <Calendar className="h-3.5 w-3.5 text-brand-600" />
                   <span>Due by {formatEthiopian(chargeData?.dueAt)}</span>
                 </div>
+              </div>
+
+              {/* Online Checkout: Chapa (Telebirr / CBEBirr / Cards) */}
+              <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50/70 p-5 text-center space-y-3">
+                <div className="flex items-center justify-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600 text-white font-bold text-xs">✓</span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-950">Recommended Instant Checkout</span>
+                </div>
+                <p className="text-xs text-emerald-800 leading-relaxed">
+                  Pay securely with <strong>Telebirr</strong>, <strong>CBEBirr</strong>, or <strong>Bank Cards</strong> via Chapa. Your fee clearance is confirmed immediately.
+                </p>
+                <button
+                  type="button"
+                  disabled={initializingChapa}
+                  onClick={handleChapaPay}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3.5 text-sm font-bold text-white shadow-md hover:bg-emerald-700 transition disabled:opacity-50"
+                >
+                  {initializingChapa ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Connecting to Chapa...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="h-4 w-4" />
+                      <span>Pay {chargeData?.amountEtb} ETB with Chapa</span>
+                    </>
+                  )}
+                </button>
               </div>
 
               {/* Bank Details */}

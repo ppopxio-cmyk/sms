@@ -68,6 +68,7 @@ export default function FinancePaymentCycles() {
   });
 
   const departments = structureData?.departments || [];
+  const academicYears = structureData?.academicYears || [];
   const programs = useMemo(() => {
     if (!departmentFilter) return structureData?.programs || [];
     return (structureData?.programs || []).filter(
@@ -346,12 +347,15 @@ export default function FinancePaymentCycles() {
               className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
               <option value="">All Academic Years</option>
-              <option value="2016">2016 E.C.</option>
-              <option value="2017">2017 E.C.</option>
-              <option value="2018">2018 E.C.</option>
-              <option value="2019">2019 E.C.</option>
-              <option value="2020">2020 E.C.</option>
-              <option value="2021">2021 E.C.</option>
+              {academicYears.map((ay) => {
+                const match = ay.label?.match(/\b(20\d\d)\b/);
+                const yr = match ? match[1] : (ay.startDate ? String(new Date(ay.startDate).getFullYear()) : String(ay.year || ''));
+                return (
+                  <option key={ay._id || ay.id} value={yr}>
+                    {ay.label || `${yr} E.C.`}
+                  </option>
+                );
+              })}
             </select>
           </div>
 
@@ -635,15 +639,36 @@ export default function FinancePaymentCycles() {
 
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
-                Ethiopian Year
+                Academic Year (EC)
               </label>
-              <input
-                type="number"
+              <select
                 value={createForm.ethYear}
-                onChange={(e) => setCreateForm({ ...createForm, ethYear: Number(e.target.value) })}
+                onChange={(e) => {
+                  const yr = Number(e.target.value);
+                  const m = createForm.ethMonth;
+                  setCreateForm({
+                    ...createForm,
+                    ethYear: yr,
+                    title: `${ETH_MONTHS[m - 1] || 'Month'} ${yr}`,
+                  });
+                }}
                 className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
                 required
-              />
+              >
+                {academicYears.length > 0 ? (
+                  academicYears.map((ay) => {
+                    const match = ay.label?.match(/\b(20\d\d)\b/);
+                    const yr = match ? Number(match[1]) : 2019;
+                    return (
+                      <option key={ay._id || ay.id} value={yr}>
+                        {ay.label || `${yr} E.C.`}
+                      </option>
+                    );
+                  })
+                ) : (
+                  <option value={2019}>2019 E.C.</option>
+                )}
+              </select>
             </div>
           </div>
 

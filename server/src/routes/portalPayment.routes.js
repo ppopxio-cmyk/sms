@@ -5,6 +5,8 @@ import {
   loginStudentPortal,
   verifyPortalReceipt,
   getPaymentConfirmation,
+  initializeChapaPortalPayment,
+  verifyChapaPortalPayment,
 } from '../controllers/portalPayment.controller.js';
 
 const router = Router();
@@ -36,6 +38,10 @@ const portalVerifyLimiter = rateLimit({
 router.get('/:hash', getCyclePublicDetails);
 router.post('/:hash/login', portalLoginLimiter, loginStudentPortal);
 router.post('/:hash/verify', portalVerifyLimiter, verifyPortalReceipt);
+router.post('/:hash/chapa/initialize', portalLoginLimiter, initializeChapaPortalPayment);
+router.post('/chapa/verify', portalVerifyLimiter, verifyChapaPortalPayment);
+router.post('/:hash/chapa/verify', portalVerifyLimiter, verifyChapaPortalPayment);
+router.get('/chapa/verify', portalVerifyLimiter, verifyChapaPortalPayment);
 router.get('/done/:doneHash', getPaymentConfirmation);
 
 export default router;

@@ -5,6 +5,14 @@ import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { verifyCbeReceipt } from '../services/cbeVerifier.service.js';
 import { toEthiopian, ETH_MONTHS } from '../utils/ethiopianDate.js';
+import { env } from '../config/env.js';
+import { logger } from '../utils/logger.js';
+import {
+  initializeHostedPayment,
+  verifyChapaTransaction,
+  verifyChapaWebhookSignature,
+  processVerifiedChapaPayment,
+} from '../services/chapa.service.js';
 
 const PORTAL_JWT_SECRET = process.env.JWT_ACCESS_SECRET || 'portal-secret-key-sms-finance-2019';
 
@@ -273,4 +281,177 @@ export const getPaymentConfirmation = asyncHandler(async (req, res) => {
       bank: payment.cycle?.bank,
     },
   });
+});
+
+/**
+ * 5. POST /api/portal/monthly-payments/:hash/chapa/initialize
+ * Initializes hosted checkout with Chapa Test API
+ */
+export const initializeChapaPortalPayment = asyncHandler(async (req, res) => {
+  const { hash } = req.params;
+  const { portalToken } = req.body;
+
+  if (!portalToken) {
+    throw new AppError(401, 'INVALID_SESSION', 'Session expired. Please enter your Student ID again.');
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(portalToken, PORTAL_JWT_SECRET);
+  } catch {
+    throw new AppError(401, 'EXPIRED_SESSION', 'Session expired. Please enter your Student ID again.');
+  }
+
+  if (decoded.portalHash !== String(hash).toLowerCase().trim()) {
+    throw new AppError(403, 'INVALID_PORTAL_SCOPE', 'Token scope does not match this payment cycle.');
+  }
+
+  const [cycle, charge] = await Promise.all([
+    PaymentCycle.findById(decoded.cycleId),
+    StudentCharge.findById(decoded.chargeId),
+  ]);
+
+  if (!cycle || !charge) {
+    throw new AppError(404, 'RECORD_NOT_FOUND', 'Payment record not found.');
+  }
+
+  const studentDoc = await Student.findById(charge.student);
+  if (!studentDoc) {
+    throw new AppError(404, 'STUDENT_NOT_FOUND', 'Student record not found.');
+  }
+
+  if (charge.status === 'paid' && charge.payment) {
+    const p = await Payment.findById(charge.payment);
+    return res.json({
+      status: 'already_paid',
+      doneHash: p?.doneHash,
+      receiptNumber: p?.receiptNumber,
+      message: 'This fee is already paid!',
+    });
+  }
+
+  const txRef = `TX-CHAPA-${charge._id}-${Date.now()}`;
+  const amountEtb = (charge.amountDue / 100).toFixed(2);
+
+  const clientOrigin = env.CLIENT_ORIGIN || 'https://sms-two-kappa.vercel.app';
+  const returnUrl = `${clientOrigin}/monthly-payments/chapa-verify?tx_ref=${encodeURIComponent(txRef)}&hash=${encodeURIComponent(cycle.portalHash)}`;
+
+  await PaymentAttempt.create({
+    charge: charge._id,
+    cycle: cycle._id,
+    student: studentDoc._id,
+    studentId: studentDoc.studentId,
+    receiptUrl: `chapa://${txRef}`,
+    parsedReference: txRef,
+    result: 'pending_verification',
+    ipAddress: req.ip || '',
+  });
+
+  const nameParts = (studentDoc.fullName || `${studentDoc.firstName} ${studentDoc.lastName}`).trim().split(' ');
+  const firstName = nameParts[0] || 'Student';
+  const lastName = nameParts.slice(1).join(' ') || 'Account';
+
+  const chapaRes = await initializeHostedPayment({
+    amount: amountEtb,
+    currency: 'ETB',
+    email: studentDoc.email && studentDoc.email.includes('@') ? studentDoc.email : 'student@college.edu.et',
+    firstName,
+    lastName,
+    phone: studentDoc.phone || '',
+    txRef,
+    returnUrl,
+    customization: {
+      title: `${cycle.title} Fee`,
+      description: `Payment for ${studentDoc.fullName} (${studentDoc.studentId})`,
+    },
+  });
+
+  res.json({
+    status: 'success',
+    checkoutUrl: chapaRes.checkoutUrl,
+    txRef,
+  });
+});
+
+/**
+ * 6. POST /api/portal/monthly-payments/chapa/verify
+ * Real database update on verification
+ */
+export const verifyChapaPortalPayment = asyncHandler(async (req, res) => {
+  const { txRef, tx_ref } = req.body;
+  const reference = txRef || tx_ref || req.query.tx_ref || req.query.txRef;
+
+  if (!reference || !String(reference).trim()) {
+    throw new AppError(400, 'TX_REF_REQUIRED', 'Transaction reference (tx_ref) is required.');
+  }
+
+  const cleanRef = String(reference).trim();
+
+  // Call Chapa verify API
+  const chapaVerifyRes = await verifyChapaTransaction(cleanRef);
+  if (chapaVerifyRes.status !== 200 || !chapaVerifyRes.data) {
+    const errorMsg = chapaVerifyRes.data?.message || 'Chapa transaction verification failed.';
+    return res.status(400).json({
+      status: 'failed',
+      message: errorMsg,
+    });
+  }
+
+  const verifiedData = chapaVerifyRes.data?.data || chapaVerifyRes.data;
+
+  // Process verified data and update database atomicity
+  const processResult = await processVerifiedChapaPayment({
+    txRef: cleanRef,
+    verifiedData,
+    ipAddress: req.ip || '',
+  });
+
+  res.json(processResult);
+});
+
+/**
+ * 7. POST /api/webhooks/chapa
+ * Webhook handler with HMAC-SHA256 constant-time verification
+ */
+export const chapaWebhookHandler = asyncHandler(async (req, res) => {
+  const rawBody = req.body;
+  const signature = req.headers['x-chapa-signature'] || req.headers['chapa-signature'];
+
+  if (!rawBody) {
+    return res.status(400).send('Missing webhook body');
+  }
+
+  const isValid = verifyChapaWebhookSignature(rawBody, signature);
+  if (!isValid && env.NODE_ENV === 'production') {
+    logger.warn({ signature }, 'Invalid Chapa webhook signature rejected');
+    return res.status(401).json({ error: 'INVALID_SIGNATURE' });
+  }
+
+  let event = {};
+  try {
+    event = JSON.parse(rawBody.toString('utf8'));
+  } catch {
+    return res.status(400).send('Invalid JSON payload');
+  }
+
+  const txRef = event.tx_ref || event.trx_ref || event.reference;
+  if (!txRef) {
+    return res.status(200).json({ received: true, ignored: true });
+  }
+
+  try {
+    const chapaVerifyRes = await verifyChapaTransaction(txRef);
+    if (chapaVerifyRes.status === 200 && chapaVerifyRes.data) {
+      const verifiedData = chapaVerifyRes.data?.data || chapaVerifyRes.data;
+      await processVerifiedChapaPayment({
+        txRef,
+        verifiedData,
+        ipAddress: req.ip || '',
+      });
+    }
+  } catch (err) {
+    logger.warn({ err: err?.message, txRef }, 'Error processing Chapa webhook verification');
+  }
+
+  res.status(200).json({ status: 'success' });
 });

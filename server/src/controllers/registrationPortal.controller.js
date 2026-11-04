@@ -4,7 +4,20 @@ import { StudentApplication } from '../models/StudentApplication.js';
 import { Student, Enrollment } from '../models/Student.js';
 import { Program, Department, Batch, AcademicYear } from '../models/AcademicStructure.js';
 import { nextStudentId } from './registrar.students.controller.js';
-import { sendStudentAdmissionEmail } from '../services/mail.service.js';
+import {
+  sendStudentAdmissionEmail,
+  sendApplicationSubmittedEmail,
+  sendApplicationApprovedEmail,
+  sendApplicationRejectedEmail,
+} from '../services/mail.service.js';
+import {
+  imagekitConfigured,
+  signedImageUrl,
+  uploadImage,
+  uploadDocument,
+} from '../services/imagekit.service.js';
+import { logger } from '../utils/logger.js';
+import { env } from '../config/env.js';
 import { audit } from '../services/audit.service.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -370,9 +383,95 @@ export const submitPublicApplication = asyncHandler(async (req, res) => {
     dob = fromEthiopian(y, m, d, 12, 0, 0);
   }
 
-  const ethYear = toEthiopian(new Date()).year;
+  // Generate atomic unique permanent tracking reference: COL-YYYY-NNNNNN
+  const currentYear = new Date().getFullYear();
   const count = await StudentApplication.countDocuments();
-  const applicationNumber = `APP-${ethYear}-${String(count + 1).padStart(6, '0')}`;
+  let applicationNumber = '';
+  let candidateNum = count + 1;
+  let uniqueFound = false;
+  while (!uniqueFound) {
+    const candidate = `COL-${currentYear}-${String(candidateNum).padStart(6, '0')}`;
+    const exists = await StudentApplication.exists({ applicationNumber: candidate });
+    if (!exists) {
+      applicationNumber = candidate;
+      uniqueFound = true;
+    } else {
+      candidateNum += 1;
+    }
+  }
+
+  // Handle ImageKit upload for applicant photo if base64 data URL provided
+  let photoData = {
+    provider: 'imagekit',
+    fileId: photo.fileId || null,
+    filePath: photo.filePath || null,
+    url: photo.url || null,
+    thumbnailUrl: photo.thumbnailUrl || null,
+    status: photo.url || photo.filePath ? 'active' : 'missing',
+  };
+
+  if (imagekitConfigured() && typeof photo.url === 'string' && photo.url.startsWith('data:')) {
+    try {
+      const match = photo.url.match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        const mime = match[1];
+        const buffer = Buffer.from(match[2], 'base64');
+        const ikRes = await uploadImage(buffer, {
+          fileName: `applicant_${cleanEmail.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.jpg`,
+          folder: '/sms/applicants/photos',
+          contentType: mime,
+        });
+        photoData = {
+          provider: 'imagekit',
+          fileId: ikRes.fileId,
+          filePath: ikRes.filePath,
+          url: ikRes.url,
+          thumbnailUrl: ikRes.thumbnailUrl,
+          status: 'active',
+        };
+      }
+    } catch (err) {
+      logger.warn({ err: err?.message }, 'Could not upload applicant photo to ImageKit, keeping raw URL');
+    }
+  }
+
+  // Handle ImageKit upload for 12th Grade Certificate Document if base64 data URL provided
+  let certDocData = {
+    fileName: certificateDocument.fileName || null,
+    fileType: certificateDocument.fileType || null,
+    fileSize: certificateDocument.fileSize || null,
+    url: certificateDocument.url || null,
+    fileId: certificateDocument.fileId || null,
+    filePath: certificateDocument.filePath || null,
+    uploadedAt: new Date(),
+  };
+
+  if (imagekitConfigured() && typeof certificateDocument.url === 'string' && certificateDocument.url.startsWith('data:')) {
+    try {
+      const match = certificateDocument.url.match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        const mime = match[1];
+        const buffer = Buffer.from(match[2], 'base64');
+        const ext = mime.includes('pdf') ? '.pdf' : mime.includes('word') ? '.docx' : '.jpg';
+        const ikDoc = await uploadDocument(buffer, {
+          fileName: `cert_${cleanEmail.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}${ext}`,
+          folder: '/sms/applicants/certificates',
+          contentType: mime,
+        });
+        certDocData = {
+          fileName: certificateDocument.fileName || `12th_Grade_Certificate${ext}`,
+          fileType: mime,
+          fileSize: buffer.length,
+          fileId: ikDoc.fileId,
+          filePath: ikDoc.filePath,
+          url: ikDoc.url,
+          uploadedAt: new Date(),
+        };
+      }
+    } catch (err) {
+      logger.warn({ err: err?.message }, 'Could not upload certificate doc to ImageKit, keeping raw URL');
+    }
+  }
 
   const application = await StudentApplication.create({
     portal: portal._id,
@@ -383,7 +482,12 @@ export const submitPublicApplication = asyncHandler(async (req, res) => {
     fullName,
     gender: gender || 'unspecified',
     dateOfBirth: dob,
+    birthDateCalendar: 'ETHIOPIAN',
+    birthDateEthiopian: ethDob,
     ethDateOfBirth: ethDob,
+    birthYear: ethDob?.year || null,
+    birthMonth: ethDob?.month || null,
+    birthDay: ethDob?.day || null,
     email: cleanEmail,
     phone: cleanPhone,
     address,
@@ -396,25 +500,28 @@ export const submitPublicApplication = asyncHandler(async (req, res) => {
     department: departmentId || portal.department,
     program: programId || portal.program,
     batch: batchId || portal.batch || (portal.batches?.[0] || null),
-    certificateDocument: {
-      fileName: certificateDocument.fileName || null,
-      fileType: certificateDocument.fileType || null,
-      fileSize: certificateDocument.fileSize || null,
-      url: certificateDocument.url || null,
-      uploadedAt: new Date(),
-    },
-    photo: {
-      provider: 'imagekit',
-      fileId: photo.fileId || null,
-      filePath: photo.filePath || null,
-      url: photo.url || null,
-      thumbnailUrl: photo.thumbnailUrl || null,
-      status: photo.url || photo.filePath ? 'active' : 'missing',
-    },
+    certificateDocument: certDocData,
+    photo: photoData,
     status: 'pending',
     ip: req.ip || '',
     userAgent: req.get('user-agent') || '',
   });
+
+  // Send application submitted confirmation email via Brevo
+  try {
+    const progDoc = await Program.findById(application.program || portal.program).select('name').lean();
+    const deptDoc = await Department.findById(application.department || portal.department).select('name').lean();
+    sendApplicationSubmittedEmail({
+      to: cleanEmail,
+      name: fullName,
+      applicationNumber,
+      program: progDoc?.name || 'Academic Programme',
+      department: deptDoc?.name || 'Health Sciences',
+      trackingUrl: `${env.CLIENT_ORIGIN || 'https://college.edu.et'}/application/track?ref=${encodeURIComponent(applicationNumber)}`,
+    }).catch((err) => logger.warn({ err: err?.message }, 'Failed to dispatch application submitted email'));
+  } catch (err) {
+    logger.warn({ err: err?.message }, 'Error preparing application submitted email');
+  }
 
   audit({
     actorRole: 'APPLICANT',
@@ -435,7 +542,7 @@ export const submitPublicApplication = asyncHandler(async (req, res) => {
       status: application.status,
       createdAt: application.createdAt,
     },
-    message: `Application submitted successfully! Your tracking reference is ${application.applicationNumber}.`,
+    message: `Application submitted successfully! Your permanent tracking reference is ${application.applicationNumber}.`,
   });
 });
 
@@ -448,13 +555,15 @@ export const listApplications = asyncHandler(async (req, res) => {
     batchId,
     status,
     search,
+    startDate,
+    endDate,
     page = 1,
     limit = 20,
   } = req.query;
 
   const filter = {};
   if (portalId) filter.portal = portalId;
-  if (status) filter.status = status;
+  if (status && status !== 'all') filter.status = status;
 
   if (search && search.trim()) {
     const term = search.trim();
@@ -466,32 +575,57 @@ export const listApplications = asyncHandler(async (req, res) => {
     ];
   }
 
-  // Filter by department, program, or batch (direct on application or via portal)
+  // Date range filter
+  if (startDate || endDate) {
+    filter.createdAt = {};
+    if (startDate) {
+      filter.createdAt.$gte = new Date(startDate);
+    }
+    if (endDate) {
+      const e = new Date(endDate);
+      e.setHours(23, 59, 59, 999);
+      filter.createdAt.$lte = e;
+    }
+  }
+
+  // Filter by department, program, or batch (strict: if set on application, must match)
   const andClauses = [];
-  if (departmentId) {
-    const matchingPortals = await RegistrationPortal.find({
-      $or: [{ department: departmentId }, { departments: departmentId }],
-    }).distinct('_id');
-    andClauses.push({
-      $or: [{ department: departmentId }, { portal: { $in: matchingPortals } }],
-    });
-  }
-  if (programId) {
-    const matchingPortals = await RegistrationPortal.find({
-      $or: [{ program: programId }, { programs: programId }],
-    }).distinct('_id');
-    andClauses.push({
-      $or: [{ program: programId }, { portal: { $in: matchingPortals } }],
-    });
-  }
   if (batchId) {
     const matchingPortals = await RegistrationPortal.find({
       $or: [{ batch: batchId }, { batches: batchId }],
     }).distinct('_id');
     andClauses.push({
-      $or: [{ batch: batchId }, { portal: { $in: matchingPortals } }],
+      $or: [
+        { batch: batchId },
+        { batch: { $in: [null, undefined] }, portal: { $in: matchingPortals } },
+      ],
     });
   }
+
+  if (departmentId) {
+    const matchingPortals = await RegistrationPortal.find({
+      $or: [{ department: departmentId }, { departments: departmentId }],
+    }).distinct('_id');
+    andClauses.push({
+      $or: [
+        { department: departmentId },
+        { department: { $in: [null, undefined] }, portal: { $in: matchingPortals } },
+      ],
+    });
+  }
+
+  if (programId) {
+    const matchingPortals = await RegistrationPortal.find({
+      $or: [{ program: programId }, { programs: programId }],
+    }).distinct('_id');
+    andClauses.push({
+      $or: [
+        { program: programId },
+        { program: { $in: [null, undefined] }, portal: { $in: matchingPortals } },
+      ],
+    });
+  }
+
   if (andClauses.length > 0) {
     filter.$and = andClauses;
   }
@@ -519,11 +653,48 @@ export const listApplications = asyncHandler(async (req, res) => {
     StudentApplication.countDocuments(filter),
   ]);
 
-  res.json({
-    applications: applications.map((a) => ({
+  // Enrich with authoritative Ethiopian date and ImageKit signed URLs if needed
+  const enriched = applications.map((a) => {
+    const ethYear = a.birthDateEthiopian?.year || a.ethDateOfBirth?.year || a.birthYear;
+    const ethMonth = a.birthDateEthiopian?.month || a.ethDateOfBirth?.month || a.birthMonth;
+    const ethDay = a.birthDateEthiopian?.day || a.ethDateOfBirth?.day || a.birthDay;
+    const birthDateEthiopian = ethYear && ethMonth && ethDay ? { year: ethYear, month: ethMonth, day: ethDay } : null;
+
+    let photo = a.photo || {};
+    if (photo.filePath && imagekitConfigured()) {
+      photo = {
+        ...photo,
+        url: signedImageUrl(photo.filePath, { expiresIn: 7200 }),
+        thumbnailUrl: signedImageUrl(photo.filePath, {
+          transformation: [{ width: 160, height: 160, crop: 'maintain_ratio', focus: 'face' }],
+          expiresIn: 7200,
+        }),
+      };
+    }
+
+    let certificateDocument = a.certificateDocument || {};
+    if (certificateDocument.filePath && imagekitConfigured()) {
+      certificateDocument = {
+        ...certificateDocument,
+        url: signedImageUrl(certificateDocument.filePath, { expiresIn: 7200 }),
+      };
+    }
+
+    return {
       ...a,
       id: String(a._id),
-    })),
+      birthYear: ethYear,
+      birthMonth: ethMonth,
+      birthDay: ethDay,
+      birthDateEthiopian,
+      ethDateOfBirth: birthDateEthiopian,
+      photo,
+      certificateDocument,
+    };
+  });
+
+  res.json({
+    applications: enriched,
     total,
     page: Number(page),
     pages: Math.ceil(total / Number(limit)),
@@ -550,10 +721,42 @@ export const getApplicationDetail = asyncHandler(async (req, res) => {
 
   if (!application) throw new AppError(404, 'APPLICATION_NOT_FOUND', 'Application record not found.');
 
+  const ethYear = application.birthDateEthiopian?.year || application.ethDateOfBirth?.year || application.birthYear;
+  const ethMonth = application.birthDateEthiopian?.month || application.ethDateOfBirth?.month || application.birthMonth;
+  const ethDay = application.birthDateEthiopian?.day || application.ethDateOfBirth?.day || application.birthDay;
+  const birthDateEthiopian = ethYear && ethMonth && ethDay ? { year: ethYear, month: ethMonth, day: ethDay } : null;
+
+  let photo = application.photo || {};
+  if (photo.filePath && imagekitConfigured()) {
+    photo = {
+      ...photo,
+      url: signedImageUrl(photo.filePath, { expiresIn: 7200 }),
+      thumbnailUrl: signedImageUrl(photo.filePath, {
+        transformation: [{ width: 240, height: 240, crop: 'maintain_ratio', focus: 'face' }],
+        expiresIn: 7200,
+      }),
+    };
+  }
+
+  let certificateDocument = application.certificateDocument || {};
+  if (certificateDocument.filePath && imagekitConfigured()) {
+    certificateDocument = {
+      ...certificateDocument,
+      url: signedImageUrl(certificateDocument.filePath, { expiresIn: 7200 }),
+    };
+  }
+
   res.json({
     application: {
       ...application,
       id: String(application._id),
+      birthYear: ethYear,
+      birthMonth: ethMonth,
+      birthDay: ethDay,
+      birthDateEthiopian,
+      ethDateOfBirth: birthDateEthiopian,
+      photo,
+      certificateDocument,
     },
   });
 });
@@ -574,6 +777,11 @@ export const approveApplication = asyncHandler(async (req, res) => {
     .populate('batch');
 
   if (!application) throw new AppError(404, 'APPLICATION_NOT_FOUND', 'Application record not found.');
+
+  // Guard: Do not allow rejected applicants to be approved accidentally
+  if (application.status === 'rejected') {
+    throw new AppError(400, 'CANNOT_APPROVE_REJECTED', 'This application was previously rejected. You cannot approve a rejected application without an authorized status reset.');
+  }
 
   // Idempotency: if already approved, return existing student
   if (application.status === 'approved' && application.student) {
@@ -680,18 +888,19 @@ export const approveApplication = asyncHandler(async (req, res) => {
 
   // Send official admission confirmation email
   try {
-    await sendStudentAdmissionEmail({
+    await sendApplicationApprovedEmail({
       to: student.email,
       name: student.fullName,
+      applicationNumber: application.applicationNumber,
       studentId: student.studentId,
       program: program.name || program.code,
       department: department.name || department.code,
-      batch: batch?.name || batch?.code || 'Year 1',
+      batch: batch?.name || batch?.code || 'First Year',
       category: student.studentCategory,
       admissionDate: student.admissionDate,
     });
   } catch (err) {
-    // Non-blocking mail warning
+    logger.warn({ err: err?.message }, 'Failed to send approval email');
   }
 
   audit({
@@ -713,34 +922,127 @@ export const approveApplication = asyncHandler(async (req, res) => {
   });
 });
 
-// 10. Reject Application (Registrar)
+// 10. Reject Application (Registrar) — Reject & Preserve Audit Trail
 export const rejectApplication = asyncHandler(async (req, res) => {
   const { reason } = req.body;
   if (!reason || !reason.trim()) {
     throw new AppError(400, 'REASON_REQUIRED', 'A reason is required to reject an application.');
   }
 
-  const application = await StudentApplication.findById(req.params.id);
+  const application = await StudentApplication.findById(req.params.id)
+    .populate('department', 'name code')
+    .populate('program', 'name code');
+
   if (!application) throw new AppError(404, 'APPLICATION_NOT_FOUND', 'Application record not found.');
 
   if (application.status === 'approved') {
     throw new AppError(400, 'ALREADY_APPROVED', 'An approved application cannot be rejected after student registration.');
   }
 
-  // When rejected: remove completely from the database as requested
-  const appNumber = application.applicationNumber;
-  await StudentApplication.findByIdAndDelete(req.params.id);
+  // Preserve record & audit history: Update status to rejected
+  application.status = 'rejected';
+  application.rejectionReason = reason.trim();
+  application.reviewedBy = req.user.id;
+  application.reviewedAt = new Date();
+  await application.save();
 
   audit({
     req,
-    action: 'registrar.application_rejected_and_deleted',
+    action: 'registrar.application_rejected',
     targetType: 'StudentApplication',
-    targetId: req.params.id,
-    meta: { applicationNumber: appNumber, reason },
+    targetId: application._id,
+    meta: { applicationNumber: application.applicationNumber, reason },
   });
+
+  // Dispatch formal rejection notification email to applicant
+  sendApplicationRejectedEmail({
+    to: application.email,
+    name: application.fullName,
+    applicationNumber: application.applicationNumber,
+    reason: application.rejectionReason,
+    program: application.program?.name || 'Academic Programme',
+    department: application.department?.name || 'Health Sciences',
+  }).catch((err) => logger.warn({ err: err?.message }, 'Failed to dispatch rejection email'));
 
   res.json({
     success: true,
-    message: 'Application was rejected and completely removed from the database.',
+    message: 'Application was marked as rejected and notification email dispatched to the applicant.',
+    application,
+  });
+});
+
+// 11. Public Track Application by Reference
+export const trackApplication = asyncHandler(async (req, res) => {
+  const { trackingNumber } = req.params;
+  if (!trackingNumber || !trackingNumber.trim()) {
+    throw new AppError(400, 'TRACKING_NUMBER_REQUIRED', 'Please provide a valid application tracking reference number.');
+  }
+
+  const cleanRef = trackingNumber.trim().toUpperCase();
+  const application = await StudentApplication.findOne({
+    $or: [{ applicationNumber: cleanRef }, { applicationNumber: trackingNumber.trim() }],
+  })
+    .populate('department', 'name code')
+    .populate('program', 'name code qualificationType durationYears')
+    .populate('batch', 'name code category')
+    .populate({
+      path: 'portal',
+      populate: [
+        { path: 'department', select: 'name code' },
+        { path: 'program', select: 'name code qualificationType' },
+        { path: 'batch', select: 'name code category' },
+      ],
+    })
+    .lean();
+
+  if (!application) {
+    throw new AppError(404, 'APPLICATION_NOT_FOUND', `No application was found matching reference "${cleanRef}". Please verify the tracking number.`);
+  }
+
+  const ethYear = application.birthDateEthiopian?.year || application.ethDateOfBirth?.year || application.birthYear;
+  const ethMonth = application.birthDateEthiopian?.month || application.ethDateOfBirth?.month || application.birthMonth;
+  const ethDay = application.birthDateEthiopian?.day || application.ethDateOfBirth?.day || application.birthDay;
+  const birthDateEthiopian = ethYear && ethMonth && ethDay ? { year: ethYear, month: ethMonth, day: ethDay } : null;
+
+  const departmentName = application.department?.name || application.portal?.department?.name || 'Department of Health Sciences';
+  const programName = application.program?.name || application.portal?.program?.name || 'Academic Programme';
+  const batchName = application.batch?.name || application.batch?.code || application.portal?.batch?.name || 'To be assigned upon admission';
+
+  let publicStatus = 'SUBMITTED';
+  let statusDescription = 'Your application has been received and is waiting for review by the Admissions Office.';
+  let nextSteps = 'Our Admissions Committee will review your academic qualifications. Check back soon or watch your email for updates.';
+
+  if (application.status === 'pending') {
+    publicStatus = application.reviewedBy ? 'UNDER_REVIEW' : 'SUBMITTED';
+    if (publicStatus === 'UNDER_REVIEW') {
+      statusDescription = 'Your application is currently being evaluated by the Registrar Admissions Committee.';
+    }
+  } else if (application.status === 'approved') {
+    publicStatus = 'APPROVED';
+    statusDescription = `Congratulations! Your application has been approved for admission. Official Student ID: ${application.generatedStudentId || 'Issued'}.`;
+    nextSteps = 'Please report to the Registrar\'s Office with your original academic documents to finalize enrollment before classes start.';
+  } else if (application.status === 'rejected') {
+    publicStatus = 'REJECTED';
+    statusDescription = 'Your application for this intake was not approved by the Admissions Committee.';
+    nextSteps = 'Please review the decision note below. You may contact the Admissions Office if you have any questions.';
+  }
+
+  res.json({
+    tracking: {
+      trackingReference: application.applicationNumber,
+      applicantName: application.fullName,
+      status: publicStatus,
+      statusDescription,
+      nextSteps,
+      submissionDate: application.createdAt,
+      lastUpdated: application.reviewedAt || application.updatedAt,
+      departmentName,
+      programName,
+      batchName,
+      qualificationType: application.qualificationType || application.program?.qualificationType || 'Degree',
+      rejectionReason: application.status === 'rejected' ? application.rejectionReason : null,
+      officialStudentId: application.status === 'approved' ? application.generatedStudentId : null,
+      birthDateEthiopian,
+    },
   });
 });

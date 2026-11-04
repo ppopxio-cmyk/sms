@@ -3,6 +3,7 @@ import { env, gmailApiReady, brevoReady } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { formatEthiopian } from '../utils/ethiopianDate.js';
 import { checkGmailApi, sendViaGmailApi } from './gmailTransport.js';
+import { SystemSetting } from '../models/SystemSetting.js';
 
 // How the mail leaves the building: Brevo transactional API (HTTPS) is preferred whenever
 // BREVO_API_KEY is present, followed by Gmail API over HTTPS, and finally SMTP.
@@ -490,5 +491,156 @@ export function sendTestEmail({ to, name, transport }) {
     subject: 'Test email from the college portal',
     html: layout({ preheader: 'Mail delivery is working', title: 'Mail delivery is working', accent: 'Email settings', body }),
     text: `This is a test from the college portal. Transport: ${transport}.`,
+  });
+}
+
+// College centralized branding helper
+export async function getCollegeBranding() {
+  try {
+    const setting = await SystemSetting.findOne({ key: 'global' }).lean();
+    const inst = setting?.institution || {};
+    return {
+      name: inst.name || env.BREVO_SENDER_NAME || env.MAIL_FROM_NAME || 'Ethiopian College of Health Sciences',
+      shortName: inst.shortName || 'ECHS',
+      email: inst.admissionsEmail || inst.email || env.BREVO_SENDER_EMAIL || 'admissions@college.edu.et',
+      phone: inst.admissionsPhone || inst.phone || '+251 11 123 4567',
+      website: inst.website || env.CLIENT_ORIGIN || 'https://college.edu.et',
+      logoUrl: inst.logoUrl || '',
+      primaryColor: inst.primaryColor || '#4f46e5',
+      facebook: inst.facebook || 'https://facebook.com',
+      telegram: inst.telegram || 'https://t.me',
+      youtube: inst.youtube || 'https://youtube.com',
+      instagram: inst.instagram || 'https://instagram.com',
+      address: inst.address || 'Addis Ababa, Ethiopia',
+    };
+  } catch {
+    return {
+      name: env.BREVO_SENDER_NAME || env.MAIL_FROM_NAME || 'Ethiopian College of Health Sciences',
+      shortName: 'ECHS',
+      email: env.BREVO_SENDER_EMAIL || 'admissions@college.edu.et',
+      phone: '+251 11 123 4567',
+      website: env.CLIENT_ORIGIN || 'https://college.edu.et',
+      logoUrl: '',
+      primaryColor: '#4f46e5',
+      facebook: 'https://facebook.com',
+      telegram: 'https://t.me',
+      youtube: 'https://youtube.com',
+      instagram: 'https://instagram.com',
+      address: 'Addis Ababa, Ethiopia',
+    };
+  }
+}
+
+function collegeSocialBlock(b) {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px;padding-top:16px;border-top:1px dashed #cbd5e1;">
+    <tr><td align="center">
+      <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:1.2px;">Connect with the College</p>
+      <div>
+        ${b.telegram ? `<a href="${esc(b.telegram)}" style="display:inline-block;margin:0 8px;color:#2563eb;text-decoration:none;font-size:12px;font-weight:600;">Telegram</a>` : ''}
+        ${b.facebook ? `<a href="${esc(b.facebook)}" style="display:inline-block;margin:0 8px;color:#2563eb;text-decoration:none;font-size:12px;font-weight:600;">Facebook</a>` : ''}
+        ${b.youtube ? `<a href="${esc(b.youtube)}" style="display:inline-block;margin:0 8px;color:#2563eb;text-decoration:none;font-size:12px;font-weight:600;">YouTube</a>` : ''}
+        ${b.website ? `<a href="${esc(b.website)}" style="display:inline-block;margin:0 8px;color:#2563eb;text-decoration:none;font-size:12px;font-weight:600;">Website</a>` : ''}
+      </div>
+      <p style="margin:10px 0 0;font-size:11px;color:#94a3b8;">Admissions Office: ${esc(b.email)} · Phone: ${esc(b.phone)}</p>
+    </td></tr>
+  </table>`;
+}
+
+// 1. Application Submitted Confirmation Email
+export async function sendApplicationSubmittedEmail({ to, name, applicationNumber, program, department, trackingUrl }) {
+  const branding = await getCollegeBranding();
+  const trackHref = trackingUrl || `${env.CLIENT_ORIGIN || 'https://college.edu.et'}/application/track?ref=${encodeURIComponent(applicationNumber)}`;
+
+  const body =
+    para(`Dear <strong>${hi(name)}</strong>,<br>Thank you for applying to <strong>${esc(branding.name)}</strong>. Your application has been successfully submitted and is now under review by our Admissions Office.`) +
+    codeBlock(applicationNumber, 'KEEP THIS TRACKING NUMBER') +
+    detailCard(
+      row('Tracking reference', applicationNumber) +
+      row('Target programme', program || 'Degree / Diploma') +
+      row('Department', department || 'Health Sciences') +
+      row('Status', 'Under Review') +
+      row('Submission date', formatEthiopian(new Date(), { time: true }))
+    ) +
+    button(trackHref, 'Track Your Application Online', 'Live Status Updates') +
+    note('Please monitor your email and check your tracking page periodically. Our Admissions Committee reviews applications within 24 to 48 hours.') +
+    collegeSocialBlock(branding);
+
+  return deliver({
+    to,
+    subject: `Application Submitted · Tracking Reference ${applicationNumber}`,
+    html: layout({
+      preheader: `Your application ${applicationNumber} is under review`,
+      title: 'Application Received Successfully',
+      accent: branding.name,
+      body,
+    }),
+    text: `Dear ${name}, your application ${applicationNumber} to ${branding.name} for ${program} (${department}) has been received. Track your application status at: ${trackHref}. Admissions Office: ${branding.phone}`,
+  });
+}
+
+// 2. Application Approved & Admission Email
+export async function sendApplicationApprovedEmail({ to, name, applicationNumber, studentId, program, department, batch, category, admissionDate }) {
+  const branding = await getCollegeBranding();
+
+  const body =
+    para(`Congratulations, <strong>${hi(name)}</strong>!<br>We are pleased to inform you that your application <strong>${esc(applicationNumber)}</strong> has been officially <strong>APPROVED</strong>. You have been officially admitted to <strong>${esc(branding.name)}</strong>.`) +
+    detailCard(
+      row('Official Student ID', studentId) +
+      row('Tracking reference', applicationNumber) +
+      row('Programme', program || 'Degree') +
+      row('Department', department || 'Health Sciences') +
+      row('Assigned batch', batch || 'First Year') +
+      row('Delivery stream', category || 'Regular') +
+      row('Admission date', admissionDate ? formatEthiopian(admissionDate) : formatEthiopian(new Date()))
+    ) +
+    para('<strong>Next Registration Instructions:</strong><br>1. Keep your Official Student ID safe. You will need it for orientation and class registration.<br>2. Visit the Registrar\'s Office with your original high school matriculation / 12th grade certificates for physical verification before classes commence.<br>3. Pay your monthly registration fees through the student portal or designated college payment options.') +
+    note('If you have any questions or require campus assistance, contact the Admissions Office.') +
+    collegeSocialBlock(branding);
+
+  return deliver({
+    to,
+    subject: `Congratulations! Official Admission Confirmed · ID: ${studentId}`,
+    html: layout({
+      preheader: `Official Admission: Student ID ${studentId}`,
+      title: 'Official Admission Confirmed',
+      accent: branding.name,
+      body,
+    }),
+    text: `Congratulations ${name}! Your application ${applicationNumber} has been approved. Your Official Student ID is ${studentId}. Programme: ${program}. Department: ${department}. Batch: ${batch}. Please report to the Registrar with your original documents before classes begin.`,
+  });
+}
+
+// 3. Application Rejected Notification Email
+export async function sendApplicationRejectedEmail({ to, name, applicationNumber, reason, program, department }) {
+  const branding = await getCollegeBranding();
+
+  const body =
+    para(`Dear <strong>${hi(name)}</strong>,<br>Thank you for your interest in <strong>${esc(branding.name)}</strong> and for taking the time to submit your application for the <strong>${esc(program || 'academic programme')}</strong> in <strong>${esc(department || 'Admissions')}</strong>.`) +
+    detailCard(
+      row('Tracking reference', applicationNumber) +
+      row('Programme applied', program || 'Health Sciences') +
+      row('Status', 'Application Rejected') +
+      row('Review date', formatEthiopian(new Date()))
+    ) +
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;">
+      <tr><td style="background:#fff1f2;border-left:4px solid #e11d48;border-radius:12px;padding:16px 20px;">
+        <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#9f1239;text-transform:uppercase;letter-spacing:1px;">Official Committee Decision Note:</p>
+        <p style="margin:0;font-size:14px;line-height:1.6;color:#881337;font-style:italic;">"${esc(reason || 'Requirements not met for the current intake cycle.')}"</p>
+      </td></tr>
+    </table>` +
+    para('While we are unable to offer you admission for this specific intake, we encourage you to review the eligibility criteria and consider re-applying in upcoming academic registration windows.') +
+    note(`If you believe this decision was made in error or wish to submit additional documentation, please contact the Admissions Office at <strong>${esc(branding.email)}</strong> or phone <strong>${esc(branding.phone)}</strong>.`) +
+    collegeSocialBlock(branding);
+
+  return deliver({
+    to,
+    subject: `Admissions Decision Update · Reference ${applicationNumber}`,
+    html: layout({
+      preheader: `Admission update regarding reference ${applicationNumber}`,
+      title: 'Admissions Decision Notification',
+      accent: branding.name,
+      body,
+    }),
+    text: `Dear ${name}, regarding your application ${applicationNumber} for ${program}: the admissions committee has marked your application as not approved. Reason: ${reason}. For inquiries, contact ${branding.email} or ${branding.phone}.`,
   });
 }

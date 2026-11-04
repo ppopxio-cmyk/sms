@@ -68,6 +68,14 @@ const schema = z.object({
   BREVO_SENDER_NAME: optionalText(z.string().min(1)),
   BREVO_SENDER_EMAIL: optionalText(z.string().email()),
   BREVO_WEBHOOK_SECRET: optionalText(z.string().min(1)),
+  // Chapa payment gateway (API v2 / v1 hosted checkout)
+  CHAPA_PUBLIC_KEY: optionalText(z.string().min(1)),
+  CHAPA_SECRET_KEY: optionalText(z.string().min(1)),
+  CHAPA_ENCRYPTION_KEY: optionalText(z.string().min(1)),
+  CHAPA_WEBHOOK_URL: optionalText(z.string()),
+  CHAPA_WEBHOOK_SECRET: optionalText(z.string().min(1)),
+  CHAPA_API_BASE_URL: z.string().default('https://api.chapa.co'),
+  CHAPA_ENVIRONMENT: z.enum(['test', 'live']).default('test'),
 }).superRefine((value, ctx) => {
   const brevo = Boolean(value.BREVO_API_KEY);
   const smtp = Boolean(value.SMTP_APP_PASSWORD);
@@ -99,3 +107,4 @@ export const brevoReady = Boolean(env.BREVO_API_KEY);
 // True when all three Google values are present. The Gmail API is preferred whenever it
 // is available, because it works on hosts that block the SMTP ports.
 export const gmailApiReady = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REFRESH_TOKEN);
+export const chapaReady = Boolean(env.CHAPA_SECRET_KEY);

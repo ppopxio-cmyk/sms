@@ -26,6 +26,12 @@ import {
   FileText,
   Download,
   Layers,
+  ZoomIn,
+  ZoomOut,
+  RotateCw,
+  Maximize2,
+  Minimize2,
+  FileCheck,
 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import { REGISTRAR } from '../../lib/registrar';
@@ -38,6 +44,17 @@ import Modal from '../../components/ui/Modal';
 import SearchInput from '../../components/ui/SearchInput';
 import Pagination from '../../components/ui/Pagination';
 
+// Helper to format authoritative Ethiopian birth date without ever replacing with Gregorian
+function formatEthiopianBirthDate(app) {
+  if (!app) return '—';
+  const y = app.birthDateEthiopian?.year || app.ethDateOfBirth?.year || app.birthYear;
+  const m = app.birthDateEthiopian?.month || app.ethDateOfBirth?.month || app.birthMonth;
+  const d = app.birthDateEthiopian?.day || app.ethDateOfBirth?.day || app.birthDay;
+  if (!y || !m || !d) return '—';
+  const monthName = ETH_MONTHS[Number(m) - 1] || `Month ${m}`;
+  return `${monthName} ${d}, ${y} E.C.`;
+}
+
 export default function RegistrarApplications() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -46,12 +63,15 @@ export default function RegistrarApplications() {
   const tabParam = searchParams.get('tab') || 'pending';
   const portalParam = searchParams.get('portalId') || '';
 
-  // Main Tabs: 'pending' (Pending Applications) | 'approved' (Approved Students) | 'all' (All Queue)
+  // Main Mode Tabs: 'pending' (Pending Applications) | 'approved' (Approved Students) | 'all' (All Queue)
   const [activeTab, setActiveTab] = useState(tabParam);
   const [selectedPortal, setSelectedPortal] = useState(portalParam);
   const [batchFilter, setBatchFilter] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('');
   const [programFilter, setProgramFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(15);
@@ -60,6 +80,11 @@ export default function RegistrarApplications() {
   const [rejectingApp, setRejectingApp] = useState(null);
   const [rejectionReason, setRejectionReason] = useState('');
 
+  // Document & Photo Viewer Modal state
+  const [viewingDoc, setViewingDoc] = useState(null); // { type: 'image' | 'pdf', url: string, title: string, fileName?: string }
+  const [imgZoom, setImgZoom] = useState(1);
+  const [imgRotation, setImgRotation] = useState(0);
+
   // 1. Fetch Portals for the portal dropdown
   const portalsQuery = useQuery({
     queryKey: ['registrar', 'registration-portals-list'],
@@ -67,22 +92,51 @@ export default function RegistrarApplications() {
   });
   const portals = portalsQuery.data?.portals || [];
 
-  // 2. Fetch Academic Structure (Departments, Programs, Batches) for Approved Students filters
+  // 2. Fetch Academic Structure (Departments, Programs, Batches)
   const structureQuery = useQuery({
     queryKey: ['registrar', 'academic-structure'],
     queryFn: async () => (await api.get(`${REGISTRAR}/academic-structure`)).data,
   });
-  const departments = structureQuery.data?.departments || [];
-  const allPrograms = structureQuery.data?.programs || [];
-  const allBatches = structureQuery.data?.batches || [];
+  const rawDepartments = structureQuery.data?.departments || [];
+  const rawPrograms = structureQuery.data?.programs || [];
+  const rawBatches = structureQuery.data?.batches || [];
 
-  // Filter programs based on selected department
-  const filteredPrograms = useMemo(() => {
-    if (!departmentFilter) return allPrograms;
-    return allPrograms.filter(
-      (p) => String(p.department?._id || p.department) === String(departmentFilter)
-    );
-  }, [allPrograms, departmentFilter]);
+  // Deduplicate options to prevent duplicate batch/department choices
+  const uniqueDepartments = useMemo(() => {
+    const seen = new Set();
+    return rawDepartments.filter((d) => {
+      const key = String(d._id || d.id);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [rawDepartments]);
+
+  const uniqueBatches = useMemo(() => {
+    const seen = new Set();
+    return rawBatches.filter((b) => {
+      const key = String(b._id || b.id || b.code);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [rawBatches]);
+
+  const uniquePrograms = useMemo(() => {
+    let list = rawPrograms;
+    if (departmentFilter) {
+      list = list.filter(
+        (p) => String(p.department?._id || p.department) === String(departmentFilter)
+      );
+    }
+    const seen = new Set();
+    return list.filter((p) => {
+      const key = String(p._id || p.id);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [rawPrograms, departmentFilter]);
 
   // Tab Badge Counts
   const pendingCountQuery = useQuery({
@@ -106,7 +160,7 @@ export default function RegistrarApplications() {
     queryKey: [
       'registrar',
       'applications',
-      { activeTab, selectedPortal, batchFilter, departmentFilter, programFilter, search, page, limit },
+      { activeTab, selectedPortal, batchFilter, departmentFilter, programFilter, statusFilter, startDate, endDate, search, page, limit },
     ],
     queryFn: async () => {
       const params = { page, limit };
@@ -114,11 +168,15 @@ export default function RegistrarApplications() {
         params.status = 'pending';
       } else if (activeTab === 'approved') {
         params.status = 'approved';
+      } else if (statusFilter !== 'all') {
+        params.status = statusFilter;
       }
       if (selectedPortal) params.portalId = selectedPortal;
       if (batchFilter) params.batchId = batchFilter;
       if (departmentFilter) params.departmentId = departmentFilter;
       if (programFilter) params.programId = programFilter;
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
       if (search.trim()) params.search = search.trim();
 
       return (await api.get(`${REGISTRAR}/applications`, { params })).data;
@@ -155,19 +213,24 @@ export default function RegistrarApplications() {
     },
   });
 
-  // 5. Reject Mutation (Removes permanently from database)
+  // 5. Reject Mutation (Preserves audit history and updates status to REJECTED)
   const rejectMutation = useMutation({
     mutationFn: async ({ id, reason }) => {
       return (await api.post(`${REGISTRAR}/applications/${id}/reject`, { reason })).data;
     },
     onSuccess: (data) => {
-      toast.success(data.message || 'Application rejected and completely removed from the database.');
+      toast.success(data.message || 'Application rejected and notification email dispatched.');
       setRejectingApp(null);
       setRejectionReason('');
-      setActiveApplication(null);
+      if (activeApplication) {
+        setActiveApplication((prev) => ({
+          ...prev,
+          status: 'rejected',
+          rejectionReason,
+        }));
+      }
       queryClient.invalidateQueries({ queryKey: ['registrar', 'applications'] });
       queryClient.invalidateQueries({ queryKey: ['registrar', 'applications-count'] });
-      queryClient.invalidateQueries({ queryKey: ['registrar', 'registration-portals'] });
     },
     onError: (err) => {
       toast.error(errorMessage(err, 'Failed to reject application.'));
@@ -184,9 +247,22 @@ export default function RegistrarApplications() {
     });
   };
 
-  const handlePortalFilterChange = (portalId) => {
-    setSelectedPortal(portalId);
+  const clearAllFilters = () => {
+    setBatchFilter('');
+    setDepartmentFilter('');
+    setProgramFilter('');
+    setSelectedPortal('');
+    setStatusFilter('all');
+    setStartDate('');
+    setEndDate('');
+    setSearch('');
     setPage(1);
+  };
+
+  const openDocumentViewer = ({ type, url, title, fileName }) => {
+    setImgZoom(1);
+    setImgRotation(0);
+    setViewingDoc({ type, url, title, fileName });
   };
 
   return (
@@ -194,7 +270,7 @@ export default function RegistrarApplications() {
       <RegistrarPageHeader
         eyebrow="Admissions Review Queue"
         title="Student Applications & Admitted Students"
-        subtitle="Review prospective student applications, verify entry qualifications and 12th grade certificates, and manage admitted students."
+        subtitle="Review prospective student applications, verify entry qualifications and 12th grade certificates, and manage admitted cohorts."
       />
 
       {/* Main Mode Tabs */}
@@ -272,67 +348,68 @@ export default function RegistrarApplications() {
             />
           </div>
 
-          {/* Conditional Filters based on tab */}
+          {/* Filtering Dropdowns */}
           <div className="flex flex-wrap items-center gap-2.5">
-            {activeTab === 'approved' ? (
-              <>
-                {/* Batch Filter */}
-                <select
-                  value={batchFilter}
-                  onChange={(e) => {
-                    setBatchFilter(e.target.value);
-                    setPage(1);
-                  }}
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none"
-                >
-                  <option value="">All Batches</option>
-                  {allBatches.map((b) => (
-                    <option key={b._id || b.id} value={b._id || b.id}>
-                      {b.name || b.code} ({b.category || 'Regular'})
-                    </option>
-                  ))}
-                </select>
+            {/* Batch Filter */}
+            <select
+              value={batchFilter}
+              onChange={(e) => {
+                setBatchFilter(e.target.value);
+                setPage(1);
+              }}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none"
+            >
+              <option value="">All Batches</option>
+              {uniqueBatches.map((b) => (
+                <option key={b._id || b.id} value={b._id || b.id}>
+                  {b.name || b.code} ({b.category || 'Regular'})
+                </option>
+              ))}
+            </select>
 
-                {/* Department Filter */}
-                <select
-                  value={departmentFilter}
-                  onChange={(e) => {
-                    setDepartmentFilter(e.target.value);
-                    setProgramFilter('');
-                    setPage(1);
-                  }}
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none"
-                >
-                  <option value="">All Departments</option>
-                  {departments.map((d) => (
-                    <option key={d._id || d.id} value={d._id || d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
+            {/* Department Filter */}
+            <select
+              value={departmentFilter}
+              onChange={(e) => {
+                setDepartmentFilter(e.target.value);
+                setProgramFilter('');
+                setPage(1);
+              }}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none"
+            >
+              <option value="">All Departments</option>
+              {uniqueDepartments.map((d) => (
+                <option key={d._id || d.id} value={d._id || d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
 
-                {/* Programme Filter */}
-                <select
-                  value={programFilter}
-                  onChange={(e) => {
-                    setProgramFilter(e.target.value);
-                    setPage(1);
-                  }}
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none"
-                >
-                  <option value="">All Programmes</option>
-                  {filteredPrograms.map((p) => (
-                    <option key={p._id || p.id} value={p._id || p.id}>
-                      {p.name} ({p.qualificationType || 'Degree'})
-                    </option>
-                  ))}
-                </select>
-              </>
-            ) : (
-              /* Portal Filter for Pending and All */
+            {/* Programme Filter */}
+            <select
+              value={programFilter}
+              onChange={(e) => {
+                setProgramFilter(e.target.value);
+                setPage(1);
+              }}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none"
+            >
+              <option value="">All Programmes</option>
+              {uniquePrograms.map((p) => (
+                <option key={p._id || p.id} value={p._id || p.id}>
+                  {p.name} ({p.qualificationType || 'Degree'})
+                </option>
+              ))}
+            </select>
+
+            {/* Portal Filter for Pending and All */}
+            {activeTab !== 'approved' && (
               <select
                 value={selectedPortal}
-                onChange={(e) => handlePortalFilterChange(e.target.value)}
+                onChange={(e) => {
+                  setSelectedPortal(e.target.value);
+                  setPage(1);
+                }}
                 className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none"
               >
                 <option value="">All Intake Portals</option>
@@ -344,18 +421,53 @@ export default function RegistrarApplications() {
               </select>
             )}
 
-            {(batchFilter || departmentFilter || programFilter || selectedPortal || search) && (
+            {/* Status Filter when in All Applications mode */}
+            {activeTab === 'all' && (
+              <select
+                value={statusFilter}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none"
+              >
+                <option value="all">All Statuses</option>
+                <option value="pending">Pending Review</option>
+                <option value="approved">Admitted</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            )}
+
+            {/* Submission Date Filter */}
+            <div className="flex items-center gap-1.5 text-xs text-slate-500">
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setPage(1);
+                }}
+                className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none"
+                title="Filter by submission date from"
+              />
+              <span>to</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setPage(1);
+                }}
+                className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none"
+                title="Filter by submission date to"
+              />
+            </div>
+
+            {(batchFilter || departmentFilter || programFilter || selectedPortal || startDate || endDate || search || statusFilter !== 'all') && (
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  setBatchFilter('');
-                  setDepartmentFilter('');
-                  setProgramFilter('');
-                  setSelectedPortal('');
-                  setSearch('');
-                  setPage(1);
-                }}
+                onClick={clearAllFilters}
                 className="text-xs"
               >
                 Clear Filters
@@ -396,6 +508,7 @@ export default function RegistrarApplications() {
                   <th className="px-4 py-3.5">Department & Programme</th>
                   <th className="px-4 py-3.5">Assigned Batch</th>
                   <th className="px-4 py-3.5">Contact</th>
+                  <th className="px-4 py-3.5">Ethiopian Birth Date</th>
                   <th className="px-4 py-3.5">Admitted On</th>
                   <th className="px-4 py-3.5 text-right">Actions</th>
                 </tr>
@@ -409,21 +522,38 @@ export default function RegistrarApplications() {
                     app.photo?.url ||
                     app.student?.photo?.url ||
                     '/avatar-placeholder.png';
+                  const ethDobFormatted = formatEthiopianBirthDate(app);
 
                   return (
                     <tr key={app.id || app._id} className="hover:bg-slate-50/70 transition">
                       {/* Photo & Name */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
-                          <img
-                            src={photoSrc}
-                            alt=""
-                            className="h-10 w-10 rounded-xl object-cover ring-1 ring-slate-200"
-                            onError={(e) => {
-                              e.target.src =
-                                'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="%2394a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>';
-                            }}
-                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openDocumentViewer({
+                                type: 'image',
+                                url: app.photo?.url || app.photo?.thumbnailUrl || photoSrc,
+                                title: `${app.fullName} — Photo`,
+                              })
+                            }
+                            className="group relative cursor-pointer"
+                            title="Click to preview photo"
+                          >
+                            <img
+                              src={photoSrc}
+                              alt=""
+                              className="h-10 w-10 rounded-xl object-cover ring-1 ring-slate-200 group-hover:ring-brand-500 transition"
+                              onError={(e) => {
+                                e.target.src =
+                                  'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="%2394a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>';
+                              }}
+                            />
+                            <div className="absolute inset-0 bg-black/20 rounded-xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                              <Eye className="h-3.5 w-3.5 text-white" />
+                            </div>
+                          </button>
                           <div>
                             <p className="font-bold text-slate-900">{app.fullName}</p>
                             <span className="text-xs text-slate-500 capitalize">{app.gender}</span>
@@ -471,6 +601,11 @@ export default function RegistrarApplications() {
                           <Mail className="h-3 w-3 text-slate-400 shrink-0" />
                           <span className="truncate max-w-[160px]">{app.email}</span>
                         </p>
+                      </td>
+
+                      {/* Authoritative Ethiopian Birth Date */}
+                      <td className="px-4 py-3 text-xs font-medium text-slate-800 whitespace-nowrap">
+                        {ethDobFormatted}
                       </td>
 
                       {/* Admitted On */}
@@ -522,7 +657,8 @@ export default function RegistrarApplications() {
                   <th className="px-4 py-3.5">Applicant</th>
                   <th className="px-4 py-3.5">Target Programme</th>
                   <th className="px-4 py-3.5">Contact Details</th>
-                  <th className="px-4 py-3.5">Certificate Document</th>
+                  <th className="px-4 py-3.5">Ethiopian Birth Date</th>
+                  <th className="px-4 py-3.5">12th Grade Certificate</th>
                   <th className="px-4 py-3.5">Status</th>
                   <th className="px-4 py-3.5">Submitted</th>
                   <th className="px-4 py-3.5 text-right">Actions</th>
@@ -530,23 +666,43 @@ export default function RegistrarApplications() {
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
                 {applications.map((app) => {
-                  const birthMonthName = ETH_MONTHS[app.birthMonth - 1] || `Month ${app.birthMonth}`;
+                  const ethDobFormatted = formatEthiopianBirthDate(app);
                   const hasDoc = Boolean(app.certificateDocument?.url || app.certificateDocument?.fileName);
+                  const docUrl = app.certificateDocument?.url;
+                  const isPdf =
+                    app.certificateDocument?.fileType?.includes('pdf') ||
+                    (app.certificateDocument?.fileName && app.certificateDocument.fileName.toLowerCase().endsWith('.pdf'));
 
                   return (
                     <tr key={app.id || app._id} className="hover:bg-slate-50/70 transition">
                       {/* Applicant Info */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
-                          <img
-                            src={app.photo?.thumbnailUrl || app.photo?.url || '/avatar-placeholder.png'}
-                            alt=""
-                            className="h-10 w-10 rounded-xl object-cover ring-1 ring-slate-200"
-                            onError={(e) => {
-                              e.target.src =
-                                'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="%2394a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>';
-                            }}
-                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openDocumentViewer({
+                                type: 'image',
+                                url: app.photo?.url || app.photo?.thumbnailUrl,
+                                title: `${app.fullName} — Photo`,
+                              })
+                            }
+                            className="group relative cursor-pointer"
+                            title="Click to view photo"
+                          >
+                            <img
+                              src={app.photo?.thumbnailUrl || app.photo?.url || '/avatar-placeholder.png'}
+                              alt=""
+                              className="h-10 w-10 rounded-xl object-cover ring-1 ring-slate-200 group-hover:ring-brand-500 transition"
+                              onError={(e) => {
+                                e.target.src =
+                                  'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="%2394a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>';
+                              }}
+                            />
+                            <div className="absolute inset-0 bg-black/20 rounded-xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                              <Eye className="h-3.5 w-3.5 text-white" />
+                            </div>
+                          </button>
                           <div>
                             <p className="font-bold text-slate-900">{app.fullName}</p>
                             <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -590,15 +746,31 @@ export default function RegistrarApplications() {
                         </p>
                       </td>
 
-                      {/* Certificate Document badge */}
+                      {/* Authoritative Ethiopian Birth Date */}
+                      <td className="px-4 py-3 text-xs font-medium text-slate-800 whitespace-nowrap">
+                        {ethDobFormatted}
+                      </td>
+
+                      {/* 12th Grade Certificate Document */}
                       <td className="px-4 py-3 text-xs">
-                        {hasDoc ? (
-                          <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 ring-1 ring-blue-200">
-                            <FileText className="h-3 w-3 text-blue-500" />
-                            Attached
-                          </span>
+                        {hasDoc && docUrl ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openDocumentViewer({
+                                type: isPdf ? 'pdf' : 'image',
+                                url: docUrl,
+                                title: `${app.fullName} — 12th Grade Certificate`,
+                                fileName: app.certificateDocument.fileName || 'certificate',
+                              })
+                            }
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition"
+                          >
+                            <FileText className="h-3.5 w-3.5 text-blue-600" />
+                            <span>View {isPdf ? 'PDF' : 'Certificate'}</span>
+                          </button>
                         ) : (
-                          <span className="text-[11px] text-slate-400 italic">None</span>
+                          <span className="text-[11px] text-slate-400 italic">None attached</span>
                         )}
                       </td>
 
@@ -640,7 +812,7 @@ export default function RegistrarApplications() {
                           className="gap-1 text-xs font-bold"
                         >
                           <Eye className="h-3.5 w-3.5" />
-                          {app.status === 'pending' ? 'Review & Admit' : 'View Details'}
+                          {app.status === 'pending' ? 'Review & Admit' : 'Details'}
                         </Button>
                       </td>
                     </tr>
@@ -712,23 +884,40 @@ export default function RegistrarApplications() {
             {/* Applicant Summary Banner */}
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="flex items-center gap-4">
-                <img
-                  src={
-                    activeApplication.photo?.url ||
-                    activeApplication.photo?.thumbnailUrl ||
-                    '/avatar-placeholder.png'
+                <button
+                  type="button"
+                  onClick={() =>
+                    openDocumentViewer({
+                      type: 'image',
+                      url: activeApplication.photo?.url || activeApplication.photo?.thumbnailUrl,
+                      title: `${activeApplication.fullName} — Photo Preview`,
+                    })
                   }
-                  alt=""
-                  className="h-20 w-20 rounded-2xl object-cover ring-2 ring-brand-300 shadow-md shrink-0"
-                  onError={(e) => {
-                    e.target.src =
-                      'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="%2394a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>';
-                  }}
-                />
+                  className="group relative cursor-pointer shrink-0"
+                  title="Click to preview full photograph"
+                >
+                  <img
+                    src={
+                      activeApplication.photo?.url ||
+                      activeApplication.photo?.thumbnailUrl ||
+                      '/avatar-placeholder.png'
+                    }
+                    alt=""
+                    className="h-20 w-20 rounded-2xl object-cover ring-2 ring-brand-300 shadow-md group-hover:ring-brand-500 transition"
+                    onError={(e) => {
+                      e.target.src =
+                        'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="%2394a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>';
+                    }}
+                  />
+                  <div className="absolute inset-0 bg-black/30 rounded-2xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                    <Eye className="h-5 w-5 text-white" />
+                  </div>
+                </button>
+
                 <div>
                   <h3 className="text-lg font-bold text-slate-900">{activeApplication.fullName}</h3>
                   <p className="text-xs font-mono font-semibold text-brand-700">
-                    {activeApplication.applicationNumber}
+                    Tracking Ref: {activeApplication.applicationNumber}
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
                     Submitted on: {new Date(activeApplication.createdAt).toLocaleString()}
@@ -762,24 +951,28 @@ export default function RegistrarApplications() {
               </div>
             </div>
 
+            {/* Rejection Decision Note if rejected */}
+            {activeApplication.status === 'rejected' && activeApplication.rejectionReason && (
+              <div className="rounded-2xl border-2 border-rose-200 bg-rose-50/80 p-4 text-xs">
+                <span className="font-bold uppercase tracking-wider text-rose-900">Official Committee Rejection Reason:</span>
+                <p className="mt-1 text-rose-800 italic">"{activeApplication.rejectionReason}"</p>
+              </div>
+            )}
+
             {/* 1. Personal & Identity Details */}
             <div>
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                1. Personal Details & Birth Date
+                1. Personal Details & Authoritative Ethiopian Birth Date
               </h4>
               <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-3 rounded-xl border border-slate-200 bg-white p-3.5 text-xs">
                 <div>
                   <span className="text-slate-400">Gender:</span>
                   <p className="font-semibold capitalize text-slate-800">{activeApplication.gender || '—'}</p>
                 </div>
-                <div>
-                  <span className="text-slate-400">Ethiopian Birth Date:</span>
-                  <p className="font-semibold text-slate-800">
-                    {activeApplication.birthYear
-                      ? `${ETH_MONTHS[activeApplication.birthMonth - 1] || activeApplication.birthMonth} ${
-                          activeApplication.birthDay
-                        }, ${activeApplication.birthYear}`
-                      : '—'}
+                <div className="col-span-2 sm:col-span-1 bg-amber-50/50 p-2 rounded-lg border border-amber-200">
+                  <span className="text-amber-800 font-bold uppercase text-[10px]">Ethiopian Birth Date (EC):</span>
+                  <p className="font-bold text-amber-950 text-sm mt-0.5">
+                    {formatEthiopianBirthDate(activeApplication)}
                   </p>
                 </div>
                 <div>
@@ -893,14 +1086,14 @@ export default function RegistrarApplications() {
               </div>
             </div>
 
-            {/* 5. 12th Grade Result Certificate Document */}
+            {/* 5. 12th Grade Examination Result Certificate Document */}
             <div>
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
                 5. 12th Grade Result Certificate Document
               </h4>
               <div className="mt-2">
                 {activeApplication.certificateDocument?.url ? (
-                  <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4">
+                  <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shrink-0">
@@ -914,30 +1107,40 @@ export default function RegistrarApplications() {
                             <span>
                               {activeApplication.certificateDocument.fileSize
                                 ? `${(activeApplication.certificateDocument.fileSize / 1024 / 1024).toFixed(2)} MB`
-                                : 'Document attached'}
+                                : 'Uploaded document'}
                             </span>
-                            {activeApplication.certificateDocument.fileType ? (
+                            {activeApplication.certificateDocument.fileType && (
                               <>
                                 <span>·</span>
                                 <span className="uppercase">
                                   {activeApplication.certificateDocument.fileType.split('/')[1] || 'PDF'}
                                 </span>
                               </>
-                            ) : null}
+                            )}
                           </div>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <a
-                          href={activeApplication.certificateDocument.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 shadow-sm hover:bg-blue-50 transition"
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            const isPdf =
+                              activeApplication.certificateDocument?.fileType?.includes('pdf') ||
+                              activeApplication.certificateDocument?.fileName?.toLowerCase().endsWith('.pdf');
+                            openDocumentViewer({
+                              type: isPdf ? 'pdf' : 'image',
+                              url: activeApplication.certificateDocument.url,
+                              title: `${activeApplication.fullName} — 12th Grade Certificate`,
+                              fileName: activeApplication.certificateDocument.fileName || 'certificate',
+                            });
+                          }}
+                          className="gap-1 text-xs font-bold"
                         >
                           <Eye className="h-3.5 w-3.5" />
                           View Document
-                        </a>
+                        </Button>
                         <a
                           href={activeApplication.certificateDocument.url}
                           download={activeApplication.certificateDocument.fileName || '12th-grade-certificate'}
@@ -961,13 +1164,13 @@ export default function RegistrarApplications() {
         </Modal>
       ) : null}
 
-      {/* Rejection Prompt Modal */}
+      {/* Rejection Prompt Modal with Mandatory Reason */}
       {rejectingApp ? (
         <Modal
           open={Boolean(rejectingApp)}
           onClose={() => setRejectingApp(null)}
           title="Reject Student Application"
-          subtitle={`Rejecting will completely remove ${rejectingApp.fullName}'s application from the database.`}
+          subtitle={`Provide an official admissions reason for rejecting ${rejectingApp.fullName}'s application.`}
           size="sm"
           footer={
             <div className="flex justify-end gap-2">
@@ -978,33 +1181,137 @@ export default function RegistrarApplications() {
                 className="bg-rose-600 hover:bg-rose-700 text-white"
                 loading={rejectMutation.isPending}
                 onClick={() => {
-                  if (!rejectionReason.trim()) return toast.error('Enter a rejection reason.');
+                  if (!rejectionReason.trim()) return toast.error('Enter a valid rejection reason.');
                   rejectMutation.mutate({
                     id: rejectingApp.id || rejectingApp._id,
                     reason: rejectionReason.trim(),
                   });
                 }}
               >
-                Confirm Rejection & Delete
+                Confirm Rejection & Send Email
               </Button>
             </div>
           }
         >
-          <div className="space-y-3">
-            <p className="text-xs text-rose-600 font-medium">
-              Note: This action is permanent. The application record and any associated documents will be deleted.
-            </p>
-            <label className="text-xs font-semibold text-slate-700">Official Rejection Reason *</label>
-            <textarea
-              rows={3}
-              value={rejectionReason}
-              onChange={(e) => setRejectionReason(e.target.value)}
-              placeholder="e.g. Ineligible entrance examination score, unverified secondary school certificate, quota exceeded..."
-              className="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-rose-500 focus:outline-none"
-            />
+          <div className="space-y-4">
+            <div className="rounded-xl border border-rose-200 bg-rose-50/70 p-3 text-xs text-rose-800 space-y-1">
+              <p className="font-bold">Applicant: {rejectingApp.fullName}</p>
+              <p className="font-mono text-[11px]">Tracking Reference: {rejectingApp.applicationNumber}</p>
+              <p className="text-[11px] opacity-90 mt-1">
+                The reason below will be officially recorded in the audit trail and emailed to <strong>{rejectingApp.email}</strong>.
+              </p>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-700 block mb-1">
+                Official Rejection Reason <span className="text-rose-500">*</span>
+              </label>
+              <textarea
+                rows={3}
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder="e.g. Entrance score below minimum cutoff, secondary transcript unverified, programme quota exceeded..."
+                className="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm focus:border-rose-500 focus:outline-none"
+              />
+            </div>
           </div>
         </Modal>
       ) : null}
+
+      {/* Interactive Document & Photo Viewer Modal */}
+      {viewingDoc && (
+        <Modal
+          open={Boolean(viewingDoc)}
+          onClose={() => setViewingDoc(null)}
+          title={viewingDoc.title}
+          size="xl"
+          footer={
+            <div className="flex w-full items-center justify-between">
+              <div className="flex items-center gap-2">
+                {viewingDoc.type === 'image' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setImgZoom((z) => Math.min(3, z + 0.25))}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      title="Zoom In"
+                    >
+                      <ZoomIn className="h-3.5 w-3.5" /> Zoom In
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setImgZoom((z) => Math.max(0.5, z - 0.25))}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      title="Zoom Out"
+                    >
+                      <ZoomOut className="h-3.5 w-3.5" /> Zoom Out
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setImgRotation((r) => (r + 90) % 360)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      title="Rotate 90deg"
+                    >
+                      <RotateCw className="h-3.5 w-3.5" /> Rotate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImgZoom(1);
+                        setImgRotation(0);
+                      }}
+                      className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-50"
+                    >
+                      Reset
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <a
+                  href={viewingDoc.url}
+                  download={viewingDoc.fileName || 'document'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download File
+                </a>
+                <Button variant="outline" size="sm" onClick={() => setViewingDoc(null)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          }
+        >
+          <div className="flex items-center justify-center min-h-[450px] max-h-[75vh] overflow-auto bg-slate-900/5 rounded-2xl p-4">
+            {viewingDoc.type === 'pdf' ? (
+              <iframe
+                src={viewingDoc.url}
+                title={viewingDoc.title}
+                className="w-full h-[600px] rounded-xl border border-slate-300 bg-white shadow-sm"
+              />
+            ) : (
+              <div className="relative overflow-hidden flex items-center justify-center w-full h-full">
+                <img
+                  src={viewingDoc.url}
+                  alt={viewingDoc.title}
+                  style={{
+                    transform: `scale(${imgZoom}) rotate(${imgRotation}deg)`,
+                    transition: 'transform 0.2s ease',
+                  }}
+                  className="max-h-[65vh] max-w-full rounded-xl object-contain shadow-md"
+                  onError={(e) => {
+                    toast.error('Unable to display image. You can download the file directly.');
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

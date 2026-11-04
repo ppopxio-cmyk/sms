@@ -346,17 +346,15 @@ export default function PublicRegistrationPortal() {
 
   // Success Confirmation Screen
   if (applicationResult) {
+    const trackingRef = applicationResult.applicationNumber;
     return (
       <div className="min-h-screen bg-slate-50 px-4 py-10 sm:px-6 print:bg-white print:p-0">
         <div className="mx-auto max-w-xl">
-          <div className="mb-4 flex items-center justify-between print:hidden">
-            <Link to="/login" className="text-xs font-medium text-slate-500 hover:text-slate-800">
-              ← Return to Login
-            </Link>
+          <div className="mb-4 flex items-center justify-end print:hidden">
             <button
               type="button"
               onClick={() => window.print()}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
             >
               <Printer className="h-4 w-4" />
               <span>Print Application Slip</span>
@@ -370,21 +368,39 @@ export default function PublicRegistrationPortal() {
               </div>
               <h1 className="mt-4 text-2xl font-black tracking-tight">Application Submitted Successfully!</h1>
               <p className="mt-1.5 text-xs text-emerald-100 max-w-md mx-auto leading-relaxed">
-                The Registrar Office will review and approve your application in a few hours. We will communicate the admission decision and your official Student ID via your phone and email. Stay tuned!
+                Your application has been received and is now registered in our admissions system. Keep your permanent tracking reference number to monitor your evaluation progress.
               </p>
             </div>
 
             <div className="p-8 space-y-6">
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4 text-center">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-800">
-                  Tracking Reference Number
+              {/* Tracking Reference Callout Card */}
+              <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50/70 p-5 text-center shadow-sm">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+                  Your Permanent Tracking Reference
                 </p>
-                <p className="mt-1 font-mono text-2xl font-black text-emerald-900 tracking-wide">
-                  {applicationResult.applicationNumber}
+                <p className="mt-1.5 font-mono text-3xl font-extrabold text-emerald-950 tracking-wider">
+                  {trackingRef}
                 </p>
-                <p className="mt-1 text-xs text-emerald-700">
-                  Keep this application number handy for verification and inquiries.
-                </p>
+                <div className="mt-3 flex items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(trackingRef);
+                      toast.success('Tracking reference copied to clipboard!');
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 shadow-xs hover:bg-emerald-50 transition"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    <span>Copy Reference Number</span>
+                  </button>
+                  <Link
+                    to={`/application/track?ref=${encodeURIComponent(trackingRef)}`}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-emerald-800 transition"
+                  >
+                    <ArrowRight className="h-3.5 w-3.5" />
+                    <span>Track Application Online</span>
+                  </Link>
+                </div>
               </div>
 
               <div className="space-y-3 divide-y divide-slate-100 text-sm">
@@ -400,19 +416,39 @@ export default function PublicRegistrationPortal() {
                   <span className="text-slate-500">Phone Number</span>
                   <span className="font-mono text-xs text-slate-800">{applicationResult.phone}</span>
                 </div>
+                <div className="flex justify-between py-2">
+                  <span className="text-slate-500">Initial Status</span>
+                  <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-xs font-bold text-amber-800 ring-1 ring-amber-200">
+                    <Clock className="h-3 w-3" /> Under Review
+                  </span>
+                </div>
               </div>
 
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4 text-xs text-emerald-900 space-y-2">
-                <p className="font-bold text-sm text-emerald-950 flex items-center gap-1.5">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                  <span>Next Steps: Verification & Admission</span>
+              {/* Instructions Card */}
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-700 space-y-2">
+                <p className="font-bold text-sm text-slate-900 flex items-center gap-1.5">
+                  <ShieldCheck className="h-4 w-4 text-brand-600" />
+                  <span>Important Admissions Guidelines:</span>
                 </p>
                 <p className="leading-relaxed">
-                  1. The Registrar Office verifies your submitted 12th grade certification and personal information.
+                  • An official confirmation email containing your tracking reference has been dispatched to <strong>{applicationResult.email}</strong>.
                 </p>
                 <p className="leading-relaxed">
-                  2. Once approved, your official Student ID card and admission confirmation will be dispatched to your Gmail.
+                  • The Admissions Office reviews applications within 24 to 48 hours. You can return to the online tracking page anytime to check for approval or document updates.
                 </p>
+              </div>
+
+              {/* College Social & Contact */}
+              <div className="pt-2 text-center text-xs text-slate-500 space-y-2 print:hidden">
+                <p className="font-semibold text-slate-700">Need help with your application?</p>
+                <p>Contact Admissions Office: haile12michaell@gmail.com · +251 911 000 000</p>
+                <div className="flex items-center justify-center gap-4 text-brand-600 font-medium pt-1">
+                  <a href="https://t.me" target="_blank" rel="noopener noreferrer" className="hover:underline">Telegram</a>
+                  <span>·</span>
+                  <a href="https://facebook.com" target="_blank" rel="noopener noreferrer" className="hover:underline">Facebook</a>
+                  <span>·</span>
+                  <a href="https://youtube.com" target="_blank" rel="noopener noreferrer" className="hover:underline">YouTube Channel</a>
+                </div>
               </div>
             </div>
           </div>

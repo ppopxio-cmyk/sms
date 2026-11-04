@@ -86,7 +86,7 @@ const paymentSchema = new mongoose.Schema(
     amount: { type: Number, required: true, min: 1 }, // Integer santim
     method: {
       type: String,
-      enum: ['cbe_receipt', 'cash', 'manual'],
+      enum: ['cbe_receipt', 'cash', 'manual', 'chapa'],
       default: 'cbe_receipt',
       index: true,
     },

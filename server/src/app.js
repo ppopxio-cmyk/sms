@@ -17,6 +17,7 @@ import { maintenanceGuard } from './middleware/maintenance.js';
 import { getSettings, maintenanceState, publicSettings } from './services/settings.service.js';
 import routes from './routes/index.js';
 import { imagekitWebhook } from './controllers/registrar.webhook.controller.js';
+import { chapaWebhookHandler } from './controllers/portalPayment.controller.js';
 
 export function createApp() {
   const app = express();
@@ -75,6 +76,12 @@ export function createApp() {
     '/api/webhooks/imagekit',
     express.raw({ type: 'application/json', limit: '1mb' }),
     imagekitWebhook,
+  );
+  // Chapa webhook signs raw request body with HMAC-SHA256 in x-chapa-signature header.
+  app.post(
+    '/api/webhooks/chapa',
+    express.raw({ type: 'application/json', limit: '2mb' }),
+    chapaWebhookHandler,
   );
   app.use(express.json({ limit: '30mb' }));
   app.use(express.urlencoded({ extended: true, limit: '30mb' }));
