@@ -28,7 +28,6 @@ import {
   getStudentProfile,
   getSettings,
   updateSettings,
-  testReceiptTool,
 } from '../controllers/finance.controller.js';
 
 const router = Router();
@@ -81,6 +80,4 @@ router.get('/students/:id', requirePermission('finance:view'), getStudentProfile
 // Settings
 router.get('/settings', requirePermission('finance:view'), getSettings);
 router.put('/settings', requirePermission('finance:settings'), updateSettings);
-router.post('/test-receipt', requirePermission('finance:settings'), testReceiptTool);
-
 export default router;

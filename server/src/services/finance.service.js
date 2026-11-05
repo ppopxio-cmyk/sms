@@ -795,27 +795,26 @@ export async function getFinanceDashboardData() {
     reviewQueueCount,
     programmeBreakdown,
     recentCycles,
+    paymentMethodCounts,
+    departmentBreakdown,
+    cycleStatusCounts,
+    topDebtors,
   ] = await Promise.all([
     // Total collected
-    Payment.aggregate([
-      { $match: { status: 'confirmed' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } },
-    ]),
+    Payment.aggregate([{ $match: { status: 'confirmed' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
     // Total outstanding
     StudentCharge.aggregate([
       { $match: { status: 'unpaid' } },
       { $group: { _id: null, total: { $sum: '$amountDue' } } },
     ]),
     // Status counts
-    StudentCharge.aggregate([
-      { $group: { _id: '$status', count: { $sum: 1 } } },
-    ]),
+    StudentCharge.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
     // Overdue count
     StudentCharge.countDocuments({
       status: 'unpaid',
       dueAt: { $lt: cutoff },
     }),
-    // Review queue count
+    // Review queue count (keep for backwards compat)
     PaymentAttempt.countDocuments({
       result: { $in: ['review_required', 'pending_verification'] },
     }),
@@ -836,6 +835,44 @@ export async function getFinanceDashboardData() {
     ]),
     // Cycles for 13-month collection trend
     PaymentCycle.find({ deletedAt: null }).sort({ ethYear: -1, ethMonth: -1 }).limit(13).lean(),
+    // Payment method breakdown
+    Payment.aggregate([
+      { $match: { status: 'confirmed' } },
+      { $group: { _id: '$method', total: { $sum: '$amount' } } },
+    ]),
+    // Department breakdown (top 5)
+    StudentCharge.aggregate([
+      { $match: { department: { $exists: true, $ne: '' } } },
+      {
+        $group: {
+          _id: '$department',
+          totalBilled: { $sum: '$amountDue' },
+          collected: {
+            $sum: { $cond: [{ $eq: ['$status', 'paid'] }, '$amountDue', 0] },
+          },
+          studentsCount: { $sum: 1 },
+        },
+      },
+      { $sort: { totalBilled: -1 } },
+      { $limit: 5 },
+    ]),
+    // Cycle status breakdown
+    PaymentCycle.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+    // Top debtors (students with highest outstanding)
+    StudentCharge.aggregate([
+      { $match: { status: 'unpaid' } },
+      {
+        $group: {
+          _id: '$student',
+          studentId: { $first: '$studentId' },
+          studentName: { $first: '$studentName' },
+          outstanding: { $sum: '$amountDue' },
+          dueAt: { $min: '$dueAt' },
+        },
+      },
+      { $sort: { outstanding: -1 } },
+      { $limit: 8 },
+    ]),
   ]);
 
   const totalCollected = totalCollectedAgg[0]?.total || 0;
@@ -869,7 +906,34 @@ export async function getFinanceDashboardData() {
     collectedEtb: ((cycleColMap[String(c._id)] || 0) / 100).toFixed(2),
     amountPerStudent: (c.amount / 100).toFixed(2),
     status: c.status,
+    billedSantim: c.amount * (c.totalStudents || 1),
   })).reverse();
+
+  const paymentMethodBreakdown = (paymentMethodCounts || []).map((m) => ({
+    method: m._id || 'other',
+    totalEtb: ((m.total || 0) / 100).toFixed(2),
+    totalSantim: m.total || 0,
+  }));
+
+  const departmentBreakdownResult = (departmentBreakdown || []).map((d) => ({
+    department: d._id || 'Unassigned',
+    totalBilledEtb: (d.totalBilled / 100).toFixed(2),
+    collectedEtb: (d.collected / 100).toFixed(2),
+    studentsCount: d.studentsCount,
+    percent: d.totalBilled > 0 ? Math.round((d.collected / d.totalBilled) * 100) : 0,
+  }));
+
+  const cycleStatusCountsResult = (cycleStatusCounts || []).reduce((acc, curr) => {
+    acc[curr._id] = curr.count;
+    return acc;
+  }, {});
+
+  const topDebtorsResult = (topDebtors || []).map((d) => ({
+    studentId: d.studentId,
+    studentName: d.studentName,
+    outstandingEtb: (d.outstanding / 100).toFixed(2),
+    dueAt: d.dueAt,
+  }));
 
   return {
     overview: {
@@ -877,6 +941,7 @@ export async function getFinanceDashboardData() {
       totalCollectedEtb: (totalCollected / 100).toFixed(2),
       totalOutstandingSantim: totalOutstanding,
       totalOutstandingEtb: (totalOutstanding / 100).toFixed(2),
+      totalBilledEtb: (totalBilled / 100).toFixed(2),
       percentPaid,
       overdueCount,
       reviewQueueCount,
@@ -896,5 +961,9 @@ export async function getFinanceDashboardData() {
       studentsCount: p.studentsCount,
       percent: p.totalBilled > 0 ? Math.round((p.collected / p.totalBilled) * 100) : 0,
     })),
+    paymentMethodBreakdown,
+    departmentBreakdown: departmentBreakdownResult,
+    cycleStatusCounts: cycleStatusCountsResult,
+    topDebtors: topDebtorsResult,
   };
 }

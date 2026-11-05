@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   CalendarDays,
@@ -126,7 +127,45 @@ export default function FinancePaymentCycles() {
 
   // Students tab: live search across Student ID / full name + paid-receipt detail modal
   const [studentSearch, setStudentSearch] = useState('');
+  const [studentBatchFilter, setStudentBatchFilter] = useState('');
+  const [studentProgrammeFilter, setStudentProgrammeFilter] = useState('');
+  const [studentSort, setStudentSort] = useState('paidFirst'); // paidFirst | newest | oldest
   const [paidDetail, setPaidDetail] = useState(null);
+
+  const chargeBatches = useMemo(
+    () => [...new Set((cycleChargesData || []).map((c) => c.batch).filter(Boolean))].sort(),
+    [cycleChargesData]
+  );
+  const chargeProgrammes = useMemo(
+    () => [...new Set((cycleChargesData || []).map((c) => c.programme).filter(Boolean))].sort(),
+    [cycleChargesData]
+  );
+
+  // Live search across Student ID / full name for the Students tab
+  const filteredCharges = useMemo(() => {
+    const list = cycleChargesData || [];
+    const q = studentSearch.trim().toLowerCase();
+    const result = list.filter(
+      (c) =>
+        (!q ||
+          String(c.studentId || '').toLowerCase().includes(q) ||
+          String(c.studentName || '').toLowerCase().includes(q)) &&
+        (!studentBatchFilter || c.batch === studentBatchFilter) &&
+        (!studentProgrammeFilter || c.programme === studentProgrammeFilter)
+    );
+    result.sort((a, b) => {
+      const aPaid = a.status === 'paid' ? 1 : 0;
+      const bPaid = b.status === 'paid' ? 1 : 0;
+      if (studentSort === 'paidFirst') {
+        if (aPaid !== bPaid) return bPaid - aPaid;
+        return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+      }
+      const aT = new Date(a.createdAt || 0).getTime();
+      const bT = new Date(b.createdAt || 0).getTime();
+      return studentSort === 'newest' ? bT - aT : aT - bT;
+    });
+    return result;
+  }, [cycleChargesData, studentSearch, studentBatchFilter, studentProgrammeFilter, studentSort]);
 
   // 1. Fetch Cycles List with Academic Year / Month / Status Filters
   const { data: cyclesData, isLoading, refetch } = useQuery({
@@ -181,18 +220,6 @@ export default function FinancePaymentCycles() {
     },
     enabled: Boolean(selectedCycleId && detailTab === 'students'),
   });
-
-  // Live search across Student ID / full name for the Students tab
-  const filteredCharges = useMemo(() => {
-    const list = cycleChargesData || [];
-    const q = studentSearch.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter(
-      (c) =>
-        String(c.studentId || '').toLowerCase().includes(q) ||
-        String(c.studentName || '').toLowerCase().includes(q)
-    );
-  }, [cycleChargesData, studentSearch]);
 
   // 4. Create Cycle Mutation
   const createMutation = useMutation({
@@ -945,6 +972,20 @@ export default function FinancePaymentCycles() {
                   <p className="text-xs text-slate-500">
                     Showing charges generated for this cycle. Paid rows are clickable.
                   </p>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={studentSort}
+                      onChange={(e) => setStudentSort(e.target.value)}
+                      className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    >
+                      <option value="paidFirst">Paid students first</option>
+                      <option value="newest">Newest first</option>
+                      <option value="oldest">Oldest first</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
                     <input
@@ -952,9 +993,33 @@ export default function FinancePaymentCycles() {
                       value={studentSearch}
                       onChange={(e) => setStudentSearch(e.target.value)}
                       placeholder="Search Student ID or full name..."
-                      className="w-56 rounded-xl border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      className="w-full rounded-xl border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
                     />
                   </div>
+                  <select
+                    value={studentBatchFilter}
+                    onChange={(e) => setStudentBatchFilter(e.target.value)}
+                    className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  >
+                    <option value="">All Batches</option>
+                    {chargeBatches.map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={studentProgrammeFilter}
+                    onChange={(e) => setStudentProgrammeFilter(e.target.value)}
+                    className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  >
+                    <option value="">All Programmes</option>
+                    {chargeProgrammes.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="max-h-96 overflow-y-auto rounded-xl border border-slate-100">
@@ -972,7 +1037,7 @@ export default function FinancePaymentCycles() {
                       {filteredCharges.length === 0 ? (
                         <tr>
                           <td colSpan={5} className="p-6 text-center text-xs text-slate-400">
-                            No students match "{studentSearch}".
+                            No students match the current filters.
                           </td>
                         </tr>
                       ) : (

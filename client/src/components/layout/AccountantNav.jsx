@@ -25,7 +25,6 @@ const financeNavSections = [
   {
     title: 'Compliance & Holds',
     items: [
-      { to: '/accountant/review-queue', label: 'Review Queue', icon: UserCheck },
       { to: '/accountant/overdue', label: 'Overdue & Holds', icon: AlertTriangle },
       { to: '/accountant/waivers', label: 'Waivers & Grants', icon: Gift },
     ],

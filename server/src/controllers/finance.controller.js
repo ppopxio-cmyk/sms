@@ -33,7 +33,6 @@ import { Student } from '../models/Student.js';
 import { Batch, Department, Course } from '../models/AcademicStructure.js';
 import { CourseRegistration } from '../models/Offering.js';
 import { SystemSetting } from '../models/SystemSetting.js';
-import { parseCbeReceiptInput, queryCbeJsonBackend, queryCbePdfBackend, extractCbeTransactionFields } from '../services/cbeVerifier.service.js';
 import { ETH_MONTHS } from '../utils/ethiopianDate.js';
 import crypto from 'node:crypto';
 
@@ -879,35 +878,4 @@ export const updateSettings = asyncHandler(async (req, res) => {
   });
 
   res.json({ finance: setting.finance });
-});
-
-// 17. Test Receipt URL Tool
-export const testReceiptTool = asyncHandler(async (req, res) => {
-  const { receiptUrl } = req.body;
-  if (!receiptUrl) throw new AppError(400, 'URL_REQUIRED', 'Please enter a receipt URL.');
-
-  try {
-    const parsed = parseCbeReceiptInput(receiptUrl);
-    let backendResult = null;
-
-    if (parsed.type === 'json_token') {
-      backendResult = await queryCbeJsonBackend(parsed.token);
-    } else {
-      backendResult = await queryCbePdfBackend(parsed.ftRef, parsed.accSuffix);
-    }
-
-    const fields = extractCbeTransactionFields(backendResult);
-
-    res.json({
-      parsedInput: parsed,
-      upstreamResponse: backendResult,
-      extractedFields: fields,
-    });
-  } catch (err) {
-    res.json({
-      error: true,
-      message: err.message,
-      code: err.code || 'TEST_FAILED',
-    });
-  }
 });

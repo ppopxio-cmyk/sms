@@ -5,9 +5,6 @@ import {
   Building2,
   Clock,
   ShieldCheck,
-  FlaskConical,
-  CheckCircle2,
-  AlertCircle,
   Save,
   Loader2,
   Bell,
@@ -42,10 +39,7 @@ export default function FinanceSettings() {
     },
   });
 
-  // Sandbox Test Tool
-  const [testUrl, setTestUrl] = useState('');
-  const [testing, setTesting] = useState(false);
-  const [testOutput, setTestOutput] = useState(null);
+  // Sandbox Test Tool removed: payments now use Chapa — no CBE verification needed.
 
   const { data, isLoading } = useQuery({
     queryKey: ['finance', 'settings'],
@@ -90,30 +84,6 @@ export default function FinanceSettings() {
     },
     onError: (err) => toast.error(errorMessage(err)),
   });
-
-  const handleRunTest = async (e) => {
-    e.preventDefault();
-    if (!testUrl.trim()) {
-      toast.error('Please enter a CBE receipt URL to test.');
-      return;
-    }
-    setTesting(true);
-    setTestOutput(null);
-
-    try {
-      const res = await api.post('/finance/test-receipt', { receiptUrl: testUrl.trim() });
-      setTestOutput(res.data);
-      if (res.data.error) {
-        toast.error(res.data.message || 'Verification test failed.');
-      } else {
-        toast.success('Receipt tested and parsed successfully!');
-      }
-    } catch (err) {
-      toast.error(errorMessage(err));
-    } finally {
-      setTesting(false);
-    }
-  };
 
   if (isLoading) {
     return <SkeletonPage cards={3} />;
@@ -311,109 +281,6 @@ export default function FinanceSettings() {
           </Card>
         </div>
 
-        {/* Live CBE Verifier Sandbox Tool */}
-        <div className="space-y-6">
-          <Card>
-            <CardHeader
-              title="Test a CBE Receipt URL (Sandbox Tool)"
-              subtitle="Paste any real or test CBE receipt URL to test upstream connectivity, token extraction, and field normalization."
-              icon={FlaskConical}
-            />
-            <CardBody className="space-y-4">
-              <form onSubmit={handleRunTest} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold uppercase text-slate-600">
-                    CBE Receipt URL or Token
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={testUrl}
-                    onChange={(e) => setTestUrl(e.target.value)}
-                    placeholder="https://mbreciept.cbe.com.et/v2-... or https://apps.cbe.com.et:100/..."
-                    className="mt-1 block w-full rounded-xl border border-slate-200 p-2.5 font-mono text-xs text-slate-800"
-                  />
-                  <p className="mt-1 text-[11px] text-slate-400">
-                    Supports Nuxt tokens (v2), short alphanumeric hashes, and Port 100 FT references.
-                  </p>
-                </div>
-
-                <Button type="submit" disabled={testing || !testUrl.trim()} size="sm">
-                  {testing ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      <span>Testing CBE Upstream...</span>
-                    </>
-                  ) : (
-                    <>
-                      <FlaskConical className="h-3.5 w-3.5" />
-                      <span>Test Verifier Pipeline</span>
-                    </>
-                  )}
-                </Button>
-              </form>
-
-              {testOutput && (
-                <div className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs font-mono">
-                  <p className="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
-                    Inspection Result
-                  </p>
-
-                  <div>
-                    <span className="text-slate-400">Parsed Input Type:</span>{' '}
-                    <span className="font-bold text-brand-700">
-                      {testOutput.parsedInput?.type || '—'}
-                    </span>
-                  </div>
-
-                  {testOutput.extractedFields && (
-                    <div className="space-y-1.5 rounded-xl bg-white p-3 border border-slate-100">
-                      <div>
-                        <span className="text-slate-400">Reference:</span>{' '}
-                        <span className="font-bold text-slate-900">
-                          {testOutput.extractedFields.reference || 'None'}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400">Amount Santim:</span>{' '}
-                        <span className="font-bold text-emerald-700">
-                          {testOutput.extractedFields.amountSantim !== null
-                            ? `${testOutput.extractedFields.amountSantim} (${(testOutput.extractedFields.amountSantim / 100).toFixed(2)} ETB)`
-                            : 'None'}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400">Sender / Payer:</span>{' '}
-                        <span className="text-slate-800">
-                          {testOutput.extractedFields.senderName || 'None'}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400">Receiver / Account:</span>{' '}
-                        <span className="text-slate-800">
-                          {testOutput.extractedFields.receiverName || 'None'} (
-                          {testOutput.extractedFields.receiverAccount || '—'})
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400">Status:</span>{' '}
-                        <span className={testOutput.extractedFields.isSuccess ? 'text-emerald-700 font-bold' : 'text-rose-700'}>
-                          {testOutput.extractedFields.statusString || 'UNKNOWN'}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {testOutput.error && (
-                    <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-700">
-                      <p className="font-bold">Error Code: {testOutput.code}</p>
-                      <p className="mt-1">{testOutput.message}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </CardBody>
-          </Card>
-        </div>
       </div>
     </div>
   );

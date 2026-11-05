@@ -12,11 +12,11 @@ import {
   ArrowRight,
   ShieldCheck,
   Building2,
-  UserCheck,
   Clock,
   Layers,
   BarChart3,
   RefreshCw,
+  Eye,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -74,7 +74,7 @@ export default function FinanceDashboard() {
     <div className="space-y-6">
       <PageHeader
         title="Finance & Payments Dashboard"
-        subtitle="Live college fee collections, automated CBE receipt reconciliations, and academic hold management."
+        subtitle="Live college fee collections via Chapa, automated reconciliation, and academic hold management."
         icon={DollarSign}
         actions={
           <div className="flex items-center gap-2">
@@ -121,16 +121,16 @@ export default function FinanceDashboard() {
           tone="rose"
         />
         <StatCard
-          icon={UserCheck}
-          label="Review Queue"
-          value={overview.reviewQueueCount || 0}
-          hint="Submissions needing manual review"
-          tone="indigo"
+          icon={Layers}
+          label="Total Billed"
+          value={`${overview.totalBilledEtb || '0.00'} ETB`}
+          hint="Billed across all open cycles"
+          tone="slate"
         />
       </div>
 
       {/* Action Shortcut Banners */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <Link
           to="/accountant/cycles"
           className="group flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-brand-500 hover:shadow-md"
@@ -149,7 +149,7 @@ export default function FinanceDashboard() {
 
         <Link
           to="/accountant/collections"
-          className="group flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-brand-500 hover:shadow-md"
+          className="group flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-emerald-500 hover:shadow-md"
         >
           <div className="flex items-center gap-3">
             <div className="rounded-xl bg-emerald-50 p-2.5 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition">
@@ -164,27 +164,35 @@ export default function FinanceDashboard() {
         </Link>
 
         <Link
-          to="/accountant/review-queue"
-          className="group flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-brand-500 hover:shadow-md"
+          to="/accountant/ledger"
+          className="group flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-violet-500 hover:shadow-md"
         >
           <div className="flex items-center gap-3">
             <div className="rounded-xl bg-violet-50 p-2.5 text-violet-600 group-hover:bg-violet-600 group-hover:text-white transition">
-              <UserCheck className="h-5 w-5" />
+              <FileCheck className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-slate-800">CBE Review Queue</p>
-              <p className="text-xs text-slate-400">
-                {overview.reviewQueueCount > 0 ? (
-                  <span className="font-semibold text-rose-600">
-                    {overview.reviewQueueCount} submissions pending review
-                  </span>
-                ) : (
-                  'All submissions reconciled'
-                )}
-              </p>
+              <p className="text-sm font-semibold text-slate-800">Official Receipts</p>
+              <p className="text-xs text-slate-400">Browse confirmed receipts & reversals</p>
             </div>
           </div>
           <ArrowRight className="h-4 w-4 text-slate-400 group-hover:text-violet-600 group-hover:translate-x-1 transition" />
+        </Link>
+
+        <Link
+          to="/accountant/analytics"
+          className="group flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-amber-500 hover:shadow-md"
+        >
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-amber-50 p-2.5 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition">
+              <Eye className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-800">Analytics & Charts</p>
+              <p className="text-xs text-slate-400">8 live charts with real data</p>
+            </div>
+          </div>
+          <ArrowRight className="h-4 w-4 text-slate-400 group-hover:text-amber-600 group-hover:translate-x-1 transition" />
         </Link>
       </div>
 
