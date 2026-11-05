@@ -10,6 +10,33 @@ import { calculateOverdueLateFee } from '../utils/lateFee.js';
 
 const CHAPA_BASE_URL = env.CHAPA_API_BASE_URL || 'https://api.chapa.co';
 
+// Chapa field limits: checkout `title` ≤ 26 chars, `description` ≤ 128 chars. Anything
+// longer is rejected at initialize-time with a validation error, so clamp here.
+const CHAPA_TITLE_LIMIT = 26;
+const CHAPA_DESCRIPTION_LIMIT = 128;
+
+/**
+ * Flatten a Chapa error response into one readable message.
+ * Chapa returns either `message: "string"` or a validation error object such as
+ * `{ message: { phone_number: ["not a valid format"], email: ["..."] } }`.
+ */
+function chapaErrorMessage(res) {
+  const m = res?.data?.message ?? res?.data?.error;
+  if (typeof m === 'string' && m.trim()) return m.trim();
+  if (Array.isArray(m)) return m.filter(Boolean).join(', ');
+  if (m && typeof m === 'object') {
+    const parts = Object.entries(m).map(([field, issues]) => {
+      const text = Array.isArray(issues) ? issues.join(', ') : String(issues);
+      return `${field}: ${text}`;
+    });
+    if (parts.length) return parts.join('; ');
+  }
+  if (res?.data?.status && res.data.status !== 'success' && typeof res.data.message !== 'string') {
+    return 'Chapa rejected the payment initialization.';
+  }
+  return 'Could not initialize Chapa checkout.';
+}
+
 /**
  * Perform HTTPS request with JSON parsing
  */
@@ -90,8 +117,8 @@ export async function initializeHostedPayment({
     callback_url: callbackUrl || env.CHAPA_WEBHOOK_URL,
     return_url: returnUrl,
     customization: {
-      title: customization.title || 'College Monthly Fee',
-      description: customization.description || 'Monthly college tuition fee payment',
+      title: (customization.title || 'College Monthly Fee').slice(0, CHAPA_TITLE_LIMIT),
+      description: (customization.description || 'Monthly college tuition fee payment').slice(0, CHAPA_DESCRIPTION_LIMIT),
     },
   };
 
@@ -118,11 +145,8 @@ export async function initializeHostedPayment({
   }
 
   if (res.status !== 200 && res.status !== 201) {
-    const errorMsg =
-      res.data?.message?.email?.[0] ||
-      (typeof res.data?.message === 'string' ? res.data.message : '') ||
-      'Could not initialize Chapa checkout.';
-    logger.warn({ chapaResponse: res.data, status: res.status }, 'Chapa initialization failed');
+    const errorMsg = chapaErrorMessage(res);
+    logger.warn({ chapaResponse: res.data, status: res.status, txRef }, 'Chapa initialization failed');
     throw new AppError(400, 'CHAPA_INIT_FAILED', errorMsg);
   }
 

@@ -32,6 +32,8 @@ import {
   Maximize2,
   Minimize2,
   FileCheck,
+  X,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import { REGISTRAR } from '../../lib/registrar';
@@ -54,6 +56,12 @@ function formatEthiopianBirthDate(app) {
   const monthName = ETH_MONTHS[Number(m) - 1] || `Month ${m}`;
   return `${monthName} ${d}, ${y} E.C.`;
 }
+
+const COMPACT_SELECT =
+  'focus-ring h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition';
+
+const COMPACT_DATE =
+  'focus-ring h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 transition';
 
 export default function RegistrarApplications() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -265,6 +273,37 @@ export default function RegistrarApplications() {
     setViewingDoc({ type, url, title, fileName });
   };
 
+  // Compact active-filter chips: every chip knows which filter it clears.
+  const activeFilters = useMemo(() => {
+    const chips = [];
+    if (search.trim()) {
+      chips.push({ key: 'search', label: `Search: "${search.trim()}"`, clear: () => { setSearch(''); setPage(1); } });
+    }
+    if (batchFilter) {
+      const batch = uniqueBatches.find((b) => String(b._id || b.id) === String(batchFilter));
+      chips.push({ key: 'batch', label: `Batch: ${batch?.name || batch?.code || 'custom'}`, clear: () => { setBatchFilter(''); setPage(1); } });
+    }
+    if (departmentFilter) {
+      const dept = uniqueDepartments.find((d) => String(d._id || d.id) === String(departmentFilter));
+      chips.push({ key: 'department', label: `Dept: ${dept?.name || 'custom'}`, clear: () => { setDepartmentFilter(''); setProgramFilter(''); setPage(1); } });
+    }
+    if (programFilter) {
+      const prog = rawPrograms.find((p) => String(p._id || p.id) === String(programFilter));
+      chips.push({ key: 'program', label: `Programme: ${prog?.name || 'custom'}`, clear: () => { setProgramFilter(''); setPage(1); } });
+    }
+    if (selectedPortal && activeTab !== 'approved') {
+      const portal = portals.find((p) => String(p._id || p.id) === String(selectedPortal));
+      chips.push({ key: 'portal', label: `Portal: ${portal?.title || 'custom'}`, clear: () => { setSelectedPortal(''); setPage(1); } });
+    }
+    if (statusFilter !== 'all' && activeTab === 'all') {
+      const labels = { pending: 'Pending', approved: 'Admitted', rejected: 'Rejected' };
+      chips.push({ key: 'status', label: `Status: ${labels[statusFilter] || statusFilter}`, clear: () => { setStatusFilter('all'); setPage(1); } });
+    }
+    if (startDate) chips.push({ key: 'start', label: `From: ${startDate}`, clear: () => { setStartDate(''); setPage(1); } });
+    if (endDate) chips.push({ key: 'end', label: `To: ${endDate}`, clear: () => { setEndDate(''); setPage(1); } });
+    return chips;
+  }, [search, batchFilter, departmentFilter, programFilter, selectedPortal, statusFilter, startDate, endDate, activeTab, uniqueBatches, uniqueDepartments, rawPrograms, portals]);
+
   return (
     <div className="space-y-6">
       <RegistrarPageHeader
@@ -274,11 +313,12 @@ export default function RegistrarApplications() {
       />
 
       {/* Main Mode Tabs */}
-      <div className="flex border-b border-slate-200">
-        <button
-          type="button"
-          onClick={() => handleTabChange('pending')}
-          className={`flex items-center gap-2 border-b-2 px-5 py-3 text-sm font-bold transition ${
+      <div className="-mx-1 overflow-x-auto px-1 pb-0.5">
+        <div className="flex min-w-max border-b border-slate-200">
+          <button
+            type="button"
+            onClick={() => handleTabChange('pending')}
+            className={`flex shrink-0 items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-bold transition sm:px-5 sm:py-3 ${
             activeTab === 'pending'
               ? 'border-amber-500 text-amber-700 bg-amber-50/40'
               : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
@@ -298,7 +338,7 @@ export default function RegistrarApplications() {
         <button
           type="button"
           onClick={() => handleTabChange('approved')}
-          className={`flex items-center gap-2 border-b-2 px-5 py-3 text-sm font-bold transition ${
+          className={`flex shrink-0 items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-bold transition sm:px-5 sm:py-3 ${
             activeTab === 'approved'
               ? 'border-emerald-600 text-emerald-800 bg-emerald-50/40'
               : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
@@ -318,7 +358,7 @@ export default function RegistrarApplications() {
         <button
           type="button"
           onClick={() => handleTabChange('all')}
-          className={`flex items-center gap-2 border-b-2 px-5 py-3 text-sm font-bold transition ${
+          className={`flex shrink-0 items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-bold transition sm:px-5 sm:py-3 ${
             activeTab === 'all'
               ? 'border-brand-600 text-brand-700 bg-brand-50/40'
               : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
@@ -327,17 +367,18 @@ export default function RegistrarApplications() {
           <Layers className="h-4 w-4" />
           <span>All Applications Queue</span>
         </button>
+        </div>
       </div>
 
-      {/* Filter and Control Bar */}
-      <Card className="p-4 space-y-3">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          {/* Search Input */}
-          <div className="w-full sm:max-w-xs">
+      {/* Compact Filter and Control Bar */}
+      <Card className="p-3 space-y-2.5 sm:p-4 sm:space-y-3">
+        {/* Row 1: search + result count + clear */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="w-full sm:max-w-sm">
             <SearchInput
               value={search}
-              onChange={(val) => {
-                setSearch(val);
+              onChange={(event) => {
+                setSearch(event.target.value);
                 setPage(1);
               }}
               placeholder={
@@ -348,133 +389,152 @@ export default function RegistrarApplications() {
             />
           </div>
 
-          {/* Filtering Dropdowns */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Batch Filter */}
-            <select
-              value={batchFilter}
-              onChange={(e) => {
-                setBatchFilter(e.target.value);
-                setPage(1);
-              }}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none"
-            >
-              <option value="">All Batches</option>
-              {uniqueBatches.map((b) => (
-                <option key={b._id || b.id} value={b._id || b.id}>
-                  {b.name || b.code} ({b.category || 'Regular'})
-                </option>
-              ))}
-            </select>
-
-            {/* Department Filter */}
-            <select
-              value={departmentFilter}
-              onChange={(e) => {
-                setDepartmentFilter(e.target.value);
-                setProgramFilter('');
-                setPage(1);
-              }}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none"
-            >
-              <option value="">All Departments</option>
-              {uniqueDepartments.map((d) => (
-                <option key={d._id || d.id} value={d._id || d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-
-            {/* Programme Filter */}
-            <select
-              value={programFilter}
-              onChange={(e) => {
-                setProgramFilter(e.target.value);
-                setPage(1);
-              }}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none"
-            >
-              <option value="">All Programmes</option>
-              {uniquePrograms.map((p) => (
-                <option key={p._id || p.id} value={p._id || p.id}>
-                  {p.name} ({p.qualificationType || 'Degree'})
-                </option>
-              ))}
-            </select>
-
-            {/* Portal Filter for Pending and All */}
-            {activeTab !== 'approved' && (
-              <select
-                value={selectedPortal}
-                onChange={(e) => {
-                  setSelectedPortal(e.target.value);
-                  setPage(1);
-                }}
-                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none"
-              >
-                <option value="">All Intake Portals</option>
-                {portals.map((p) => (
-                  <option key={p.id || p._id} value={p._id || p.id}>
-                    {p.title}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            {/* Status Filter when in All Applications mode */}
-            {activeTab === 'all' && (
-              <select
-                value={statusFilter}
-                onChange={(e) => {
-                  setStatusFilter(e.target.value);
-                  setPage(1);
-                }}
-                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none"
-              >
-                <option value="all">All Statuses</option>
-                <option value="pending">Pending Review</option>
-                <option value="approved">Admitted</option>
-                <option value="rejected">Rejected</option>
-              </select>
-            )}
-
-            {/* Submission Date Filter */}
-            <div className="flex items-center gap-1.5 text-xs text-slate-500">
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => {
-                  setStartDate(e.target.value);
-                  setPage(1);
-                }}
-                className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none"
-                title="Filter by submission date from"
-              />
-              <span>to</span>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => {
-                  setEndDate(e.target.value);
-                  setPage(1);
-                }}
-                className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none"
-                title="Filter by submission date to"
-              />
-            </div>
-
-            {(batchFilter || departmentFilter || programFilter || selectedPortal || startDate || endDate || search || statusFilter !== 'all') && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={clearAllFilters}
-                className="text-xs"
-              >
-                Clear Filters
+          <div className="flex items-center justify-between gap-2 sm:ml-auto sm:justify-end">
+            <span className="hidden text-xs font-medium text-slate-500 lg:block">
+              {applicationsQuery.isFetching ? 'Searching…' : `${total} result${Number(total) === 1 ? '' : 's'}`}
+            </span>
+            {activeFilters.length > 0 && (
+              <Button variant="secondary" size="sm" onClick={clearAllFilters} className="gap-1 text-xs">
+                <X className="h-3.5 w-3.5" />
+                Clear all
               </Button>
             )}
           </div>
         </div>
+
+        {/* Row 2: compact filter grid */}
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {/* Batch */}
+          <select
+            value={batchFilter}
+            onChange={(event) => {
+              setBatchFilter(event.target.value);
+              setPage(1);
+            }}
+            className={COMPACT_SELECT}
+          >
+            <option value="">All Batches</option>
+            {uniqueBatches.map((b) => (
+              <option key={b._id || b.id} value={b._id || b.id}>
+                {b.name || b.code} ({b.category || 'Regular'})
+              </option>
+            ))}
+          </select>
+
+          {/* Department */}
+          <select
+            value={departmentFilter}
+            onChange={(event) => {
+              setDepartmentFilter(event.target.value);
+              setProgramFilter('');
+              setPage(1);
+            }}
+            className={COMPACT_SELECT}
+          >
+            <option value="">All Departments</option>
+            {uniqueDepartments.map((d) => (
+              <option key={d._id || d.id} value={d._id || d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+
+          {/* Programme */}
+          <select
+            value={programFilter}
+            onChange={(event) => {
+              setProgramFilter(event.target.value);
+              setPage(1);
+            }}
+            className={COMPACT_SELECT}
+          >
+            <option value="">All Programmes</option>
+            {uniquePrograms.map((p) => (
+              <option key={p._id || p.id} value={p._id || p.id}>
+                {p.name} ({p.qualificationType || 'Degree'})
+              </option>
+            ))}
+          </select>
+
+          {/* Portal Filter for Pending and All */}
+          {activeTab !== 'approved' && (
+            <select
+              value={selectedPortal}
+              onChange={(event) => {
+                setSelectedPortal(event.target.value);
+                setPage(1);
+              }}
+              className={COMPACT_SELECT}
+            >
+              <option value="">All Intake Portals</option>
+              {portals.map((p) => (
+                <option key={p.id || p._id} value={p._id || p.id}>
+                  {p.title}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {/* Status Filter when in All Applications mode */}
+          {activeTab === 'all' && (
+            <select
+              value={statusFilter}
+              onChange={(event) => {
+                setStatusFilter(event.target.value);
+                setPage(1);
+              }}
+              className={COMPACT_SELECT}
+            >
+              <option value="all">All Statuses</option>
+              <option value="pending">Pending Review</option>
+              <option value="approved">Admitted</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          )}
+
+          {/* Submission Date Range */}
+          <div className="col-span-2 grid grid-cols-2 items-center gap-1.5">
+            <input
+              type="date"
+              value={startDate}
+              onChange={(event) => {
+                setStartDate(event.target.value);
+                setPage(1);
+              }}
+              className={COMPACT_DATE}
+              title="Filter by submission date from"
+            />
+            <input
+              type="date"
+              value={endDate}
+              onChange={(event) => {
+                setEndDate(event.target.value);
+                setPage(1);
+              }}
+              className={COMPACT_DATE}
+              title="Filter by submission date to"
+            />
+          </div>
+        </div>
+
+        {/* Row 3: active filter chips */}
+        {activeFilters.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2.5">
+            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+            {activeFilters.map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={chip.clear}
+                className="focus-ring inline-flex max-w-full items-center gap-1 rounded-full bg-brand-50 py-1 pl-2.5 pr-1.5 text-[11px] font-semibold text-brand-800 ring-1 ring-brand-100 transition hover:bg-brand-100"
+                title="Remove this filter"
+              >
+                <span className="truncate">{chip.label}</span>
+                <X className="h-3 w-3 shrink-0 opacity-60" />
+              </button>
+            ))}
+          </div>
+        )}
       </Card>
 
       {/* Content Table */}
@@ -498,8 +558,22 @@ export default function RegistrarApplications() {
             </p>
           </div>
         ) : activeTab === 'approved' ? (
-          /* Approved Students Table */
-          <div className="overflow-x-auto">
+          /* Approved Students: mobile cards + desktop table */
+          <>
+            <div className="divide-y divide-slate-100 md:hidden">
+              {applications.map((app) => (
+                <ApprovedStudentCard
+                  key={app.id || app._id}
+                  app={app}
+                  onReview={() => setActiveApplication(app)}
+                  onOpenDoc={openDocumentViewer}
+                  onOpenProfile={() =>
+                    navigate(`/registrar/applications/students/${app.student?._id || app.student?.id || app.student}`)
+                  }
+                />
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-left text-sm text-slate-700">
               <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                 <tr>
@@ -647,10 +721,22 @@ export default function RegistrarApplications() {
                 })}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         ) : (
-          /* Applications Queue Table (Pending & All) */
-          <div className="overflow-x-auto">
+          /* Applications Queue: mobile cards + desktop table */
+          <>
+            <div className="divide-y divide-slate-100 md:hidden">
+              {applications.map((app) => (
+                <QueueApplicationCard
+                  key={app.id || app._id}
+                  app={app}
+                  onReview={() => setActiveApplication(app)}
+                  onOpenDoc={openDocumentViewer}
+                />
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-left text-sm text-slate-700">
               <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                 <tr>
@@ -820,14 +906,15 @@ export default function RegistrarApplications() {
                 })}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         )}
       </Card>
 
       {/* Pagination */}
       {pages > 1 ? (
         <div className="pt-2">
-          <Pagination page={page} pages={pages} total={total} onChange={setPage} />
+          <Pagination page={page} pages={pages} total={total} limit={limit} onPage={setPage} />
         </div>
       ) : null}
 
@@ -1330,6 +1417,7 @@ export default function RegistrarApplications() {
         </Modal>
       ) : null}
 
+
       {/* Interactive Document & Photo Viewer Modal */}
       {viewingDoc && (
         <Modal
@@ -1424,6 +1512,215 @@ export default function RegistrarApplications() {
           </div>
         </Modal>
       )}
+    </div>
+  );
+}
+const AVATAR_FALLBACK =
+  "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M20 21a8 8 0 0 0-16 0'/><circle cx='12' cy='8' r='5'/></svg>";
+
+function PreviewAvatar({ src, alt, onOpen, size = 'h-12 w-12' }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group relative shrink-0 cursor-pointer"
+      title="Click to view photo"
+    >
+      <img
+        src={src || AVATAR_FALLBACK}
+        alt={alt || ''}
+        className={`${size} rounded-xl object-cover ring-1 ring-slate-200 transition group-hover:ring-brand-500`}
+        onError={(e) => {
+          e.target.src = AVATAR_FALLBACK;
+        }}
+      />
+      <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/20 opacity-0 transition group-hover:opacity-100">
+        <Eye className="h-3.5 w-3.5 text-white" />
+      </div>
+    </button>
+  );
+}
+
+/* Mobile card for the Approved Students list */
+function ApprovedStudentCard({ app, onReview, onOpenDoc, onOpenProfile }) {
+  const studentRecordId = app.student?._id || app.student?.id || app.student;
+  const officialId = app.assignedStudentId || app.student?.studentId || app.generatedStudentId || '—';
+  const photoSrc = app.photo?.thumbnailUrl || app.photo?.url || app.student?.photo?.url;
+  const admittedOn = app.reviewedAt || app.createdAt;
+
+  return (
+    <div className="bg-white p-4">
+      <div className="flex items-start gap-3">
+        <PreviewAvatar
+          src={photoSrc}
+          alt={app.fullName}
+          onOpen={() =>
+            onOpenDoc({
+              type: 'image',
+              url: app.photo?.url || app.photo?.thumbnailUrl || photoSrc,
+              title: `${app.fullName} — Photo`,
+            })
+          }
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate font-bold text-slate-900">{app.fullName}</p>
+              <p className="mt-0.5 text-xs text-slate-500 capitalize">{app.gender}</p>
+            </div>
+            <span className="shrink-0 rounded-lg bg-emerald-50 px-2 py-1 font-mono text-[11px] font-extrabold text-emerald-800 ring-1 ring-emerald-200">
+              {officialId}
+            </span>
+          </div>
+
+          <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+            <span className="max-w-full truncate rounded-full bg-brand-50 px-2 py-0.5 font-semibold text-brand-800 ring-1 ring-brand-100">
+              {app.program?.name || app.portal?.program?.name || 'Programme'}
+            </span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
+              {app.department?.name || app.portal?.department?.name || 'Department'}
+            </span>
+            {app.batch?.code || app.batch?.name || app.portal?.batch?.name ? (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
+                {app.batch?.code || app.batch?.name || app.portal?.batch?.name}
+              </span>
+            ) : null}
+          </div>
+
+          <dl className="mt-2.5 grid grid-cols-[auto_1fr] gap-x-2 text-[11px] leading-5">
+            <dt className="text-slate-400">Admitted</dt>
+            <dd className="font-semibold text-slate-700">{admittedOn ? new Date(admittedOn).toLocaleDateString() : '—'}</dd>
+            <dt className="text-slate-400">Birth (E.C.)</dt>
+            <dd className="font-semibold text-slate-700">{formatEthiopianBirthDate(app)}</dd>
+            <dt className="text-slate-400">Phone</dt>
+            <dd className="truncate font-semibold text-slate-700">{app.phone || '—'}</dd>
+            <dt className="text-slate-400">Email</dt>
+            <dd className="truncate text-slate-500">{app.email || '—'}</dd>
+          </dl>
+
+          <div className="mt-3 flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={onReview} className="gap-1 text-xs">
+              <Eye className="h-3.5 w-3.5" />
+              Application
+            </Button>
+            {studentRecordId ? (
+              <Button
+                size="sm"
+                className="gap-1 bg-emerald-600 text-xs text-white hover:bg-emerald-700"
+                onClick={onOpenProfile}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                Profile
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Mobile card for the Pending / All queue */
+function QueueApplicationCard({ app, onReview, onOpenDoc: onOpenDocProp }) {
+  const hasDoc = Boolean(app.certificateDocument?.url || app.certificateDocument?.fileName);
+  const docUrl = app.certificateDocument?.url;
+  const isPdf =
+    app.certificateDocument?.fileType?.includes('pdf') ||
+    (app.certificateDocument?.fileName && app.certificateDocument.fileName.toLowerCase().endsWith('.pdf'));
+
+  return (
+    <div className="bg-white p-4">
+      <div className="flex items-start gap-3">
+        <PreviewAvatar
+          src={app.photo?.thumbnailUrl || app.photo?.url}
+          alt={app.fullName}
+          onOpen={() =>
+            onOpenDocProp({
+              type: 'image',
+              url: app.photo?.url || app.photo?.thumbnailUrl,
+              title: `${app.fullName} — Photo`,
+            })
+          }
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate font-bold text-slate-900">{app.fullName}</p>
+              <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500">
+                <span className="truncate font-mono font-semibold text-brand-700">{app.applicationNumber}</span>
+                <span>·</span>
+                <span className="capitalize">{app.gender}</span>
+              </p>
+            </div>
+            {app.status === 'approved' ? (
+              <Badge tone="success">
+                <CheckCircle2 className="h-3 w-3" /> Admitted
+              </Badge>
+            ) : app.status === 'rejected' ? (
+              <Badge tone="danger">
+                <XCircle className="h-3 w-3" /> Rejected
+              </Badge>
+            ) : (
+              <Badge tone="warning">
+                <Clock className="h-3 w-3" /> Pending
+              </Badge>
+            )}
+          </div>
+
+          <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+            <span className="max-w-full truncate rounded-full bg-brand-50 px-2 py-0.5 font-semibold text-brand-800 ring-1 ring-brand-100">
+              {app.program?.name || app.portal?.program?.name || 'Programme'}
+            </span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
+              {app.department?.name || app.portal?.department?.name || app.portal?.title || 'Portal'}
+            </span>
+            {app.batch?.code || app.portal?.batch?.code ? (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-600">
+                {app.batch?.code || app.portal?.batch?.code}
+              </span>
+            ) : null}
+          </div>
+
+          <dl className="mt-2.5 grid grid-cols-[auto_1fr] gap-x-2 text-[11px] leading-5">
+            <dt className="text-slate-400">Submitted</dt>
+            <dd className="font-semibold text-slate-700">
+              {app.createdAt ? new Date(app.createdAt).toLocaleDateString() : '—'}
+            </dd>
+            <dt className="text-slate-400">Birth (E.C.)</dt>
+            <dd className="font-semibold text-slate-700">{formatEthiopianBirthDate(app)}</dd>
+            <dt className="text-slate-400">Phone</dt>
+            <dd className="truncate font-semibold text-slate-700">{app.phone || '—'}</dd>
+            <dt className="text-slate-400">Email</dt>
+            <dd className="truncate text-slate-500">{app.email || '—'}</dd>
+          </dl>
+
+          <div className="mt-3 flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={onReview} className="gap-1 text-xs font-bold">
+              <Eye className="h-3.5 w-3.5" />
+              {app.status === 'pending' ? 'Review & Admit' : 'Details'}
+            </Button>
+            {hasDoc && docUrl ? (
+              <button
+                type="button"
+                onClick={() =>
+                  onOpenDocProp({
+                    type: isPdf ? 'pdf' : 'image',
+                    url: docUrl,
+                    title: `${app.fullName} — 12th Grade Certificate`,
+                    fileName: app.certificateDocument.fileName || 'certificate',
+                  })
+                }
+                className="focus-ring inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+              >
+                <FileText className="h-3.5 w-3.5 text-blue-600" />
+                <span>{isPdf ? 'PDF' : 'Certificate'}</span>
+              </button>
+            ) : (
+              <span className="text-[11px] italic text-slate-400">No 12th grade doc</span>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

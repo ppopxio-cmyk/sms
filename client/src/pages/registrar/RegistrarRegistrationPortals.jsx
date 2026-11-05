@@ -348,8 +348,8 @@ export default function RegistrarRegistrationPortals() {
           <div className="w-full sm:max-w-md">
             <SearchInput
               value={search}
-              onChange={(val) => {
-                setSearch(val);
+              onChange={(event) => {
+                setSearch(event.target.value);
                 setPage(1);
               }}
               placeholder="Search portals by campaign title..."
@@ -558,7 +558,7 @@ export default function RegistrarRegistrationPortals() {
       {/* Pagination */}
       {pages > 1 ? (
         <div className="pt-2">
-          <Pagination page={page} pages={pages} total={total} onChange={setPage} />
+          <Pagination page={page} pages={pages} total={total} limit={limit} onPage={setPage} />
         </div>
       ) : null}
 

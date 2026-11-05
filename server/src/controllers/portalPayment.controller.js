@@ -6,6 +6,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { verifyCbeReceipt } from '../services/cbeVerifier.service.js';
 import { toEthiopian, ETH_MONTHS } from '../utils/ethiopianDate.js';
 import { calculateOverdueLateFee } from '../utils/lateFee.js';
+import { normalizePhone } from '../utils/phone.js';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import {
@@ -385,13 +386,19 @@ export const initializeChapaPortalPayment = asyncHandler(async (req, res) => {
   const firstName = nameParts[0] || 'Student';
   const lastName = nameParts.slice(1).join(' ') || 'Account';
 
+  // Chapa only accepts Ethiopian domestic numbers (09XXXXXXXX / 07XXXXXXXX); our records
+  // store the international form (+2519XXXXXXXX). Convert, and fall back to a neutral
+  // placeholder when no mobile number is on file so checkout is not fully blocked.
+  const normalizedPhone = normalizePhone(studentDoc.phone || '');
+  const chapaPhone = normalizedPhone ? `0${normalizedPhone.slice(4)}` : '0900000000';
+
   const chapaRes = await initializeHostedPayment({
     amount: amountEtb,
     currency: 'ETB',
     email: studentDoc.email && studentDoc.email.includes('@') ? studentDoc.email : 'student@college.edu.et',
     firstName,
     lastName,
-    phone: studentDoc.phone || '',
+    phone: chapaPhone,
     txRef,
     returnUrl,
     customization: {

@@ -12,10 +12,79 @@ import {
   AlertCircle,
   Clock,
   Sparkles,
+  Hourglass,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Brand from '../../components/ui/Brand';
 import { formatEthiopian } from '../../lib/ethiopianDate';
+
+// Parses the due timestamp once per render pass and splits the remaining time into
+// labeled digits. When the window is past due, the penalty wording takes over instead
+// of showing a negative countdown.
+function useCountdown(dueAt) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!dueAt) return undefined;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [dueAt]);
+
+  if (!dueAt) return null;
+  const diff = new Date(dueAt).getTime() - now;
+  if (Number.isNaN(diff)) return null;
+  return diff > 0 ? diff : 0;
+}
+
+function Countdown({ dueAt, overdueLabel = 'Payment window closed' }) {
+  const remaining = useCountdown(dueAt);
+  if (!remaining) return null;
+
+  const totalSeconds = Math.floor(remaining / 1000);
+  if (totalSeconds <= 0) {
+    return (
+      <div className="mt-2 inline-flex items-center gap-1.5 rounded-xl bg-rose-100 px-3 py-1.5 text-xs font-bold text-rose-700">
+        <AlertCircle className="h-3.5 w-3.5" />
+        <span>{overdueLabel}</span>
+      </div>
+    );
+  }
+
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const cells = [
+    { value: days, label: 'days', labelAm: 'ቀን' },
+    { value: hours, label: 'hrs', labelAm: 'ሰዓት' },
+    { value: minutes, label: 'min', labelAm: 'ደቂቃ' },
+    { value: seconds, label: 'sec', labelAm: 'ሰከንድ' },
+  ];
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      <div className="flex items-center justify-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-brand-800">
+        <Hourglass className="h-3.5 w-3.5 animate-pulse" />
+        <span>Time remaining to pay / የሚቀረው ጊዜ</span>
+      </div>
+      <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
+        {cells.map((cell) => (
+          <div
+            key={cell.label}
+            className="rounded-xl border border-brand-100 bg-white px-1 py-1.5 text-center shadow-sm"
+          >
+            <p className="font-mono text-base font-black leading-none text-brand-700 sm:text-lg">
+              {String(cell.value).padStart(2, '0')}
+            </p>
+            <p className="mt-1 text-[9px] font-bold uppercase tracking-wider text-slate-400 sm:text-[10px]">
+              {cell.label} · {cell.labelAm}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function MonthlyPaymentPortal() {
   const { hash } = useParams();
@@ -205,10 +274,13 @@ export default function MonthlyPaymentPortal() {
                 <p className="mt-1 font-mono text-3xl font-extrabold text-slate-900">
                   {cycle.amountEtb} <span className="text-sm font-normal text-slate-500">ETB</span>
                 </p>
-                <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-slate-600">
+                <div className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700">
                   <Clock className="h-3.5 w-3.5 text-brand-600" />
-                  <span>Due Date / የመክፈያ ቀን: {formatEthiopian(cycle.dueAt)}</span>
+                  <span>
+                    Due Date / የመክፈያ ቀን: {formatEthiopian(cycle.dueAt, { time: true })} (EAT)
+                  </span>
                 </div>
+                <Countdown dueAt={cycle.dueAt} />
               </div>
 
               <form onSubmit={handleLogin} className="space-y-4">
@@ -302,10 +374,13 @@ export default function MonthlyPaymentPortal() {
                   </p>
                 )}
 
-                <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-slate-600">
+                <div className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700">
                   <Calendar className="h-3.5 w-3.5 text-brand-600" />
-                  <span>Due by / መክፈያ ቀን: {formatEthiopian(chargeData?.dueAt)}</span>
+                  <span>
+                    Due by / መክፈያ ቀን: {formatEthiopian(chargeData?.dueAt, { time: true })} (EAT)
+                  </span>
                 </div>
+                <Countdown dueAt={chargeData?.dueAt} />
               </div>
 
               {/* Online Checkout: Chapa (Telebirr / CBEBirr / Cards) */}
