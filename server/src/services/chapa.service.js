@@ -241,15 +241,23 @@ export async function processVerifiedChapaPayment({ txRef, verifiedData, ipAddre
   if (!isSuccess) {
     // Record failed attempt in audit ledger WITHOUT updating charge/payment
     if (attempt) {
-      attempt.result = 'failed';
+      attempt.result = chapaStatus === 'pending' ? 'pending_verification' : 'failed';
       attempt.cbeResponse = verifiedData;
-      attempt.reasonCode = 'CHAPA_VERIFICATION_FAILED';
+      attempt.reasonCode = chapaStatus === 'pending' ? 'CHAPA_PENDING' : 'CHAPA_VERIFICATION_FAILED';
       await attempt.save().catch(() => {});
     }
 
     charge.isLocked = false;
     charge.lockedAt = null;
     await charge.save().catch(() => {});
+
+    if (chapaStatus === 'pending') {
+      return {
+        status: 'pending',
+        message: 'Payment is still being processed by Chapa. Please try again in a moment.',
+        verifiedData,
+      };
+    }
 
     return {
       status: 'failed',

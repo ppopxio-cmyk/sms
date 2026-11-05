@@ -497,6 +497,12 @@ export const verifyChapaPortalPayment = asyncHandler(async (req, res) => {
     ipAddress: req.ip || '',
   });
 
+  // 202 Accepted = Chapa has the transaction but has not confirmed it yet. The student
+  // should retry; no payment record was created, so a later retry is safe.
+  if (processResult.status === 'pending') {
+    return res.status(202).json(processResult);
+  }
+
   res.json(processResult);
 });
 
