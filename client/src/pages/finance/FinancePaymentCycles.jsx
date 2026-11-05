@@ -128,17 +128,6 @@ export default function FinancePaymentCycles() {
   const [studentSearch, setStudentSearch] = useState('');
   const [paidDetail, setPaidDetail] = useState(null);
 
-  const filteredCharges = useMemo(() => {
-    const list = cycleChargesData || [];
-    const q = studentSearch.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter(
-      (c) =>
-        String(c.studentId || '').toLowerCase().includes(q) ||
-        String(c.studentName || '').toLowerCase().includes(q)
-    );
-  }, [cycleChargesData, studentSearch]);
-
   // 1. Fetch Cycles List with Academic Year / Month / Status Filters
   const { data: cyclesData, isLoading, refetch } = useQuery({
     queryKey: [
@@ -192,6 +181,18 @@ export default function FinancePaymentCycles() {
     },
     enabled: Boolean(selectedCycleId && detailTab === 'students'),
   });
+
+  // Live search across Student ID / full name for the Students tab
+  const filteredCharges = useMemo(() => {
+    const list = cycleChargesData || [];
+    const q = studentSearch.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(
+      (c) =>
+        String(c.studentId || '').toLowerCase().includes(q) ||
+        String(c.studentName || '').toLowerCase().includes(q)
+    );
+  }, [cycleChargesData, studentSearch]);
 
   // 4. Create Cycle Mutation
   const createMutation = useMutation({
