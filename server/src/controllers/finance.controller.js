@@ -16,7 +16,9 @@ import {
   extendStudentDeadline,
   getFinanceDashboardData,
   checkStudentFinancialHold,
+  notifyAssignedTeachersHoldStatus,
 } from '../services/finance.service.js';
+import { notifyRole } from '../services/notification.service.js';
 import mongoose from 'mongoose';
 import {
   PaymentCycle,
@@ -657,6 +659,90 @@ export const listOverdueHolds = asyncHandler(async (req, res) => {
     total,
     page: Number(page),
     pages: Math.ceil(total / Number(limit)),
+  });
+});
+
+export const notifyOverdueHoldsHandler = asyncHandler(async (req, res) => {
+  const now = new Date();
+  const settings = await SystemSetting.findOne({ key: 'global' }).lean();
+  const graceDays = Number(settings?.finance?.graceDays || 0);
+  const cutoff = new Date(now.getTime() - graceDays * 86_400_000);
+
+  const overdueCharges = await StudentCharge.find({
+    status: 'unpaid',
+    dueAt: { $lt: cutoff },
+  })
+    .populate('cycle', 'title ethYear ethMonth dueAt amount portalHash')
+    .populate('student', 'studentId fullName phone email department program batch')
+    .lean();
+
+  if (!overdueCharges.length) {
+    return res.json({ success: true, count: 0, message: 'No overdue charges requiring notification.' });
+  }
+
+  // 1. Group by student
+  const studentMap = new Map();
+  for (const c of overdueCharges) {
+    if (!c.student?._id) continue;
+    const sId = String(c.student._id);
+    if (!studentMap.has(sId)) {
+      studentMap.set(sId, { student: c.student, charges: [] });
+    }
+    studentMap.get(sId).charges.push(c);
+  }
+
+  const notificationsToInsert = [];
+
+  for (const [sId, item] of studentMap.entries()) {
+    const student = item.student;
+    const charges = item.charges;
+    const totalDue = charges.reduce((acc, c) => acc + (c.amountDue || 0), 0);
+    const totalDueEtb = (totalDue / 100).toFixed(2);
+    const firstCharge = charges[0];
+    const portalHash = firstCharge?.cycle?.portalHash;
+
+    notificationsToInsert.push({
+      student: student._id,
+      cycle: firstCharge?.cycle?._id || null,
+      title: 'Academic Hold Warning: Unpaid Monthly Fees',
+      message: `You have ${charges.length} overdue fee cycle(s) totaling ${totalDueEtb} ETB. Automated academic holds are in effect blocking assessment submissions, attendance, and mark recording. Please settle immediately via Chapa at /monthly-payments/${portalHash || ''}`,
+      type: 'hold_warning',
+    });
+
+    // Notify assigned teachers for this student
+    notifyAssignedTeachersHoldStatus(student._id, {
+      isCleared: false,
+      details: {
+        title: firstCharge?.cycle?.title || 'Overdue Monthly Fee',
+        amountEtb: totalDueEtb,
+      },
+    }).catch(() => {});
+  }
+
+  if (notificationsToInsert.length) {
+    await StudentNotification.insertMany(notificationsToInsert, { ordered: false }).catch(() => {});
+  }
+
+  // 2. Notify Registrar office
+  await notifyRole('REGISTRAR', {
+    title: 'Financial Holds Active: Student Clearance Blocked',
+    message: `Finance has alerted ${studentMap.size} overdue student(s) currently under academic hold. ID card issuance, graduation eligibility, and official document printing remain locked.`,
+    type: 'financial_hold_summary',
+    link: '/registrar/applications',
+  }).catch(() => {});
+
+  audit({
+    req,
+    action: 'finance.overdue_holds_notified',
+    targetType: 'StudentCharge',
+    meta: { studentsCount: studentMap.size, chargesCount: overdueCharges.length },
+  });
+
+  res.json({
+    success: true,
+    studentsNotified: studentMap.size,
+    chargesCount: overdueCharges.length,
+    message: `Alerts dispatched to ${studentMap.size} overdue students, their assigned teachers, and the Registrar Office.`,
   });
 });
 

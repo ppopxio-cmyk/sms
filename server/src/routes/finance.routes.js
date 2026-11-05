@@ -24,6 +24,7 @@ import {
   listReviewQueue,
   resolveReviewAttempt,
   listOverdueHolds,
+  notifyOverdueHoldsHandler,
   getStudentProfile,
   getSettings,
   updateSettings,
@@ -68,6 +69,7 @@ router.post('/review-queue/:id/resolve', requirePermission('finance:review'), re
 
 // Overdue & Holds
 router.get('/overdue', requirePermission('finance:view'), listOverdueHolds);
+router.post('/overdue/notify', requirePermission('finance:cycles'), notifyOverdueHoldsHandler);
 
 // Waivers
 router.get('/waivers', requirePermission('finance:view'), listWaivers);

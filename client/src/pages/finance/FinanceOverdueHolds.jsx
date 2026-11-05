@@ -11,6 +11,8 @@ import {
   RefreshCw,
   Clock,
   ShieldAlert,
+  Bell,
+  Send,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../../lib/api';
@@ -85,6 +87,18 @@ export default function FinanceOverdueHolds() {
     onError: (err) => toast.error(errorMessage(err)),
   });
 
+  const notifyMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.post('/finance/overdue/notify');
+      return res.data;
+    },
+    onSuccess: (res) => {
+      toast.success(res.message || 'Overdue alert notices dispatched successfully.');
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
+    },
+    onError: (err) => toast.error(errorMessage(err, 'Failed to dispatch notices.')),
+  });
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -111,15 +125,29 @@ export default function FinanceOverdueHolds() {
               />
             </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => refetch()}
-              disabled={isFetching}
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
-              <span>Refresh</span>
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetch()}
+                disabled={isFetching}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
+                <span>Refresh</span>
+              </Button>
+
+              <Button
+                size="sm"
+                className="bg-rose-600 hover:bg-rose-700 text-white gap-1.5"
+                onClick={() => notifyMutation.mutate()}
+                loading={notifyMutation.isPending}
+                disabled={!data?.overdue?.length}
+                title="Dispatch in-app notifications and warnings to overdue students, their assigned course teachers, and the Registrar."
+              >
+                <Bell className="h-3.5 w-3.5" />
+                <span>Notify Students, Teachers & Registrar</span>
+              </Button>
+            </div>
           </div>
         </CardBody>
       </Card>
