@@ -428,6 +428,19 @@ export const verifyChapaPortalPayment = asyncHandler(async (req, res) => {
 
   const cleanRef = String(reference).trim();
 
+  // portalToken is OPTIONAL: Chapa redirects the student back to /chapa-verify with only
+  // tx_ref in the query string, so a tokenless redirect must still be able to verify.
+  // When a token is present it scopes the lookup to the student's own charge; without one
+  // we fall back to locating the charge by tx_ref alone.
+  let decoded = null;
+  if (req.body.portalToken) {
+    try {
+      decoded = jwt.verify(req.body.portalToken, PORTAL_JWT_SECRET);
+    } catch {
+      throw new AppError(401, 'EXPIRED_SESSION', 'Session expired. Please enter your Student ID again.');
+    }
+  }
+
   // Call Chapa verify API
   const chapaVerifyRes = await verifyChapaTransaction(cleanRef);
   if (chapaVerifyRes.status !== 200 || !chapaVerifyRes.data) {

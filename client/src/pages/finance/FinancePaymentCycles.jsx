@@ -23,6 +23,7 @@ import {
   ArrowRight,
   ShieldAlert,
   Loader2,
+  Printer,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import QRCode from 'qrcode';
@@ -122,6 +123,21 @@ export default function FinancePaymentCycles() {
 
   // Copy feedback
   const [copiedId, setCopiedId] = useState(null);
+
+  // Students tab: live search across Student ID / full name + paid-receipt detail modal
+  const [studentSearch, setStudentSearch] = useState('');
+  const [paidDetail, setPaidDetail] = useState(null);
+
+  const filteredCharges = useMemo(() => {
+    const list = cycleChargesData || [];
+    const q = studentSearch.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(
+      (c) =>
+        String(c.studentId || '').toLowerCase().includes(q) ||
+        String(c.studentName || '').toLowerCase().includes(q)
+    );
+  }, [cycleChargesData, studentSearch]);
 
   // 1. Fetch Cycles List with Academic Year / Month / Status Filters
   const { data: cyclesData, isLoading, refetch } = useQuery({
@@ -924,10 +940,20 @@ export default function FinancePaymentCycles() {
             {/* TAB 2: STUDENTS / CHARGES */}
             {detailTab === 'students' && (
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs text-slate-500">
-                    Showing charges generated for this cycle
+                    Showing charges generated for this cycle. Paid rows are clickable.
                   </p>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={studentSearch}
+                      onChange={(e) => setStudentSearch(e.target.value)}
+                      placeholder="Search Student ID or full name..."
+                      className="w-56 rounded-xl border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                  </div>
                 </div>
 
                 <div className="max-h-96 overflow-y-auto rounded-xl border border-slate-100">
@@ -938,40 +964,72 @@ export default function FinancePaymentCycles() {
                         <th className="p-2.5">Programme</th>
                         <th className="p-2.5">Status</th>
                         <th className="p-2.5">Due / Paid</th>
+                        <th className="p-2.5">Receipt</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {(cycleChargesData || []).map((ch) => (
-                        <tr key={ch.id}>
-                          <td className="p-2.5 font-medium text-slate-800">
-                            {ch.studentName}
-                            <span className="block font-mono text-[10px] text-slate-400">
-                              {ch.studentId}
-                            </span>
-                          </td>
-                          <td className="p-2.5 text-slate-600">{ch.programme || '—'}</td>
-                          <td className="p-2.5">
-                            <Badge
-                              tone={
-                                ch.status === 'paid'
-                                  ? 'emerald'
-                                  : ch.isOverdue
-                                  ? 'rose'
-                                  : ch.status === 'waived'
-                                  ? 'purple'
-                                  : 'neutral'
-                              }
-                            >
-                              {ch.status.toUpperCase()}
-                            </Badge>
-                          </td>
-                          <td className="p-2.5 text-slate-500">
-                            {ch.paidAt
-                              ? formatEthiopian(ch.paidAt)
-                              : formatEthiopian(ch.dueAt)}
+                      {filteredCharges.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-6 text-center text-xs text-slate-400">
+                            No students match "{studentSearch}".
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        filteredCharges.map((ch) => {
+                          const isPaid = ch.status === 'paid' && ch.payment;
+                          return (
+                            <tr
+                              key={ch.id}
+                              onClick={() => {
+                                if (isPaid) setPaidDetail(ch);
+                              }}
+                              className={
+                                isPaid
+                                  ? 'cursor-pointer transition hover:bg-emerald-50/60'
+                                  : ''
+                              }
+                            >
+                              <td className="p-2.5 font-medium text-slate-800">
+                                {ch.studentName}
+                                <span className="block font-mono text-[10px] text-slate-400">
+                                  {ch.studentId}
+                                </span>
+                              </td>
+                              <td className="p-2.5 text-slate-600">{ch.programme || '—'}</td>
+                              <td className="p-2.5">
+                                <Badge
+                                  tone={
+                                    ch.status === 'paid'
+                                      ? 'emerald'
+                                      : ch.isOverdue
+                                      ? 'rose'
+                                      : ch.status === 'waived'
+                                      ? 'purple'
+                                      : 'neutral'
+                                  }
+                                >
+                                  {ch.status.toUpperCase()}
+                                </Badge>
+                              </td>
+                              <td className="p-2.5 text-slate-500">
+                                {ch.paidAt
+                                  ? formatEthiopian(ch.paidAt)
+                                  : formatEthiopian(ch.dueAt)}
+                              </td>
+                              <td className="p-2.5">
+                                {isPaid ? (
+                                  <span className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold text-emerald-700">
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                    {ch.payment.receiptNumber}
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1150,6 +1208,84 @@ export default function FinancePaymentCycles() {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* PAID STUDENT RECEIPT DETAIL MODAL */}
+      <Modal
+        open={Boolean(paidDetail)}
+        onClose={() => setPaidDetail(null)}
+        title="Paid Student Receipt Detail"
+        size="md"
+      >
+        {paidDetail && paidDetail.payment ? (
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 text-center">
+              <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-600" />
+              <p className="mt-2 text-sm font-bold text-slate-900">Payment Confirmed</p>
+              <p className="text-xs text-slate-500">
+                Recorded in the college fee register on {formatEthiopian(paidDetail.payment.paidAt)}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="rounded-xl border border-slate-100 bg-white p-3">
+                <p className="text-[10px] uppercase tracking-wider text-slate-400">Student Name</p>
+                <p className="mt-0.5 font-semibold text-slate-800">{paidDetail.studentName}</p>
+              </div>
+              <div className="rounded-xl border border-slate-100 bg-white p-3">
+                <p className="text-[10px] uppercase tracking-wider text-slate-400">Student ID</p>
+                <p className="mt-0.5 font-mono font-semibold text-slate-800">{paidDetail.studentId}</p>
+              </div>
+              <div className="rounded-xl border border-slate-100 bg-white p-3">
+                <p className="text-[10px] uppercase tracking-wider text-slate-400">Receipt Number</p>
+                <p className="mt-0.5 font-mono font-semibold text-emerald-700">{paidDetail.payment.receiptNumber}</p>
+              </div>
+              <div className="rounded-xl border border-slate-100 bg-white p-3">
+                <p className="text-[10px] uppercase tracking-wider text-slate-400">Amount</p>
+                <p className="mt-0.5 font-mono font-semibold text-slate-800">
+                  {(paidDetail.amountDue / 100).toFixed(2)} ETB
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-100 bg-white p-3">
+                <p className="text-[10px] uppercase tracking-wider text-slate-400">Payment Method</p>
+                <p className="mt-0.5 font-semibold text-slate-800">{paidDetail.payment.method}</p>
+              </div>
+              <div className="rounded-xl border border-slate-100 bg-white p-3">
+                <p className="text-[10px] uppercase tracking-wider text-slate-400">Bank Reference</p>
+                <p className="mt-0.5 font-mono text-[11px] text-slate-800 break-all">
+                  {paidDetail.payment.bankReference || '—'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.print()}
+              >
+                <Printer className="h-4 w-4" />
+                <span>Print Receipt</span>
+              </Button>
+              {paidDetail?.student?._id && (
+                <Link
+                  to={`/finance/students/${paidDetail.student._id}`}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  <span>Student Finance Profile</span>
+                </Link>
+              )}
+              <Button size="sm" onClick={() => setPaidDetail(null)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="py-8 text-center text-xs text-slate-500">
+            Loading receipt detail...
+          </div>
+        )}
       </Modal>
     </div>
   );

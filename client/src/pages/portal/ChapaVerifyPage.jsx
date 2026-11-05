@@ -151,7 +151,7 @@ export default function ChapaVerifyPage() {
                   </Link>
                 ) : (
                   <Link
-                    to="/login"
+                    to="/"
                     className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-900 py-3 text-xs font-bold text-white hover:bg-slate-800 transition"
                   >
                     <RotateCcw className="h-4 w-4" />
