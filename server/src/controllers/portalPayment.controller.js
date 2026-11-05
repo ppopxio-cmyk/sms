@@ -428,20 +428,57 @@ export const verifyChapaPortalPayment = asyncHandler(async (req, res) => {
 
   const cleanRef = String(reference).trim();
 
-  // portalToken is OPTIONAL: Chapa redirects the student back to /chapa-verify with only
-  // tx_ref in the query string, so a tokenless redirect must still be able to verify.
-  // When a token is present it scopes the lookup to the student's own charge; without one
-  // we fall back to locating the charge by tx_ref alone.
-  let decoded = null;
-  if (req.body.portalToken) {
-    try {
-      decoded = jwt.verify(req.body.portalToken, PORTAL_JWT_SECRET);
-    } catch {
-      throw new AppError(401, 'EXPIRED_SESSION', 'Session expired. Please enter your Student ID again.');
+  // This is a public payment-return endpoint, not a student login endpoint.
+  // Chapa redirects with tx_ref only. Never reject a completed payment because a
+  // short-lived portal JWT is missing, expired, or left over in a cached frontend.
+  // The server-created PaymentAttempt plus the server-to-server Chapa verification
+  // below are the authority for an unpaid transaction.
+
+  // First reconcile against the local ledger. The webhook may have completed this
+  // payment before the student's browser returned from Chapa. In that case, return
+  // the existing receipt immediately instead of making a second gateway request.
+  const existingAttempt = await PaymentAttempt.findOne({ parsedReference: cleanRef });
+  if (existingAttempt?.charge) {
+    const existingCharge = await StudentCharge.findById(existingAttempt.charge);
+    if (existingCharge) {
+      let existingPayment = existingCharge.payment
+        ? await Payment.findById(existingCharge.payment).lean()
+        : null;
+
+      // Recover safely if the payment row was created but the charge link was not
+      // saved before a process restart/interruption.
+      if (!existingPayment) {
+        existingPayment = await Payment.findOne({
+          charge: existingCharge._id,
+          status: 'confirmed',
+        }).lean();
+      }
+
+      if (existingPayment?.status === 'confirmed') {
+        if (
+          existingCharge.status !== 'paid' ||
+          String(existingCharge.payment || '') !== String(existingPayment._id)
+        ) {
+          existingCharge.status = 'paid';
+          existingCharge.payment = existingPayment._id;
+          existingCharge.paidAt = existingPayment.paidAt || new Date();
+          existingCharge.isLocked = false;
+          existingCharge.lockedAt = null;
+          await existingCharge.save();
+        }
+
+        return res.json({
+          status: 'success',
+          alreadyPaid: true,
+          doneHash: existingPayment.doneHash,
+          receiptNumber: existingPayment.receiptNumber,
+          message: 'Payment is already confirmed in the college ledger.',
+        });
+      }
     }
   }
 
-  // Call Chapa verify API
+  // Only an unpaid transaction needs a fresh server-to-server Chapa verification.
   const chapaVerifyRes = await verifyChapaTransaction(cleanRef);
   if (chapaVerifyRes.status !== 200 || !chapaVerifyRes.data) {
     const errorMsg = chapaVerifyRes.data?.message || 'Chapa transaction verification failed.';
