@@ -85,13 +85,6 @@ export default function MonthlyPaymentDone() {
       <div className="mx-auto max-w-xl">
         {/* Print & share toolbar (hidden during print) */}
         <div className="mb-4 flex items-center justify-between print:hidden">
-          <Link
-            to="/login"
-            className="text-xs font-medium text-slate-500 hover:text-slate-800"
-          >
-            ← Back to Login
-          </Link>
-
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -230,16 +223,6 @@ export default function MonthlyPaymentDone() {
               </p>
             </div>
           </div>
-        </div>
-
-        {/* Action Button */}
-        <div className="mt-6 text-center print:hidden">
-          <Link
-            to="/login"
-            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
-          >
-            Done • Return to Login
-          </Link>
         </div>
       </div>
     </div>
