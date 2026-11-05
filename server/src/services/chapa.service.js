@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import https from 'node:https';
+import { Chapa, isAxiosError } from 'chapa-nodejs';
 import { env } from '../config/env.js';
 import { AppError } from '../utils/AppError.js';
 import { logger } from '../utils/logger.js';
@@ -8,87 +8,75 @@ import { Student } from '../models/Student.js';
 import { toEthiopian } from '../utils/ethiopianDate.js';
 import { calculateOverdueLateFee } from '../utils/lateFee.js';
 
-const CHAPA_BASE_URL = env.CHAPA_API_BASE_URL || 'https://api.chapa.co';
-
 // Chapa field limits: checkout `title` ≤ 26 chars, `description` ≤ 128 chars. Anything
 // longer is rejected at initialize-time with a validation error, so clamp here.
 const CHAPA_TITLE_LIMIT = 26;
 const CHAPA_DESCRIPTION_LIMIT = 128;
 
-/**
- * Flatten a Chapa error response into one readable message.
- * Chapa returns either `message: "string"` or a validation error object such as
- * `{ message: { phone_number: ["not a valid format"], email: ["..."] } }`.
- */
-function chapaErrorMessage(res) {
-  const m = res?.data?.message ?? res?.data?.error;
-  if (typeof m === 'string' && m.trim()) return m.trim();
-  if (Array.isArray(m)) return m.filter(Boolean).join(', ');
-  if (m && typeof m === 'object') {
-    const parts = Object.entries(m).map(([field, issues]) => {
-      const text = Array.isArray(issues) ? issues.join(', ') : String(issues);
-      return `${field}: ${text}`;
-    });
-    if (parts.length) return parts.join('; ');
+// Chapa only accepts letters, numbers, hyphens, underscores, spaces, and dots inside
+// customization (and name) fields — parentheses, slashes, Amharic script, etc. are
+// rejected wholesale. Strip anything else before it reaches the gateway.
+const CHAPA_ALLOWED_TEXT = /[^A-Za-z0-9_.\- ]+/g;
+
+export function sanitizeChapaText(value, limit) {
+  if (value == null) return '';
+  const cleaned = String(value).replace(CHAPA_ALLOWED_TEXT, ' ').replace(/\s+/g, ' ').trim();
+  return limit ? cleaned.slice(0, limit).trim() : cleaned;
+}
+
+// Lazily created official SDK client (https://github.com/Chapa-Et/chapa-nodejs).
+let chapaClient = null;
+
+export function getChapaClient() {
+  if (!env.CHAPA_SECRET_KEY) {
+    throw new AppError(503, 'CHAPA_NOT_CONFIGURED', 'Chapa payment gateway is not configured.');
   }
-  if (res?.data?.status && res.data.status !== 'success' && typeof res.data.message !== 'string') {
-    return 'Chapa rejected the payment initialization.';
+  if (!chapaClient) {
+    chapaClient = new Chapa({ secretKey: env.CHAPA_SECRET_KEY });
   }
-  return 'Could not initialize Chapa checkout.';
+  return chapaClient;
 }
 
 /**
- * Perform HTTPS request with JSON parsing
+ * Turn an SDK/Axios failure into a user-readable sentence. Chapa sends either a plain
+ * string, or a validation-error object which the SDK collapses into "[object Object]" —
+ * in that case we still know the HTTP status and can hint at what was rejected.
  */
-function chapaRequest({ path, method = 'GET', headers = {}, body = null }) {
-  return new Promise((resolve, reject) => {
-    const url = new URL(path, CHAPA_BASE_URL);
-    const options = {
-      hostname: url.hostname,
-      port: 443,
-      path: url.pathname + url.search,
-      method,
-      headers: {
-        Authorization: `Bearer ${env.CHAPA_SECRET_KEY}`,
-        'Content-Type': 'application/json',
-        ...headers,
-      },
-      timeout: 30000,
-    };
+function chapaFailureMessage(error) {
+  let detail = typeof error?.message === 'string' ? error.message.trim() : '';
+  if (!detail || detail === '[object Object]') detail = '';
+  if (detail) return detail;
 
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(data || '{}');
-          resolve({ status: res.statusCode, data: parsed });
-        } catch {
-          resolve({ status: res.statusCode, raw: data });
-        }
-      });
-    });
+  const status = error?.status ?? error?.response?.status;
+  switch (status) {
+    case 400:
+      return 'Chapa rejected the payment details (invalid field). Please contact the finance office if this continues.';
+    case 401:
+      return 'Chapa credentials were rejected. Please contact the finance office.';
+    case 408:
+    case 504:
+      return 'Chapa gateway timed out. Please try again.';
+    case 404:
+      return 'Chapa could not find this transaction.';
+    case 503:
+      return 'Chapa gateway is unreachable right now. Please try again shortly.';
+    default:
+      return 'Chapa gateway could not process the request. Please try again.';
+  }
+}
 
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new AppError(504, 'CHAPA_TIMEOUT', 'Chapa gateway timed out. Please try again.'));
-    });
-
-    req.on('error', (err) => {
-      reject(new AppError(502, 'CHAPA_NETWORK_ERROR', `Payment gateway communication error: ${err.message}`));
-    });
-
-    if (body) {
-      req.write(JSON.stringify(body));
-    }
-    req.end();
-  });
+function logChapaFailure(error, scope, extra = {}) {
+  const status = error?.status ?? error?.response?.status;
+  const payload = isAxiosError(error) ? error.response?.data : undefined;
+  if (payload) {
+    logger.warn({ chapaResponse: payload, status, ...extra }, scope);
+  } else {
+    logger.warn({ chapaError: error?.message, status, ...extra }, scope);
+  }
 }
 
 /**
- * 1. Initialize Chapa Hosted Checkout
+ * 1. Initialize Chapa Hosted Checkout (official SDK, v1 /transaction/initialize)
  */
 export async function initializeHostedPayment({
   amount,
@@ -102,93 +90,70 @@ export async function initializeHostedPayment({
   returnUrl,
   customization = {},
 }) {
-  if (!env.CHAPA_SECRET_KEY) {
-    throw new AppError(503, 'CHAPA_NOT_CONFIGURED', 'Chapa payment gateway is not configured.');
-  }
+  const chapa = getChapaClient();
 
   const payload = {
     amount: String(amount),
     currency,
     email: email || 'student@college.edu.et',
-    first_name: firstName || 'Student',
-    last_name: lastName || 'Account',
+    first_name: sanitizeChapaText(firstName || 'Student') || 'Student',
+    last_name: sanitizeChapaText(lastName || 'Account') || 'Account',
     phone_number: phone || '',
     tx_ref: txRef,
     callback_url: callbackUrl || env.CHAPA_WEBHOOK_URL,
     return_url: returnUrl,
     customization: {
-      title: (customization.title || 'College Monthly Fee').slice(0, CHAPA_TITLE_LIMIT),
-      description: (customization.description || 'Monthly college tuition fee payment').slice(0, CHAPA_DESCRIPTION_LIMIT),
+      title: sanitizeChapaText(customization.title || 'College Monthly Fee', CHAPA_TITLE_LIMIT) || 'Monthly Fee',
+      description:
+        sanitizeChapaText(customization.description || 'Monthly college tuition fee payment', CHAPA_DESCRIPTION_LIMIT) ||
+        'Tuition payment',
     },
   };
 
-  // 1. Try v1/transaction/initialize
-  let res = await chapaRequest({
-    path: '/v1/transaction/initialize',
-    method: 'POST',
-    headers: {
-      'Idempotency-Key': txRef,
-    },
-    body: payload,
-  });
-
-  // If 404 on v1, fallback to v2/payments/hosted
-  if (res.status === 404) {
-    res = await chapaRequest({
-      path: '/v2/payments/hosted',
-      method: 'POST',
-      headers: {
-        'Idempotency-Key': txRef,
-      },
-      body: payload,
-    });
+  let response;
+  try {
+    response = await chapa.initialize(payload);
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    logChapaFailure(error, 'Chapa initialization failed', { txRef });
+    throw new AppError(400, 'CHAPA_INIT_FAILED', chapaFailureMessage(error));
   }
 
-  if (res.status !== 200 && res.status !== 201) {
-    const errorMsg = chapaErrorMessage(res);
-    logger.warn({ chapaResponse: res.data, status: res.status, txRef }, 'Chapa initialization failed');
-    throw new AppError(400, 'CHAPA_INIT_FAILED', errorMsg);
-  }
-
-  const checkoutUrl = res.data?.data?.checkout_url || res.data?.checkout_url;
+  const checkoutUrl = response?.data?.checkout_url || response?.checkout_url;
   if (!checkoutUrl) {
+    logger.warn({ chapaResponse: response, txRef }, 'Chapa initialization returned no checkout_url');
     throw new AppError(502, 'CHAPA_INVALID_RESPONSE', 'Chapa did not return a valid checkout link.');
   }
 
   return {
     checkoutUrl,
     txRef,
-    raw: res.data,
+    raw: response,
   };
 }
 
 /**
- * 2. Verify Transaction with Chapa Official Verify API
+ * 2. Verify Transaction with Chapa Official Verify API (official SDK)
+ * Returns `{ status: number, data }` — consumers treat non-200 as verification failure.
  */
 export async function verifyChapaTransaction(txRef) {
-  if (!env.CHAPA_SECRET_KEY) {
-    throw new AppError(503, 'CHAPA_NOT_CONFIGURED', 'Chapa payment gateway is not configured.');
+  const chapa = getChapaClient();
+
+  try {
+    const response = await chapa.verify({ tx_ref: txRef });
+    return { status: 200, data: response };
+  } catch (error) {
+    const status = Number.isInteger(error?.status) ? error.status : 502;
+    logChapaFailure(error, 'Chapa verification failed', { txRef });
+    return {
+      status,
+      data: { message: chapaFailureMessage(error) },
+    };
   }
-
-  // 1. Try v1 verify
-  let res = await chapaRequest({
-    path: `/v1/transaction/verify/${encodeURIComponent(txRef)}`,
-    method: 'GET',
-  });
-
-  // If 404 on v1, try v2 verify
-  if (res.status === 404) {
-    res = await chapaRequest({
-      path: `/v2/payments/${encodeURIComponent(txRef)}/verify`,
-      method: 'GET',
-    });
-  }
-
-  return res;
 }
 
 /**
- * 3. Verify Webhook Signature (HMAC-SHA256)
+ * 3. Verify Webhook Signature (HMAC-SHA256, constant-time)
  */
 export function verifyChapaWebhookSignature(rawBody, signatureHeader) {
   if (!env.CHAPA_WEBHOOK_SECRET) return false;
