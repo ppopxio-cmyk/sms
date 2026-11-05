@@ -150,14 +150,13 @@ export default function ChapaVerifyPage() {
                     <span>Retry Payment</span>
                   </Link>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => window.location.reload()}
+                  <Link
+                    to="/login"
                     className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-900 py-3 text-xs font-bold text-white hover:bg-slate-800 transition"
                   >
                     <RotateCcw className="h-4 w-4" />
                     <span>Try Verification Again</span>
-                  </button>
+                  </Link>
                 )}
               </div>
             </div>
