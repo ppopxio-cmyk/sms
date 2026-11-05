@@ -132,41 +132,6 @@ export default function FinancePaymentCycles() {
   const [studentSort, setStudentSort] = useState('paidFirst'); // paidFirst | newest | oldest
   const [paidDetail, setPaidDetail] = useState(null);
 
-  const chargeBatches = useMemo(
-    () => [...new Set((cycleChargesData || []).map((c) => c.batch).filter(Boolean))].sort(),
-    [cycleChargesData]
-  );
-  const chargeProgrammes = useMemo(
-    () => [...new Set((cycleChargesData || []).map((c) => c.programme).filter(Boolean))].sort(),
-    [cycleChargesData]
-  );
-
-  // Live search across Student ID / full name for the Students tab
-  const filteredCharges = useMemo(() => {
-    const list = cycleChargesData || [];
-    const q = studentSearch.trim().toLowerCase();
-    const result = list.filter(
-      (c) =>
-        (!q ||
-          String(c.studentId || '').toLowerCase().includes(q) ||
-          String(c.studentName || '').toLowerCase().includes(q)) &&
-        (!studentBatchFilter || c.batch === studentBatchFilter) &&
-        (!studentProgrammeFilter || c.programme === studentProgrammeFilter)
-    );
-    result.sort((a, b) => {
-      const aPaid = a.status === 'paid' ? 1 : 0;
-      const bPaid = b.status === 'paid' ? 1 : 0;
-      if (studentSort === 'paidFirst') {
-        if (aPaid !== bPaid) return bPaid - aPaid;
-        return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
-      }
-      const aT = new Date(a.createdAt || 0).getTime();
-      const bT = new Date(b.createdAt || 0).getTime();
-      return studentSort === 'newest' ? bT - aT : aT - bT;
-    });
-    return result;
-  }, [cycleChargesData, studentSearch, studentBatchFilter, studentProgrammeFilter, studentSort]);
-
   // 1. Fetch Cycles List with Academic Year / Month / Status Filters
   const { data: cyclesData, isLoading, refetch } = useQuery({
     queryKey: [
@@ -220,6 +185,40 @@ export default function FinancePaymentCycles() {
     },
     enabled: Boolean(selectedCycleId && detailTab === 'students'),
   });
+
+  // Students tab filters: unique batches & programmes from loaded charges, plus sorted/searched list
+  const chargeBatches = useMemo(
+    () => [...new Set((cycleChargesData || []).map((c) => c.batch).filter(Boolean))].sort(),
+    [cycleChargesData]
+  );
+  const chargeProgrammes = useMemo(
+    () => [...new Set((cycleChargesData || []).map((c) => c.programme).filter(Boolean))].sort(),
+    [cycleChargesData]
+  );
+  const filteredCharges = useMemo(() => {
+    const list = cycleChargesData || [];
+    const q = studentSearch.trim().toLowerCase();
+    const result = list.filter(
+      (c) =>
+        (!q ||
+          String(c.studentId || '').toLowerCase().includes(q) ||
+          String(c.studentName || '').toLowerCase().includes(q)) &&
+        (!studentBatchFilter || c.batch === studentBatchFilter) &&
+        (!studentProgrammeFilter || c.programme === studentProgrammeFilter)
+    );
+    result.sort((a, b) => {
+      const aPaid = a.status === 'paid' ? 1 : 0;
+      const bPaid = b.status === 'paid' ? 1 : 0;
+      if (studentSort === 'paidFirst') {
+        if (aPaid !== bPaid) return bPaid - aPaid;
+        return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+      }
+      const aT = new Date(a.createdAt || 0).getTime();
+      const bT = new Date(b.createdAt || 0).getTime();
+      return studentSort === 'newest' ? bT - aT : aT - bT;
+    });
+    return result;
+  }, [cycleChargesData, studentSearch, studentBatchFilter, studentProgrammeFilter, studentSort]);
 
   // 4. Create Cycle Mutation
   const createMutation = useMutation({
