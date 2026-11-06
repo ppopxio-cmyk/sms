@@ -13,6 +13,7 @@ import {
   reopenCycleHandler,
   cancelCycleHandler,
   deleteCycleHandler,
+  deleteAllCycles,
   listCollections,
   recordPaymentHandler,
   createWaiverHandler,
@@ -61,6 +62,7 @@ router.post('/cycles/:id/open', requirePermission('finance:cycles'), openCycleHa
 router.post('/cycles/:id/close', requirePermission('finance:cycles'), closeCycleHandler);
 router.post('/cycles/:id/reopen', requirePermission('finance:cycles'), reopenCycleHandler);
 router.post('/cycles/:id/cancel', requirePermission('finance:cycles'), cancelCycleHandler);
+router.delete('/cycles', requirePermission('finance:cycles'), deleteAllCycles);
 router.delete('/cycles/:id', requirePermission('finance:cycles'), deleteCycleHandler);
 
 // Collections & Charges

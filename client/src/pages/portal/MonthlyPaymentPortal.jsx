@@ -283,16 +283,16 @@ export default function MonthlyPaymentPortal() {
           {/* Header */}
           <div className="mb-8 text-center">
             <Brand size="lg" className="justify-center" />
-            <span className="mt-3 inline-flex items-center gap-1 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
-              <Sparkles className="h-3.5 w-3.5" />
-              <span>Official Student Fee Portal / ይፋዊ የወርሃዊ ክፍያ ፖርታል</span>
-            </span>
-            <h1 className="mt-3 text-2xl font-black text-slate-900 tracking-tight">
-              Choose Your Academic Year & Month / የትምህርት ዓመት እና ወር ይምረጡ
-            </h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Select the academic year, then pick the month cycle to pay your fee.
-            </p>
+<span className="mt-3 inline-flex items-center gap-1 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>Official Student Fee Portal</span>
+          </span>
+          <h1 className="mt-3 text-2xl font-black text-slate-900 tracking-tight">
+            Choose Your Academic Year & Month
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Select the academic year, then pick the month cycle to pay your fee.
+          </p>
           </div>
 
           {/* Year cards */}
@@ -422,9 +422,9 @@ export default function MonthlyPaymentPortal() {
         {/* Header */}
         <div className="mb-6 text-center">
           <Brand size="lg" className="justify-center" />
-          <span className="mt-3 inline-flex items-center gap-1 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
+<span className="mt-3 inline-flex items-center gap-1 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
             <Sparkles className="h-3.5 w-3.5" />
-            <span>Official Student Fee Portal / ይፋዊ የወርሃዊ ክፍያ ፖርታል</span>
+            <span>Official Student Fee Portal</span>
           </span>
           <h1 className="mt-2 text-2xl font-black text-slate-900 tracking-tight">
             {cycle.title}
@@ -432,6 +432,18 @@ export default function MonthlyPaymentPortal() {
           <p className="mt-1 text-xs text-slate-500">
             Academic Year {cycle.ethYear} E.C. • {cycle.monthName} Intake
           </p>
+
+          {/* Embedded tutorial link — top of the cycle page */}
+          <div className="mt-4 flex justify-center">
+            <button
+              type="button"
+              onClick={() => setTutorialOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-slate-800 transition"
+            >
+              <Video className="h-3.5 w-3.5" />
+              <span>Embedded Tutorial — How to Pay</span>
+            </button>
+          </div>
         </div>
 
         {/* Tutorial Modal — auto-open on first visit to this cycle */}

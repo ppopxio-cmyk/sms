@@ -54,6 +54,7 @@ export default function FinanceLedger() {
   const [verifyReceiptNumber, setVerifyReceiptNumber] = useState('');
   const [verifyResult, setVerifyResult] = useState(null);
   const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState('');
 
   const handleApplyFilter = () => {
     setIsFilterApplied(true);
