@@ -159,13 +159,21 @@ export default function MonthlyPaymentPortal() {
       }
 
       if (data.alreadyPaid) {
-        if (data.doneHash) {
-          navigate(`/monthly-payments/done/${data.doneHash}`);
-        } else {
-          toast.success(data.message || 'This monthly fee has already been paid and confirmed.');
-        }
-        return;
+if (data.doneHash) {
+        // Remember which portal this payment came from so the confirmation page can
+        // route the student back to the correct cycle if anything goes wrong.
+        try {
+          localStorage.setItem(
+            'sms-portal-done',
+            JSON.stringify({ paymentId: data.doneHash, hash }),
+          );
+        } catch {}
+        navigate(`/monthly-payments/done/${data.doneHash}`);
+      } else {
+        toast.success(data.message || 'This monthly fee has already been paid and confirmed.');
       }
+      return;
+    }
 
       setPortalToken(data.portalToken);
       setStudentData(data.student);
@@ -198,6 +206,9 @@ export default function MonthlyPaymentPortal() {
       if (data.status === 'already_paid') {
         toast.success(data.message || 'This monthly fee has already been paid and confirmed.');
         if (data.doneHash) {
+          try {
+            localStorage.setItem('sms-portal-done', JSON.stringify({ paymentId: data.doneHash, hash }));
+          } catch {}
           navigate(`/monthly-payments/done/${data.doneHash}`);
         }
         return;

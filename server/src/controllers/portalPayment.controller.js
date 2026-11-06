@@ -580,20 +580,28 @@ export const getChapaPaymentResult = asyncHandler(async (req, res) => {
 
   const cleanId = String(paymentId).trim();
 
-  try {
-    // 1. Try Chapa flow: PaymentAttempt keyed by its _id.
-    //    NOTE: the student lives on the StudentCharge (charge.student),
-    //    NOT on PaymentCycle — populating cycle.student would throw a
-    //    Mongoose StrictModePopulateError (production 500 cause).
-    const attempt = await PaymentAttempt.findById(cleanId)
-      .populate({
-        path: 'charge',
-        populate: [
-          { path: 'cycle' },
-          { path: 'student', select: 'studentId fullName firstName lastName' },
-        ],
-      })
-      .lean();
+try {
+      // 1. Try Chapa flow: PaymentAttempt keyed by its _id.
+      //    NOTE: the student lives on the StudentCharge (charge.student),
+      //    NOT on PaymentCycle — populating cycle.student would throw a
+      //    Mongoose StrictModePopulateError (production 500 cause).
+      let attempt = null;
+      try {
+        attempt = await PaymentAttempt.findById(cleanId)
+          .populate({
+            path: 'charge',
+            populate: [
+              { path: 'cycle' },
+              { path: 'student', select: 'studentId fullName firstName lastName' },
+            ],
+          })
+          .lean();
+      } catch (lookupErr) {
+        // A doneHash is a 32-hex string, not a Mongo ObjectId — findById throws
+        // a CastError. Treat that as "no Chapa attempt" and fall through to the
+        // CBE/cash/manual flow keyed by Payment.doneHash instead of 500ing.
+        logger.warn({ err: lookupErr.message, paymentId: cleanId }, 'PaymentAttempt lookup failed (likely a doneHash) — falling back to Payment lookup');
+      }
 
     if (attempt) {
       const charge = attempt.charge;

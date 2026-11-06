@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   CheckCircle2,
   Printer,
@@ -11,19 +11,33 @@ import {
   AlertCircle,
   Clock,
   RotateCcw,
+  ArrowLeft,
 } from 'lucide-react';
 import Brand from '../../components/ui/Brand';
 import { formatEthiopian } from '../../lib/ethiopianDate';
 
 export default function MonthlyPaymentDone() {
   const { paymentId } = useParams();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [confirmation, setConfirmation] = useState(null);
   const [status, setStatus] = useState('pending'); // 'success' | 'pending' | 'failed'
   const [message, setMessage] = useState('');
   const [error, setError] = useState(false);
 
+  // The portal hash the student came from — used to route back to the correct
+  // cycle if the payment fails (otherwise they land on the generic home page).
+  const [returnHash, setReturnHash] = useState('');
+
   useEffect(() => {
+    try {
+      const stored = localStorage.getItem('sms-portal-done');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.hash) setReturnHash(parsed.hash);
+      }
+    } catch {}
+
     let timer = null;
 
     async function fetchPaymentStatus() {
@@ -72,6 +86,14 @@ export default function MonthlyPaymentDone() {
     window.print();
   };
 
+  const returnToPortal = () => {
+    if (returnHash) {
+      navigate(`/monthly-payments/${returnHash}`);
+    } else {
+      navigate('/');
+    }
+  };
+
   if (loading || status === 'pending') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
@@ -105,13 +127,21 @@ export default function MonthlyPaymentDone() {
               "{message || 'The transaction was cancelled, failed, or could not be verified.'}"
             </p>
           </div>
-          <div className="pt-2">
-            <Link
-              to="/"
+          <div className="pt-2 space-y-2">
+            <button
+              type="button"
+              onClick={returnToPortal}
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 py-3 text-xs font-bold text-white hover:bg-slate-800 transition"
             >
               <RotateCcw className="h-4 w-4" />
               <span>Return to Portal</span>
+            </button>
+            <Link
+              to="/"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white py-3 text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span>Home</span>
             </Link>
           </div>
         </div>
@@ -283,6 +313,19 @@ export default function MonthlyPaymentDone() {
             </div>
           </div>
         </div>
+
+        {returnHash && (
+          <div className="mt-4 text-center print:hidden">
+            <button
+              type="button"
+              onClick={returnToPortal}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>Return to Official Student Fee Portal</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
