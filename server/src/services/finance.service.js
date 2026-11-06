@@ -262,6 +262,7 @@ export async function createPaymentCycle(payload, userId) {
     amount,
     bank,
     targets,
+    tutorialVideoUrl,
   } = payload;
 
   const cleanAmount = Math.round(Number(amount));
@@ -297,6 +298,7 @@ export async function createPaymentCycle(payload, userId) {
     opensAt: parseEATDate(opensAt, false),
     dueAt: parseEATDate(dueAt, true),
     amount: cleanAmount,
+    tutorialVideoUrl: tutorialVideoUrl ? String(tutorialVideoUrl).trim() : '',
     bank: {
       bank: bank?.bank || defaultBank.bank || 'Chapa Payment Gateway',
       accountNumber: bank?.accountNumber || defaultBank.accountNumber || 'CHAPA',
@@ -456,6 +458,10 @@ export async function updatePaymentCycle(cycleId, updates, userId) {
     if (updates.targets) {
       cycle.targets = { ...cycle.targets, ...updates.targets };
     }
+  }
+
+  if (updates.tutorialVideoUrl !== undefined) {
+    cycle.tutorialVideoUrl = updates.tutorialVideoUrl ? String(updates.tutorialVideoUrl).trim() : '';
   }
 
   cycle.updatedBy = userId;

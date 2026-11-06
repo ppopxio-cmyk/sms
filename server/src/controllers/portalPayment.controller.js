@@ -34,19 +34,31 @@ function checkStudentIdRateLimit(studentId) {
   record.count++;
 }
 
+export function buildCyclePortalQuery(rawHash) {
+  const cleanHash = String(rawHash || '').toLowerCase().trim();
+  const orConditions = [
+    { portalHash: cleanHash },
+    { slug: cleanHash },
+    { slug: cleanHash.replace(/_/g, '-') },
+  ];
+  const matchParts = cleanHash.match(/^([a-z]+)[-_](\d{4})$/);
+  if (matchParts) {
+    const monthIndex = ETH_MONTHS.findIndex((m) => m.toLowerCase() === matchParts[1]) + 1;
+    if (monthIndex > 0) {
+      orConditions.push({ ethYear: Number(matchParts[2]), ethMonth: monthIndex });
+    }
+  }
+  return { $or: orConditions };
+}
+
 /**
  * 1. GET /api/portal/monthly-payments/:hash
  * Returns uniform 404 for unknown, draft, closed or expired links
  */
 export const getCyclePublicDetails = asyncHandler(async (req, res) => {
   const { hash } = req.params;
-  const cleanHash = String(hash).toLowerCase().trim();
   const cycle = await PaymentCycle.findOne({
-    $or: [
-      { portalHash: cleanHash },
-      { slug: cleanHash },
-      { slug: cleanHash.replace(/_/g, '-') },
-    ],
+    ...buildCyclePortalQuery(hash),
     // Students can still pay overdue months on a closed cycle — the portal stays
     // reachable for open and closed cycles alike (drafts are never public).
     status: { $in: ['open', 'closed'] },
@@ -78,6 +90,7 @@ export const getCyclePublicDetails = asyncHandler(async (req, res) => {
       monthName: ethMonthName,
       amount: cycle.amount,
       amountEtb: (cycle.amount / 100).toFixed(2),
+      tutorialVideoUrl: cycle.tutorialVideoUrl || '',
       daysOverdue: lateFee.daysOverdue,
       overduePenaltyEtb: lateFee.penaltyEtb,
       totalAmountEtb: (lateFee.totalAmountSantim / 100).toFixed(2),
@@ -107,14 +120,9 @@ export const loginStudentPortal = asyncHandler(async (req, res) => {
   const normalizedId = String(studentId).toUpperCase().trim();
   checkStudentIdRateLimit(normalizedId);
 
-  const cleanHash = String(hash).toLowerCase().trim();
   const cycle = await PaymentCycle.findOne({
-    $or: [
-      { portalHash: cleanHash },
-      { slug: cleanHash },
-      { slug: cleanHash.replace(/_/g, '-') },
-    ],
-    status: 'open',
+    ...buildCyclePortalQuery(hash),
+    status: { $in: ['open', 'closed'] },
     deletedAt: null,
   });
 
@@ -334,7 +342,7 @@ export const initializeChapaPortalPayment = asyncHandler(async (req, res) => {
   const cleanHash = String(hash).toLowerCase().trim();
   if (decoded.portalHash !== cleanHash) {
     const matchingCycle = await PaymentCycle.findOne({
-      $or: [{ portalHash: cleanHash }, { slug: cleanHash }, { slug: cleanHash.replace(/_/g, '-') }],
+      ...buildCyclePortalQuery(hash),
     }).select('portalHash slug').lean();
     if (!matchingCycle || matchingCycle.portalHash !== decoded.portalHash) {
       throw new AppError(403, 'INVALID_PORTAL_SCOPE', 'Token scope does not match this payment cycle.');
@@ -583,6 +591,9 @@ export const listPublicPaymentCycles = asyncHandler(async (_req, res) => {
       status: c.status,
       opensAt: c.opensAt,
       dueAt: c.dueAt,
+      amount: c.amount,
+      amountEtb: (c.amount / 100).toFixed(2),
+      tutorialVideoUrl: c.tutorialVideoUrl || '',
     });
   }
 

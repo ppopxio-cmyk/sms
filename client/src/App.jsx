@@ -180,6 +180,8 @@ export default function App() {
         <Route path="/assessments/student-answers" element={<PublicAssessment />} />
         <Route path="/assessments/:hash" element={<PublicAssessment />} />
         <Route path="/assesmets" element={<PublicAssessment />} />
+        <Route path="/monthly-payments" element={<MonthlyPaymentPortal />} />
+        <Route path="/monthly-payment" element={<MonthlyPaymentPortal />} />
         <Route path="/monthly-payments/:hash" element={<MonthlyPaymentPortal />} />
         <Route path="/monthly-payment/:hash" element={<MonthlyPaymentPortal />} />
         <Route path="/monthly-payments/done/:paymentId" element={<MonthlyPaymentDone />} />

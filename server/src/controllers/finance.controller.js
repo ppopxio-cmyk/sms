@@ -330,32 +330,26 @@ export const deleteAllCycles = asyncHandler(async (req, res) => {
     throw new AppError(400, 'CONFIRMATION_REQUIRED', 'Confirmation string mismatch.');
   }
 
-  // Find all cycle IDs first
-  const cycles = await PaymentCycle.find({}).select('_id').lean();
-  const cycleIds = cycles.map((c) => c._id);
+  const cycleCount = await PaymentCycle.countDocuments({});
 
-  if (!cycleIds.length) {
-    return res.json({ success: true, message: 'No cycles to delete.' });
-  }
-
-  // Delete all related records in parallel
+  // Delete all cycles and all payment/charge/attempt records completely
   await Promise.all([
-    StudentCharge.deleteMany({ cycle: { $in: cycleIds } }),
-    Payment.deleteMany({ cycle: { $in: cycleIds } }),
-    PaymentAttempt.deleteMany({ cycle: { $in: cycleIds } }),
-    Waiver.deleteMany({ cycle: { $in: cycleIds } }),
-    DeadlineExtension.deleteMany({ cycle: { $in: cycleIds } }),
-    PaymentCycle.deleteMany({ _id: { $in: cycleIds } }),
+    StudentCharge.deleteMany({}),
+    Payment.deleteMany({}),
+    PaymentAttempt.deleteMany({}),
+    Waiver.deleteMany({}),
+    DeadlineExtension.deleteMany({}),
+    PaymentCycle.deleteMany({}),
   ]);
 
   audit({
     req,
     action: 'finance.all_cycles_deleted',
     targetType: 'PaymentCycle',
-    meta: { deletedCount: cycleIds.length },
+    meta: { deletedCount: cycleCount },
   });
 
-  res.json({ success: true, deletedCycles: cycleIds.length });
+  res.json({ success: true, message: 'All cycles and payment records deleted successfully.', deletedCycles: cycleCount });
 });
 
 // 8. Collections (All charges list with rich filters)

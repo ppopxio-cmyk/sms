@@ -24,6 +24,7 @@ const paymentCycleSchema = new mongoose.Schema(
       categories: [{ type: String, trim: true }], // 'regular', 'extension'
     },
     portalHash: { type: String, required: true, unique: true, index: true, lowercase: true, trim: true }, // 32 hex chars
+    tutorialVideoUrl: { type: String, trim: true, default: '' }, // YouTube tutorial link (e.g. embed/watch)
     status: {
       type: String,
       enum: ['draft', 'open', 'closed', 'cancelled'],

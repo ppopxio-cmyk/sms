@@ -112,20 +112,20 @@ export default function FinanceLedger() {
   };
 
   const handleVerifyReceipt = async () => {
-    if (!verifyReceiptNumber.trim()) return;
+    const cleanNumber = verifyReceiptNumber.trim();
+    if (!cleanNumber) return;
     setVerifying(true);
     setVerifyResult(null);
     setVerifyError('');
     try {
-      const res = await fetch(`/api/finance/payments/verify/${verifyReceiptNumber.trim()}`);
-      const data = await res.json();
-      if (res.ok && data?.verification) {
-        setVerifyResult(data);
+      const res = await api.get(`/finance/payments/verify/${encodeURIComponent(cleanNumber)}`);
+      if (res.data?.verification) {
+        setVerifyResult(res.data);
       } else {
-        setVerifyError(data?.message || 'No payment found with that receipt number.');
+        setVerifyError(res.data?.message || 'No payment found with that receipt number.');
       }
-    } catch {
-      setVerifyError('Network error while verifying receipt.');
+    } catch (err) {
+      setVerifyError(errorMessage(err, 'No payment found with that receipt number.'));
     } finally {
       setVerifying(false);
     }
@@ -525,6 +525,7 @@ export default function FinanceLedger() {
         onClose={() => {
           setVerifyOpen(false);
           setVerifyReceiptNumber('');
+          setVerifyError('');
           setVerifyResult(null);
         }}
         title="Verify Payment by Receipt Number"
@@ -536,6 +537,12 @@ export default function FinanceLedger() {
               <p className="text-xs text-slate-500 mb-4">
                 Enter an official receipt number to verify the payment details.
               </p>
+              {verifyError && (
+                <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-700 flex items-center gap-2">
+                  <XCircle className="h-4 w-4 shrink-0 text-rose-600" />
+                  <span>{verifyError}</span>
+                </div>
+              )}
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -550,7 +557,10 @@ export default function FinanceLedger() {
                   <input
                     type="text"
                     value={verifyReceiptNumber}
-                    onChange={(e) => setVerifyReceiptNumber(e.target.value.trim().toUpperCase())}
+                    onChange={(e) => {
+                      setVerifyReceiptNumber(e.target.value.trim().toUpperCase());
+                      if (verifyError) setVerifyError('');
+                    }}
                     placeholder="e.g. RCP-2019-001234"
                     required
                     className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm text-slate-800"
@@ -558,7 +568,12 @@ export default function FinanceLedger() {
                   />
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button variant="outline" type="button" onClick={() => setVerifyOpen(false)}>
+                  <Button variant="outline" type="button" onClick={() => {
+                    setVerifyOpen(false);
+                    setVerifyReceiptNumber('');
+                    setVerifyError('');
+                    setVerifyResult(null);
+                  }}>
                     Cancel
                   </Button>
                   <Button

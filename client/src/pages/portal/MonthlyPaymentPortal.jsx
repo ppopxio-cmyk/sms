@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   CheckCircle2,
   XCircle,
+  X,
   Calendar,
   CreditCard,
   User,
@@ -14,14 +15,11 @@ import {
   Sparkles,
   Hourglass,
   Video,
-  Play,
   ChevronDown,
-  BookOpen,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Brand from '../../components/ui/Brand';
 import { formatEthiopian } from '../../lib/ethiopianDate';
-import { ETH_MONTHS } from '../../lib/ethiopianDate';
 
 function useCountdown(dueAt) {
   const [now, setNow] = useState(() => Date.now());
@@ -54,9 +52,9 @@ function Countdown({ dueAt, overdueLabel = 'Payment window closed' }) {
   const seconds = totalSeconds % 60;
   const cells = [
     { value: days, label: 'days', labelAm: 'ቀን' },
-    { value: hours, label: 'hrs', labelAm: 'ሰpta' },
-    { value: minutes, label: 'min', labelAm: 'kkkk' },
-    { value: seconds, label: 'sec', labelAm: 'kkkk' },
+    { value: hours, label: 'hrs', labelAm: 'ሰዓት' },
+    { value: minutes, label: 'min', labelAm: 'ደቂቃ' },
+    { value: seconds, label: 'sec', labelAm: 'ሰከንድ' },
   ];
   return (
     <div className="mt-2 space-y-1.5">
@@ -80,22 +78,36 @@ function Countdown({ dueAt, overdueLabel = 'Payment window closed' }) {
   );
 }
 
+function getYouTubeEmbedUrl(url) {
+  if (!url) return '';
+  try {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = String(url).match(regExp);
+    return match && match[2].length === 11
+      ? `https://www.youtube-nocookie.com/embed/${match[2]}?autoplay=1&rel=0`
+      : url;
+  } catch {
+    return url;
+  }
+}
+
 export default function MonthlyPaymentPortal() {
   const { hash } = useParams();
   const navigate = useNavigate();
 
-  // Year -> month picker state
-  const [loadingCycles, setLoadingCycles] = useState(true);
+  // Mode 1: All years & months picker (when on /monthly-payments without a hash)
+  const isAllCyclesPage = !hash || !hash.trim();
+
+  const [loadingCycles, setLoadingCycles] = useState(isAllCyclesPage);
   const [years, setYears] = useState([]);
   const [selectedYear, setSelectedYear] = useState(null);
-  const [selectedMonth, setSelectedMonth] = useState(null);
 
-  // Selected cycle state
-  const [loadingCycle, setLoadingCycle] = useState(false);
+  // Mode 2: Specific month cycle page (when on /monthly-payments/:hash)
+  const [loadingCycle, setLoadingCycle] = useState(!isAllCyclesPage);
   const [cycle, setCycle] = useState(null);
   const [notFound, setNotFound] = useState(false);
 
-  // Flow step: 'login' | 'pay'
+  // Student checkout flow inside a cycle: 'login' | 'pay'
   const [step, setStep] = useState('login');
   const [studentIdInput, setStudentIdInput] = useState('');
   const [submittingLogin, setSubmittingLogin] = useState(false);
@@ -104,11 +116,17 @@ export default function MonthlyPaymentPortal() {
   const [studentData, setStudentData] = useState(null);
   const [chargeData, setChargeData] = useState(null);
   const [initializingChapa, setInitializingChapa] = useState(false);
-  const [tutorialOpen, setTutorialOpen] = useState(true);
 
+  // Video Tutorial Modal
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [dontShowTutorialAgain, setDontShowTutorialAgain] = useState(false);
+
+  // 1. Fetch all cycles if viewing /monthly-payments
   useEffect(() => {
+    if (!isAllCyclesPage) return;
     let active = true;
-    async function loadCycles() {
+    setLoadingCycles(true);
+    async function loadAllCycles() {
       try {
         const res = await fetch('/api/portal/monthly-payments');
         if (!res.ok) throw new Error('failed');
@@ -125,21 +143,29 @@ export default function MonthlyPaymentPortal() {
         if (active) setLoadingCycles(false);
       }
     }
-    loadCycles();
-    return () => { active = false; };
-  }, []);
+    loadAllCycles();
+    return () => {
+      active = false;
+    };
+  }, [isAllCyclesPage]);
 
+  // 2. Fetch specific cycle if viewing /monthly-payments/:hash
   useEffect(() => {
-    if (!selectedYear || !selectedMonth) {
+    if (isAllCyclesPage) {
       setCycle(null);
+      setNotFound(false);
+      setLoadingCycle(false);
       return;
     }
+
     let active = true;
-    async function loadCycle() {
-      setLoadingCycle(true);
-      setNotFound(false);
+    const cleanHash = hash.trim();
+    setLoadingCycle(true);
+    setNotFound(false);
+
+    async function loadSpecificCycle() {
       try {
-        const res = await fetch(`/api/portal/monthly-payments/${selectedMonth.slug}`);
+        const res = await fetch(`/api/portal/monthly-payments/${cleanHash}`);
         if (!res.ok) {
           if (!active) return;
           setNotFound(true);
@@ -148,6 +174,16 @@ export default function MonthlyPaymentPortal() {
         const data = await res.json();
         if (!active) return;
         setCycle(data.cycle);
+
+        // Auto-open video tutorial on first visit if video URL is present and not dismissed
+        if (data.cycle?.tutorialVideoUrl) {
+          try {
+            const dismissed = localStorage.getItem('sms-tutorial-dismissed') === '1';
+            if (!dismissed) {
+              setTutorialOpen(true);
+            }
+          } catch {}
+        }
       } catch {
         if (!active) return;
         setNotFound(true);
@@ -155,21 +191,35 @@ export default function MonthlyPaymentPortal() {
         if (active) setLoadingCycle(false);
       }
     }
-    loadCycle();
-    return () => { active = false; };
-  }, [selectedYear, selectedMonth]);
+
+    loadSpecificCycle();
+    return () => {
+      active = false;
+    };
+  }, [hash, isAllCyclesPage]);
+
+  const handleCloseTutorial = (neverShowAgain = false) => {
+    if (neverShowAgain || dontShowTutorialAgain) {
+      try {
+        localStorage.setItem('sms-tutorial-dismissed', '1');
+      } catch {}
+    }
+    setTutorialOpen(false);
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
     if (!studentIdInput.trim()) {
-      setLoginError('Please enter your Student ID / እበልዎ የተማري መቃወቂያዎን ያስገብ Oc.');
+      setLoginError('Please enter your Student ID / እባክዎ የተማሪ መታወቂያዎን ያስገቡ።');
       return;
     }
     setLoginError('');
     setSubmittingLogin(true);
 
+    const activeSlug = cycle?.slug || cycle?.portalHash || hash;
+
     try {
-      const res = await fetch(`/api/portal/monthly-payments/${selectedMonth.slug}/login`, {
+      const res = await fetch(`/api/portal/monthly-payments/${activeSlug}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'sms-web' },
         body: JSON.stringify({ studentId: studentIdInput.trim() }),
@@ -184,7 +234,7 @@ export default function MonthlyPaymentPortal() {
       if (data.alreadyPaid) {
         if (data.doneHash) {
           try {
-            localStorage.setItem('sms-portal-done', JSON.stringify({ paymentId: data.doneHash, hash: selectedMonth.slug }));
+            localStorage.setItem('sms-portal-done', JSON.stringify({ paymentId: data.doneHash, hash: activeSlug }));
           } catch {}
           navigate(`/monthly-payments/done/${data.doneHash}`);
         } else {
@@ -207,8 +257,10 @@ export default function MonthlyPaymentPortal() {
   const handleChapaPay = async () => {
     if (!portalToken) return;
     setInitializingChapa(true);
+    const activeSlug = cycle?.slug || cycle?.portalHash || hash;
+
     try {
-      const res = await fetch(`/api/portal/monthly-payments/${selectedMonth.slug}/chapa/initialize`, {
+      const res = await fetch(`/api/portal/monthly-payments/${activeSlug}/chapa/initialize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'sms-web' },
         body: JSON.stringify({ portalToken }),
@@ -222,7 +274,7 @@ export default function MonthlyPaymentPortal() {
         toast.success(data.message || 'This monthly fee has already been paid and confirmed.');
         if (data.doneHash) {
           try {
-            localStorage.setItem('sms-portal-done', JSON.stringify({ paymentId: data.doneHash, hash: selectedMonth.slug }));
+            localStorage.setItem('sms-portal-done', JSON.stringify({ paymentId: data.doneHash, hash: activeSlug }));
           } catch {}
           navigate(`/monthly-payments/done/${data.doneHash}`);
         }
@@ -235,194 +287,322 @@ export default function MonthlyPaymentPortal() {
       }
     } catch {
       toast.error('Network error. Unable to reach Chapa checkout.');
-} finally {
+    } finally {
       setInitializingChapa(false);
     }
   };
 
-  // Back to year selector
-  const handleReturnToYear = () => {
-    setSelectedMonth(null);
-    setStep('login');
-    setPortalToken(null);
-    setStudentData(null);
-    setChargeData(null);
-    setStudentIdInput('');
-    setLoginError('');
-  };
-
-  // Tutorial modal — auto-open on first load
-  const [tutorialSeen, setTutorialSeen] = useState(false);
-  useEffect(() => {
-    if (cycle && !tutorialSeen) {
-      setTutorialOpen(true);
-      setTutorialSeen(true);
-    }
-  }, [cycle]);
-
-  const tutorialUrl = 'https://www.youtube.com/embed/dQw4w9WgXcQ'; // replace with real tutorial
-
-  if (loadingCycles) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
-        <div className="text-center">
-          <Loader2 className="mx-auto h-8 w-8 animate-spin text-brand-600" />
-          <p className="mt-2 text-sm font-medium text-slate-600">
-            Loading monthly payment portal / የክፍያ ገጹ እየተጫነ ነው...
-          </p>
+  // ==========================================
+  // VIEW A: ALL YEARS & MONTHS PICKER
+  // (Rendered when URL is /monthly-payments)
+  // ==========================================
+  if (isAllCyclesPage) {
+    if (loadingCycles) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
+          <div className="text-center">
+            <Loader2 className="mx-auto h-8 w-8 animate-spin text-brand-600" />
+            <p className="mt-2 text-sm font-medium text-slate-600">
+              Loading payment cycles / የክፍያ ገጹ እየተጫነ ነው...
+            </p>
+          </div>
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  if (!cycle) {
-    // Year -> Month picker
+    const activeYearCycles = years.find((y) => String(y.ethYear) === selectedYear)?.months || [];
+    const anyTutorialVideo = years.flatMap((y) => y.months).find((m) => m.tutorialVideoUrl)?.tutorialVideoUrl;
+
     return (
       <div className="min-h-screen bg-slate-50 px-4 py-8 sm:px-6 sm:py-12">
         <div className="mx-auto max-w-3xl">
           {/* Header */}
           <div className="mb-8 text-center">
             <Brand size="lg" className="justify-center" />
-<span className="mt-3 inline-flex items-center gap-1 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
-            <Sparkles className="h-3.5 w-3.5" />
-            <span>Official Student Fee Portal</span>
-          </span>
-          <h1 className="mt-3 text-2xl font-black text-slate-900 tracking-tight">
-            Choose Your Academic Year & Month
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Select the academic year, then pick the month cycle to pay your fee.
-          </p>
-          </div>
+            <span className="mt-3 inline-flex items-center gap-1 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>Official Student Fee Portal</span>
+            </span>
+            <h1 className="mt-3 text-2xl font-black text-slate-900 tracking-tight">
+              Choose Your Academic Year & Month / የትምህርት ዓመት እና ወር ይምረጡ
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Select your academic year, then click the month cycle to proceed with your student fee payment.
+            </p>
 
-          {/* Year cards */}
-          {years.length > 0 && (
-            <div className="space-y-6">
-              {years.map((y) => (
-                <div key={y.ethYear} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-100 text-brand-700">
-                        <Calendar className="h-6 w-6" />
-                      </div>
-                      <div>
-<h2 className="text-lg font-bold text-slate-900">{y.ethYear} EC Academic Year</h2>
-                    <p className="text-xs text-slate-500">{y.months.length} month cycle{y.months.length === 1 ? '' : 's'} available</p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedYear(String(y.ethYear))}
-                      className={`rounded-xl px-4 py-2 text-xs font-bold uppercase transition ${
-                        selectedYear === String(y.ethYear)
-                          ? 'bg-brand-600 text-white'
-                          : 'text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      {selectedYear === String(y.ethYear) ? 'Selected / ተመርጧል' : 'Select / ይምረጡ'}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Month grid for selected year */}
-          {selectedYear && (
-            <div className="mt-8">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold text-slate-900">
-                  Available Months for {selectedYear} EC
-                </h2>
+            {/* Optional video tutorial link on the main index page */}
+            {anyTutorialVideo && (
+              <div className="mt-4 flex justify-center">
                 <button
                   type="button"
-                  onClick={() => setSelectedYear(null)}
-                  className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                  onClick={() => setTutorialOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-slate-800 transition"
                 >
-                  ← Change Year / ዓመት ይቀየሩ
+                  <Video className="h-3.5 w-3.5 text-red-500" />
+                  <span>Watch Tutorial Video / አጋዥ ቪዲዮ ይመልከቱ</span>
                 </button>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {years.find((y) => String(y.ethYear) === selectedYear)?.months.map((m) => (
-                  <button
-                    key={`${m.ethYear}-${m.ethMonth}`}
-                    type="button"
-                    onClick={() => {
-                      setSelectedMonth(m);
-                      setTutorialSeen(false);
-                    }}
-                    disabled={m.status !== 'open'}
-                    className={`relative group rounded-2xl border p-4 text-left transition ${
-                      m.status === 'open'
-                        ? 'border-brand-300 bg-white hover:border-brand-400 hover:shadow-md'
-                        : 'border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed'
+            )}
+          </div>
+
+          {/* Academic Year Selector Cards */}
+          {years.length > 0 ? (
+            <div className="space-y-6">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {years.map((y) => (
+                  <div
+                    key={y.ethYear}
+                    onClick={() => setSelectedYear(String(y.ethYear))}
+                    className={`cursor-pointer rounded-2xl border p-4 transition ${
+                      selectedYear === String(y.ethYear)
+                        ? 'border-brand-500 bg-brand-50/50 shadow-sm ring-2 ring-brand-500/20'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
                     }`}
                   >
-                    {m.status !== 'open' && (
-                      <span className="absolute top-2 right-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">
-                        {m.status === 'closed' ? 'Closed / የተዘጋጁ' : m.status === 'draft' ? 'Draft / ድራፍት' : 'Unavailable'}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`flex h-11 w-11 items-center justify-center rounded-xl ${
+                            selectedYear === String(y.ethYear)
+                              ? 'bg-brand-600 text-white'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          <Calendar className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h2 className="text-base font-bold text-slate-900">
+                            {y.ethYear} EC Academic Year
+                          </h2>
+                          <p className="text-xs text-slate-500">
+                            {y.months.length} monthly cycle{y.months.length === 1 ? '' : 's'}
+                          </p>
+                        </div>
+                      </div>
+                      <span
+                        className={`rounded-lg px-2.5 py-1 text-[11px] font-bold uppercase ${
+                          selectedYear === String(y.ethYear)
+                            ? 'bg-brand-600 text-white'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {selectedYear === String(y.ethYear) ? 'Selected' : 'View'}
                       </span>
-                    )}
-                    <div className="flex items-center gap-3">
-                      <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${
-                        m.status === 'open' ? 'bg-brand-50 text-brand-700' : 'bg-slate-100 text-slate-400'
-                      }`}>
-                        <Calendar className="h-6 w-6" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-slate-900 truncate">{m.title}</h3>
-                        <p className="text-xs font-mono text-slate-500">
-                          {m.monthName} • Due {formatEthiopian(m.dueAt, { time: true })}
-                        </p>
-                        <p className="text-xs text-emerald-600 font-medium">
-                          {m.amountEtb} ETB
-                        </p>
-                      </div>
                     </div>
-                    {m.status === 'open' && (
-                      <ArrowRight className="h-5 w-5 text-brand-500 group-hover:translate-x-1 transition" />
-                    )}
-                  </button>
+                  </div>
                 ))}
               </div>
-            </div>
-          )}
 
-          {years.length === 0 && (
+              {/* Month cycles for selected year */}
+              {selectedYear && (
+                <div className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-base font-bold text-slate-900">
+                        Available Month Cycles for {selectedYear} E.C.
+                      </h2>
+                      <p className="text-xs text-slate-500">
+                        Click on your month to open its dedicated payment portal.
+                      </p>
+                    </div>
+                  </div>
+
+                  {activeYearCycles.length > 0 ? (
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {activeYearCycles.map((m) => {
+                        const cycleSlug = m.slug || m.portalHash;
+                        const isAccessible = m.status === 'open' || m.status === 'closed';
+
+                        return (
+                          <button
+                            key={`${m.ethYear}-${m.ethMonth}-${cycleSlug}`}
+                            type="button"
+                            onClick={() => {
+                              navigate(`/monthly-payments/${cycleSlug}`);
+                            }}
+                            disabled={!isAccessible}
+                            className={`group relative rounded-2xl border p-4 text-left transition ${
+                              isAccessible
+                                ? 'border-brand-200 bg-white hover:border-brand-400 hover:shadow-md'
+                                : 'border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-700">
+                                <Calendar className="h-5 w-5" />
+                              </div>
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                                  m.status === 'open'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : m.status === 'closed'
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : 'bg-slate-100 text-slate-500'
+                                }`}
+                              >
+                                {m.status === 'open' ? 'Open' : m.status === 'closed' ? 'Closed' : m.status}
+                              </span>
+                            </div>
+
+                            <div className="mt-3">
+                              <h3 className="font-bold text-slate-900 group-hover:text-brand-700 transition">
+                                {m.title}
+                              </h3>
+                              <p className="mt-0.5 text-xs text-slate-500">
+                                Due {formatEthiopian(m.dueAt, { time: true })}
+                              </p>
+                              {m.amountEtb && (
+                                <p className="mt-2 font-mono text-sm font-bold text-slate-900">
+                                  {m.amountEtb} <span className="text-xs font-normal text-slate-500">ETB</span>
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="mt-3 flex items-center justify-end text-xs font-semibold text-brand-600 group-hover:translate-x-1 transition">
+                              <span>Pay this month →</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center text-xs text-slate-500">
+                      No monthly cycles published for {selectedYear} E.C.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
             <div className="mt-10 rounded-3xl border border-slate-200 bg-white p-10 text-center">
               <Calendar className="mx-auto h-12 w-12 text-slate-300" />
-              <h3 className="mt-4 text-lg font-semibold text-slate-700">No Payment Cycles Yet</h3>
-              <p className="mt-2 text-sm text-slate-500">The Finance Office has not published any monthly payment cycles.</p>
+              <h3 className="mt-4 text-lg font-semibold text-slate-700">No Payment Cycles Available</h3>
+              <p className="mt-2 text-sm text-slate-500">
+                The College Finance Office has not published any monthly fee cycles yet.
+              </p>
             </div>
           )}
+        </div>
 
-          {/* Tutorial link */}
-          <div className="mt-10 rounded-2xl border border-brand-200 bg-brand-50 p-4 text-center">
-            <p className="text-xs font-semibold uppercase tracking-wider text-brand-800 mb-2">
-              Need Help? / እርዳታ ያስፈልጋሉ?
-            </p>
-            <button
-              type="button"
-              onClick={() => setTutorialOpen(true)}
-              className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-xs font-bold text-white hover:bg-brand-700"
+        {/* Video Tutorial Modal (If triggered) */}
+        {tutorialOpen && anyTutorialVideo && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-fade"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tutorial-title"
+          >
+            <div
+              className="relative w-full max-w-2xl rounded-3xl bg-white p-5 sm:p-6 shadow-2xl animate-pop overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
             >
-              <Video className="h-3.5 w-3.5" />
-              <span>Watch Tutorial Video / ሁኔታ ተግባር ይመልከቱ</span>
-            </button>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Video className="h-5 w-5 text-red-600" />
+                  <div>
+                    <h2 id="tutorial-title" className="text-base font-bold text-slate-900">
+                      Payment Tutorial / የክፍያ አጋዥ ቪዲዮ
+                    </h2>
+                    <p className="text-[11px] text-slate-400">
+                      Watch how to select your month and pay via Chapa.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCloseTutorial(false)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 transition"
+                  aria-label="Skip tutorial"
+                >
+                  <span>Skip / ዝለል</span>
+                  <X className="h-4 w-4 text-slate-500" />
+                </button>
+              </div>
+
+              <div className="aspect-video w-full rounded-2xl bg-black overflow-hidden shadow-inner">
+                <iframe
+                  src={getYouTubeEmbedUrl(anyTutorialVideo)}
+                  title="Payment tutorial"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  className="h-full w-full border-0"
+                />
+              </div>
+
+              <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-100">
+                <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={dontShowTutorialAgain}
+                    onChange={(e) => setDontShowTutorialAgain(e.target.checked)}
+                    className="rounded text-brand-600 focus:ring-brand-500"
+                  />
+                  <span>Don't show this again / እንደገና አታሳየኝ</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => handleCloseTutorial(false)}
+                  className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-brand-700 transition"
+                >
+                  <span>Close / ዝጋ</span>
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
           </div>
+        )}
+      </div>
+    );
+  }
+
+  // ==========================================
+  // VIEW B: SPECIFIC MONTH CYCLE PAYMENT PAGE
+  // (Rendered when URL is /monthly-payments/:hash)
+  // ==========================================
+
+  if (loadingCycle) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
+        <div className="text-center">
+          <Loader2 className="mx-auto h-8 w-8 animate-spin text-brand-600" />
+          <p className="mt-2 text-sm font-medium text-slate-600">
+            Loading monthly payment details / የክፍያ ገጹ እየተጫነ ነው...
+          </p>
         </div>
       </div>
     );
   }
 
-  // Cycle selected — login / pay flow
+  if (notFound || !cycle) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="max-w-md w-full rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-lg">
+          <XCircle className="mx-auto h-12 w-12 text-rose-500" />
+          <h2 className="mt-4 text-xl font-bold text-slate-900">Payment Cycle Not Found / የክፍያ ዙር አልተገኘም</h2>
+          <p className="mt-2 text-xs text-slate-500">
+            The requested payment link does not exist, has closed, or is not yet open.
+          </p>
+          <Link
+            to="/monthly-payments"
+            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-brand-700 transition"
+          >
+            <span>Browse Available Payment Cycles / ያሉትን ወራት ይመልከቱ</span>
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const embedTutorialUrl = getYouTubeEmbedUrl(cycle.tutorialVideoUrl);
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100/60 px-4 py-8 sm:py-12">
       <div className="mx-auto max-w-lg">
         {/* Header */}
         <div className="mb-6 text-center">
           <Brand size="lg" className="justify-center" />
-<span className="mt-3 inline-flex items-center gap-1 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
+          <span className="mt-3 inline-flex items-center gap-1 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
             <Sparkles className="h-3.5 w-3.5" />
             <span>Official Student Fee Portal</span>
           </span>
@@ -433,75 +613,88 @@ export default function MonthlyPaymentPortal() {
             Academic Year {cycle.ethYear} E.C. • {cycle.monthName} Intake
           </p>
 
-          {/* Embedded tutorial link — top of the cycle page */}
-          <div className="mt-4 flex justify-center">
-            <button
-              type="button"
-              onClick={() => setTutorialOpen(true)}
-              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-slate-800 transition"
-            >
-              <Video className="h-3.5 w-3.5" />
-              <span>Embedded Tutorial — How to Pay</span>
-            </button>
-          </div>
+          {/* Top Video Tutorial Button (Only when YouTube video is configured) */}
+          {embedTutorialUrl && (
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setTutorialOpen(true)}
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-slate-800 transition"
+              >
+                <Video className="h-3.5 w-3.5 text-red-500" />
+                <span>Watch Tutorial Video / አጋዥ ቪዲዮ ይመልከቱ</span>
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Tutorial Modal — auto-open on first visit to this cycle */}
-        <div
-          className={`fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 transition-opacity ${
-            tutorialOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
-          }`}
-          onClick={() => setTutorialOpen(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="tutorial-title"
-        >
+        {/* Video Tutorial Modal — unmounted when closed, so NO background playing! */}
+        {tutorialOpen && embedTutorialUrl && (
           <div
-            className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl animate-pop"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-fade"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tutorial-title"
           >
-            <div className="flex items-center justify-between mb-4">
-              <h2 id="tutorial-title" className="text-lg font-bold text-slate-900">
-                How to Pay / እንዴት ክፍያ እንደሚሰር
-              </h2>
-              <button
-                type="button"
-                onClick={() => setTutorialOpen(false)}
-                className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100"
-                aria-label="Close tutorial"
-              >
-                <XCircle className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="aspect-video w-full rounded-xl bg-slate-100 overflow-hidden">
-              <iframe
-                src={tutorialUrl}
-                title="Payment tutorial"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-                className="w-full h-full"
-              />
-            </div>
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={tutorialSeen}
-                  onChange={() => setTutorialSeen(!tutorialSeen)}
-                  className="rounded text-brand-600 focus:ring-brand-500"
+            <div
+              className="relative w-full max-w-2xl rounded-3xl bg-white p-5 sm:p-6 shadow-2xl animate-pop overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Video className="h-5 w-5 text-red-600" />
+                  <div>
+                    <h2 id="tutorial-title" className="text-base font-bold text-slate-900">
+                      Payment Tutorial / የክፍያ አጋዥ ቪዲዮ
+                    </h2>
+                    <p className="text-[11px] text-slate-400">
+                      Learn how to pay your student fee step by step.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCloseTutorial(false)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 transition"
+                  aria-label="Skip tutorial"
+                >
+                  <span>Skip / ዝለል</span>
+                  <X className="h-4 w-4 text-slate-500" />
+                </button>
+              </div>
+
+              <div className="aspect-video w-full rounded-2xl bg-black overflow-hidden shadow-inner">
+                <iframe
+                  src={embedTutorialUrl}
+                  title="Payment tutorial"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  className="h-full w-full border-0"
                 />
-                <span>Don't show again / እንደገና አትይዘው</span>
-              </label>
-              <button
-                type="button"
-                onClick={() => setTutorialOpen(false)}
-                className="rounded-xl bg-brand-600 px-4 py-2 text-xs font-bold text-white hover:bg-brand-700"
-              >
-                Got it, Start Paying / ተረጋግጧል ክፍያን እጀምር
-              </button>
+              </div>
+
+              <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-100">
+                <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={dontShowTutorialAgain}
+                    onChange={(e) => setDontShowTutorialAgain(e.target.checked)}
+                    className="rounded text-brand-600 focus:ring-brand-500"
+                  />
+                  <span>Don't show this again / እንደገና አታሳየኝ</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => handleCloseTutorial(false)}
+                  className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-brand-700 transition"
+                >
+                  <span>Continue to Payment / ወደ ክፍያ ይቀጥሉ</span>
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Main Card */}
         <div className="rounded-3xl border border-slate-200/80 bg-white p-6 sm:p-8 shadow-xl">
@@ -513,7 +706,7 @@ export default function MonthlyPaymentPortal() {
                   Monthly Fee Amount / ወርሃዊ ክፍያ
                 </p>
                 <p className="mt-1 font-mono text-3xl font-extrabold text-slate-900">
-                  {cycle.amountEtb} <span className="text-sm font-normal text-slate-500">ETB</span>
+                  {cycle.totalAmountEtb || cycle.amountEtb} <span className="text-sm font-normal text-slate-500">ETB</span>
                 </p>
                 <div className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700">
                   <Clock className="h-3.5 w-3.5 text-brand-600" />
@@ -568,14 +761,14 @@ export default function MonthlyPaymentPortal() {
                 </button>
               </form>
 
-              <button
-                type="button"
-                onClick={handleReturnToYear}
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-              >
-                <ChevronDown className="h-3.5 w-3.5" />
-                <span>Back to Year Selection / ወደ ዓመት መርጫ ተመለስ</span>
-              </button>
+              <div className="pt-2 text-center">
+                <Link
+                  to="/monthly-payments"
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-brand-600 transition"
+                >
+                  <span>← Choose another academic year or month / ሌላ ወር ይምረጡ</span>
+                </Link>
+              </div>
             </div>
           )}
 
@@ -610,7 +803,7 @@ export default function MonthlyPaymentPortal() {
                       <span className="font-mono font-bold">{chargeData.baseAmountEtb} ETB</span>
                     </div>
                     <div className="flex justify-between text-rose-600 font-semibold">
-                      <span>Overdue Penalty ({chargeData.daysOverdue} days) / የዘገየ ቅጣት ({chargeData.daysOverdue} ቀናት):</span>
+                      <span>Overdue Penalty ({chargeData.daysOverdue} days) / የዘገየ ቅጣት:</span>
                       <span className="font-mono">+{chargeData.overduePenaltyEtb} ETB</span>
                     </div>
                     <div className="border-t border-slate-200 pt-1.5 flex justify-between font-bold text-slate-900 text-sm">
@@ -668,25 +861,23 @@ export default function MonthlyPaymentPortal() {
                 </button>
               </div>
 
-              <div className="flex justify-start gap-2">
+              <div className="flex items-center justify-between gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setStep('login')}
-                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 transition"
                 >
                   ← Back to ID / ተመለስ
                 </button>
-                <button
-                  type="button"
-                  onClick={handleReturnToYear}
-                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                <Link
+                  to="/monthly-payments"
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 transition"
                 >
-                  Year Selection / ዓመት መርጫ
-                </button>
+                  All Months / ሁሉም ወራት
+                </Link>
               </div>
             </div>
           )}
-
         </div>
 
         {/* Footer */}
