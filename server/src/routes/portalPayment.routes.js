@@ -4,7 +4,7 @@ import {
   getCyclePublicDetails,
   loginStudentPortal,
   verifyPortalReceipt,
-  getPaymentConfirmation,
+  getChapaPaymentResult,
   initializeChapaPortalPayment,
   verifyChapaPortalPayment,
 } from '../controllers/portalPayment.controller.js';
@@ -42,6 +42,7 @@ router.post('/:hash/chapa/initialize', portalLoginLimiter, initializeChapaPortal
 router.post('/chapa/verify', portalVerifyLimiter, verifyChapaPortalPayment);
 router.post('/:hash/chapa/verify', portalVerifyLimiter, verifyChapaPortalPayment);
 router.get('/chapa/verify', portalVerifyLimiter, verifyChapaPortalPayment);
-router.get('/done/:doneHash', getPaymentConfirmation);
+// Unified payment result page: Chapa (PaymentAttempt._id) and CBE/cash (Payment.doneHash)
+router.get('/done/:paymentId', getChapaPaymentResult);
 
 export default router;

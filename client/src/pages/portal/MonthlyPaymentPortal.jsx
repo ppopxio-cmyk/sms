@@ -195,6 +195,13 @@ export default function MonthlyPaymentPortal() {
         toast.error(data.message || 'Unable to initialize online checkout with Chapa. Please verify payment configuration.');
         return;
       }
+      if (data.status === 'already_paid') {
+        toast.success(data.message || 'This monthly fee has already been paid and confirmed.');
+        if (data.doneHash) {
+          navigate(`/monthly-payments/done/${data.doneHash}`);
+        }
+        return;
+      }
       if (data.checkoutUrl) {
         window.location.href = data.checkoutUrl;
       } else {

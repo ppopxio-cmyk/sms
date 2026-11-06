@@ -369,9 +369,9 @@ export const initializeChapaPortalPayment = asyncHandler(async (req, res) => {
   const amountEtb = (lateFee.totalAmountSantim / 100).toFixed(2);
 
   const clientOrigin = env.CLIENT_ORIGIN || 'https://sms-two-kappa.vercel.app';
-  const returnUrl = `${clientOrigin}/monthly-payments/chapa-verify?tx_ref=${encodeURIComponent(txRef)}&hash=${encodeURIComponent(cycle.portalHash)}`;
 
-  await PaymentAttempt.create({
+  // Create PaymentAttempt FIRST so we can use its _id in the return URL
+  const attempt = await PaymentAttempt.create({
     charge: charge._id,
     cycle: cycle._id,
     student: studentDoc._id,
@@ -381,6 +381,8 @@ export const initializeChapaPortalPayment = asyncHandler(async (req, res) => {
     result: 'pending_verification',
     ipAddress: req.ip || '',
   });
+
+  const returnUrl = `${clientOrigin}/monthly-payments/done/${attempt._id}`;
 
   const nameParts = (studentDoc.fullName || `${studentDoc.firstName} ${studentDoc.lastName}`).trim().split(' ');
   const firstName = nameParts[0] || 'Student';
@@ -411,6 +413,7 @@ export const initializeChapaPortalPayment = asyncHandler(async (req, res) => {
     status: 'success',
     checkoutUrl: chapaRes.checkoutUrl,
     txRef,
+    paymentId: attempt._id,
   });
 });
 
@@ -552,3 +555,148 @@ export const chapaWebhookHandler = asyncHandler(async (req, res) => {
 
   res.status(200).json({ status: 'success' });
 });
+
+/**
+ * 8. GET /api/portal/monthly-payments/done/:paymentId
+ * Unified payment result page. Works for BOTH:
+ *   - Chapa payments (redirected here by Chapa after checkout, keyed by PaymentAttempt._id)
+ *   - CBE/cash/manual payments (existing flow, keyed by Payment.doneHash)
+ *
+ * The browser redirect is NEVER proof of payment. This endpoint:
+ *   1. Looks up the PaymentAttempt (Chapa) or Payment (CBE) by its ID.
+ *   2. If already confirmed in MongoDB, returns success immediately.
+ *   3. If not confirmed, performs server-side Chapa verification using the existing
+ *      payment reference and secret key. Never trusts URL parameters.
+ *   4. Validates tx_ref, amount, currency and successful status before marking paid.
+ *   5. Returns Pending if Chapa has not confirmed the payment yet.
+ *   6. Never creates duplicate payment records or duplicate student charges.
+ */
+export const getChapaPaymentResult = asyncHandler(async (req, res) => {
+  const { paymentId } = req.params;
+
+  if (!paymentId || !String(paymentId).trim()) {
+    throw new AppError(400, 'PAYMENT_ID_REQUIRED', 'Payment reference is required.');
+  }
+
+  const cleanId = String(paymentId).trim();
+
+  // 1. Try Chapa flow: PaymentAttempt keyed by its _id
+  const attempt = await PaymentAttempt.findById(cleanId)
+    .populate({
+      path: 'charge',
+      populate: { path: 'cycle', populate: { path: 'student' } },
+    })
+    .lean();
+
+  if (attempt) {
+    const charge = attempt.charge;
+    const cycle = charge?.cycle;
+    const student = cycle?.student;
+
+    // Already confirmed in MongoDB — return immediately
+    if (charge?.status === 'paid' && charge.payment) {
+      const payment = await Payment.findById(charge.payment).lean();
+      if (payment) {
+        return res.json({
+          status: 'success',
+          alreadyPaid: true,
+          confirmation: buildConfirmation(payment, charge, cycle, student),
+        });
+      }
+    }
+
+    // Not confirmed — perform server-side Chapa verification
+    const txRef = attempt.parsedReference;
+    if (!txRef) {
+      return res.json({
+        status: 'pending',
+        message: 'Payment reference not yet recorded. Please try again shortly.',
+      });
+    }
+
+    const chapaVerifyRes = await verifyChapaTransaction(txRef);
+    if (chapaVerifyRes.status !== 200 || !chapaVerifyRes.data) {
+      return res.json({
+        status: 'pending',
+        message: 'Chapa has not confirmed this payment yet. Please try again in a moment.',
+      });
+    }
+
+    const verifiedData = chapaVerifyRes.data?.data || chapaVerifyRes.data;
+    const processResult = await processVerifiedChapaPayment({
+      txRef,
+      verifiedData,
+      ipAddress: req.ip || '',
+    });
+
+    if (processResult.status === 'success') {
+      const payment = await Payment.findById(processResult.payment?._id || processResult.payment).lean();
+      return res.json({
+        status: 'success',
+        alreadyPaid: processResult.alreadyPaid || false,
+        confirmation: buildConfirmation(payment, charge, cycle, student),
+      });
+    }
+
+    if (processResult.status === 'pending') {
+      return res.status(202).json({
+        status: 'pending',
+        message: processResult.message || 'Payment is still being processed by Chapa.',
+      });
+    }
+
+    return res.status(400).json({
+      status: 'failed',
+      message: processResult.message || 'Payment verification failed.',
+    });
+  }
+
+  // 2. Fallback: CBE/cash/manual flow keyed by Payment.doneHash
+  const payment = await Payment.findOne({ doneHash: cleanId })
+    .populate('charge')
+    .populate('cycle')
+    .populate('student')
+    .lean();
+
+  if (!payment) {
+    throw new AppError(404, 'PAYMENT_NOT_FOUND', 'Payment confirmation not found or payment was reversed.');
+  }
+
+  const charge = payment.charge || null;
+  const cycle = payment.cycle || null;
+  const student = payment.student || null;
+
+  res.json({
+    status: payment.status === 'confirmed' ? 'success' : 'failed',
+    confirmation: buildConfirmation(payment, charge, cycle, student),
+  });
+});
+
+function buildConfirmation(payment, charge, cycle, student) {
+  if (!payment) return null;
+  return {
+    receiptNumber: payment.receiptNumber,
+    amountSantim: payment.amount,
+    amountEtb: (payment.amount / 100).toFixed(2),
+    paidAt: payment.paidAt,
+    method: payment.method,
+    bankReference: payment.bankReference,
+    payerName: payment.payerName,
+    chapaReference: payment.chapaReference || null,
+    chapaReceiptUrl: payment.chapaReceiptUrl || null,
+    student: student
+      ? {
+          studentId: student.studentId,
+          fullName: student.fullName,
+        }
+      : null,
+    cycle: cycle
+      ? {
+          title: cycle.title,
+          ethYear: cycle.ethYear,
+          ethMonth: cycle.ethMonth,
+        }
+      : null,
+    bank: cycle?.bank || null,
+  };
+}

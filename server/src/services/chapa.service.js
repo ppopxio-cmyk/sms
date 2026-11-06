@@ -284,6 +284,11 @@ export async function processVerifiedChapaPayment({ txRef, verifiedData, ipAddre
   const receiptNumber = `REC-${ethYear}-${String(count + 1).padStart(4, '0')}-${randSuffix}`;
   const doneHash = crypto.randomBytes(16).toString('hex');
 
+  // Chapa's own transaction reference ID (e.g. CHAPA-REF-999) — used to build the
+  // official Chapa receipt URL: https://chapa.link/payment-receipt/{chapaReference}
+  const chapaReference = String(verifiedData.reference || verifiedData.tx_ref || txRef).trim();
+  const chapaReceiptUrl = `https://checkout.chapa.co/checkout/test-payment-receipt/${encodeURIComponent(chapaReference)}`;
+
   // Create append-only confirmed Payment record
   const payment = await Payment.create({
     receiptNumber,
@@ -295,6 +300,8 @@ export async function processVerifiedChapaPayment({ txRef, verifiedData, ipAddre
     bankReference: verifiedData.reference || txRef,
     doneHash,
     status: 'confirmed',
+    chapaReference,
+    chapaReceiptUrl,
     payerName: `${verifiedData.first_name || ''} ${verifiedData.last_name || ''}`.trim() || student.fullName,
     cbeData: verifiedData,
     paidAt: verifiedData.created_at ? new Date(verifiedData.created_at) : new Date(),

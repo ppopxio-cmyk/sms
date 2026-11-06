@@ -3,76 +3,115 @@ import { useParams, Link } from 'react-router-dom';
 import {
   CheckCircle2,
   Printer,
-  Download,
+  ExternalLink,
   Building2,
   Calendar,
   FileCheck2,
   Loader2,
   AlertCircle,
-  Share2,
+  Clock,
+  RotateCcw,
 } from 'lucide-react';
 import Brand from '../../components/ui/Brand';
 import { formatEthiopian } from '../../lib/ethiopianDate';
 
 export default function MonthlyPaymentDone() {
-  const { doneHash } = useParams();
+  const { paymentId } = useParams();
   const [loading, setLoading] = useState(true);
   const [confirmation, setConfirmation] = useState(null);
+  const [status, setStatus] = useState('pending'); // 'success' | 'pending' | 'failed'
+  const [message, setMessage] = useState('');
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    async function fetchDone() {
-      setLoading(true);
-      setError(false);
+    let timer = null;
+
+    async function fetchPaymentStatus() {
       try {
-        const res = await fetch(`/api/portal/monthly-payments/done/${doneHash}`);
-        if (!res.ok) {
-          setError(true);
+        const res = await fetch(`/api/portal/monthly-payments/done/${paymentId}`);
+        const data = await res.json();
+
+        if (res.status === 202 || data.status === 'pending') {
+          setStatus('pending');
+          setMessage(data.message || 'Payment is still being processed by Chapa. Checking again shortly...');
+          setLoading(false);
+          // Auto-refresh status every 4 seconds if pending
+          timer = setTimeout(fetchPaymentStatus, 4000);
           return;
         }
-        const data = await res.json();
-        setConfirmation(data.confirmation);
-      } catch (err) {
+
+        if (res.ok && data.status === 'success' && data.confirmation) {
+          setConfirmation(data.confirmation);
+          setStatus('success');
+          setLoading(false);
+          return;
+        }
+
+        setStatus('failed');
+        setMessage(data.message || 'Payment verification was unsuccessful.');
         setError(true);
-      } finally {
+        setLoading(false);
+      } catch {
+        setStatus('failed');
+        setMessage('Network error while verifying payment status.');
+        setError(true);
         setLoading(false);
       }
     }
-    if (doneHash) {
-      fetchDone();
+
+    if (paymentId) {
+      fetchPaymentStatus();
     }
-  }, [doneHash]);
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [paymentId]);
 
   const handlePrint = () => {
     window.print();
   };
 
-  if (loading) {
+  if (loading || status === 'pending') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-brand-600" />
-          <p className="text-sm font-medium text-slate-500">Loading payment receipt...</p>
+        <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm space-y-4">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
+            <Loader2 className="h-8 w-8 animate-spin" />
+          </div>
+          <div>
+            <h1 className="text-xl font-black text-slate-900">
+              {status === 'pending' ? 'Waiting for Chapa Confirmation...' : 'Verifying Payment Result...'}
+            </h1>
+            <p className="mt-2 text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
+              {message || 'Communicating with payment gateway and college ledger. This page will update automatically.'}
+            </p>
+          </div>
         </div>
       </div>
     );
   }
 
-  if (error || !confirmation) {
+  if (error || status === 'failed' || !confirmation) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
-        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-          <AlertCircle className="mx-auto h-12 w-12 text-slate-400" />
-          <h1 className="mt-4 text-xl font-bold text-slate-800">Receipt Not Found</h1>
-          <p className="mt-2 text-sm text-slate-500">
-            This payment confirmation record could not be found or has been reversed.
-          </p>
-          <div className="mt-6">
+        <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm space-y-4">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-rose-50 text-rose-600">
+            <AlertCircle className="h-8 w-8" />
+          </div>
+          <div>
+            <h1 className="text-xl font-black text-slate-900">Payment Not Completed</h1>
+            <p className="mt-2 text-xs text-rose-600 font-medium max-w-xs mx-auto">
+              "{message || 'The transaction was cancelled, failed, or could not be verified.'}"
+            </p>
+          </div>
+          <div className="pt-2">
             <Link
-              to="/login"
-              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800"
+              to="/"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 py-3 text-xs font-bold text-white hover:bg-slate-800 transition"
             >
-              Go to Login
+              <RotateCcw className="h-4 w-4" />
+              <span>Return to Portal</span>
             </Link>
           </div>
         </div>
@@ -83,17 +122,28 @@ export default function MonthlyPaymentDone() {
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-10 sm:px-6 print:bg-white print:p-0">
       <div className="mx-auto max-w-xl">
-        {/* Print & share toolbar (hidden during print) */}
+        {/* Print & external receipt toolbar (hidden during print) */}
         <div className="mb-4 flex items-center justify-between print:hidden">
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handlePrint}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 cursor-pointer"
             >
               <Printer className="h-4 w-4 text-slate-500" />
               <span>Print Receipt</span>
             </button>
+            {confirmation.chapaReceiptUrl && (
+              <a
+                href={confirmation.chapaReceiptUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition"
+              >
+                <ExternalLink className="h-4 w-4" />
+                <span>View Chapa Official Receipt</span>
+              </a>
+            )}
           </div>
         </div>
 
@@ -183,11 +233,20 @@ export default function MonthlyPaymentDone() {
               </div>
 
               <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
-                <span>Bank Reference (CBE FT / Token)</span>
+                <span>Transaction Reference (Chapa / Bank)</span>
                 <span className="font-mono font-medium text-slate-800">
                   {confirmation.bankReference}
                 </span>
               </div>
+
+              {confirmation.chapaReference && (
+                <div className="mt-1.5 flex items-center justify-between text-xs text-slate-500">
+                  <span>Chapa Reference ID</span>
+                  <span className="font-mono font-medium text-emerald-700">
+                    {confirmation.chapaReference}
+                  </span>
+                </div>
+              )}
 
               <div className="mt-1.5 flex items-center justify-between text-xs text-slate-500">
                 <span>Payer Name on Record</span>

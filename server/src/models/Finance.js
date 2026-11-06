@@ -106,6 +106,9 @@ const paymentSchema = new mongoose.Schema(
     recordedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     payerName: { type: String, default: '', trim: true },
     receiptUrl: { type: String, default: '', trim: true },
+    // Chapa-specific fields (only populated for chapa payments)
+    chapaReference: { type: String, default: '', trim: true, index: true }, // Chapa's own transaction reference
+    chapaReceiptUrl: { type: String, default: '', trim: true }, // https://chapa.link/payment-receipt/{chapaReference}
     cbeData: { type: mongoose.Schema.Types.Mixed, default: null },
     paidAt: { type: Date, default: Date.now },
   },

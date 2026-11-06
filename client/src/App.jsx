@@ -79,7 +79,6 @@ const RegistrarNotifications = lazy(() => import('./pages/registrar/RegistrarNot
 const PublicVerification = lazy(() => import('./pages/PublicVerification.jsx'));
 const MonthlyPaymentPortal = lazy(() => import('./pages/portal/MonthlyPaymentPortal.jsx'));
 const MonthlyPaymentDone = lazy(() => import('./pages/portal/MonthlyPaymentDone.jsx'));
-const ChapaVerifyPage = lazy(() => import('./pages/portal/ChapaVerifyPage.jsx'));
 const PublicRegistrationPortal = lazy(() => import('./pages/portal/PublicRegistrationPortal.jsx'));
 const ApplicationTrackingPage = lazy(() => import('./pages/portal/ApplicationTrackingPage.jsx'));
 const FinanceDashboard = lazy(() => import('./pages/finance/FinanceDashboard.jsx'));
@@ -182,9 +181,8 @@ export default function App() {
         <Route path="/assesmets" element={<PublicAssessment />} />
         <Route path="/monthly-payments/:hash" element={<MonthlyPaymentPortal />} />
         <Route path="/monthly-payment/:hash" element={<MonthlyPaymentPortal />} />
-        <Route path="/monthly-payments/done/:doneHash" element={<MonthlyPaymentDone />} />
-        <Route path="/monthly-payment/done/:doneHash" element={<MonthlyPaymentDone />} />
-        <Route path="/monthly-payments/chapa-verify" element={<ChapaVerifyPage />} />
+        <Route path="/monthly-payments/done/:paymentId" element={<MonthlyPaymentDone />} />
+        <Route path="/monthly-payment/done/:paymentId" element={<MonthlyPaymentDone />} />
         <Route path="/register/:portalId" element={<PublicRegistrationPortal />} />
         <Route path="/application/track" element={<ApplicationTrackingPage />} />
 
