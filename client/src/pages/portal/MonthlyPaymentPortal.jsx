@@ -306,8 +306,8 @@ export default function MonthlyPaymentPortal() {
                         <Calendar className="h-6 w-6" />
                       </div>
                       <div>
-                        <h2 className="text-lg font-bold text-slate-900">{y.ethYear} EC Academic Year</h2>
-                        <p className="text-xs text-slate-500">{y.months.length} month cycle{s} available</p>
+<h2 className="text-lg font-bold text-slate-900">{y.ethYear} EC Academic Year</h2>
+                    <p className="text-xs text-slate-500">{y.months.length} month cycle{y.months.length === 1 ? '' : 's'} available</p>
                       </div>
                     </div>
                     <button

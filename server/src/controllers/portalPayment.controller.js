@@ -47,7 +47,9 @@ export const getCyclePublicDetails = asyncHandler(async (req, res) => {
       { slug: cleanHash },
       { slug: cleanHash.replace(/_/g, '-') },
     ],
-    status: 'open',
+    // Students can still pay overdue months on a closed cycle — the portal stays
+    // reachable for open and closed cycles alike (drafts are never public).
+    status: { $in: ['open', 'closed'] },
     deletedAt: null,
   }).lean();
 
@@ -563,7 +565,7 @@ export const chapaWebhookHandler = asyncHandler(async (req, res) => {
  * portal (slug e.g. tikimt-2019) and pay by ID.
  */
 export const listPublicPaymentCycles = asyncHandler(async (_req, res) => {
-  const cycles = await PaymentCycle.find({ deletedAt: null })
+  const cycles = await PaymentCycle.find({ deletedAt: null, status: { $in: ['open', 'closed'] } })
     .sort({ ethYear: -1, ethMonth: 1 })
     .lean();
 

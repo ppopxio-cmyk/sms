@@ -175,7 +175,7 @@ export default function MonthlyPaymentDone() {
         </div>
 
         {/* Printable Official Receipt Card */}
-        <div className="overflow-hidden rounded-3xl border border-slate-200/90 bg-white shadow-sm print:rounded-none print:border-none print:shadow-none">
+        <div className="overflow-hidden rounded-3xl border border-slate-200/90 bg-white shadow-sm print:rounded-none print:border-none print:shadow-none print-receipt">
           {/* Top Banner */}
           <div className="border-b border-slate-200 bg-white p-6 text-center">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-slate-300">

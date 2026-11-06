@@ -113,15 +113,18 @@ export default function FinanceLedger() {
   const handleVerifyReceipt = async () => {
     if (!verifyReceiptNumber.trim()) return;
     setVerifying(true);
+    setVerifyResult(null);
+    setVerifyError('');
     try {
-      const res = await api.get(`/finance/payments/verify/${verifyReceiptNumber.trim()}`);
-      if (res.ok && res.data?.verification) {
-        setVerifyResult(res.data);
+      const res = await fetch(`/api/finance/payments/verify/${verifyReceiptNumber.trim()}`);
+      const data = await res.json();
+      if (res.ok && data?.verification) {
+        setVerifyResult(data);
       } else {
-        toast.error(res.data?.message || 'Receipt not found.');
+        setVerifyError(data?.message || 'No payment found with that receipt number.');
       }
-    } catch (err) {
-      toast.error(errorMessage(err, 'Network error while verifying receipt.'));
+    } catch {
+      setVerifyError('Network error while verifying receipt.');
     } finally {
       setVerifying(false);
     }
@@ -129,11 +132,30 @@ export default function FinanceLedger() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Official Payments Ledger"
-        subtitle="Append-only record of confirmed student fee settlements, digital receipts, and audit trail of payment reversals."
-        icon={BookOpen}
-      />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <PageHeader
+            title="Official Payments Ledger"
+            subtitle="Append-only record of confirmed student fee settlements, digital receipts, and audit trail of payment reversals."
+            icon={BookOpen}
+          />
+        </div>
+
+        {/* Receipt verification stays visible at the top of the ledger page. */}
+        <Button
+          variant="primary"
+          size="sm"
+          className="shrink-0 self-start"
+          onClick={() => {
+            setVerifyReceiptNumber('');
+            setVerifyResult(null);
+            setVerifyOpen(true);
+          }}
+        >
+          <SearchCheck className="h-4 w-4" />
+          <span>Verify by Receipt #</span>
+        </Button>
+      </div>
 
       {/* Cascading Academic Filter: Batch -> Department -> Programme */}
       <AccountantAcademicFilter
@@ -210,18 +232,6 @@ export default function FinanceLedger() {
               <span>Refresh</span>
             </Button>
 
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                setVerifyReceiptNumber('');
-                setVerifyResult(null);
-                setVerifyOpen(true);
-              }}
-            >
-              <SearchCheck className="h-4 w-4" />
-              <span>Verify by Receipt #</span>
-            </Button>
           </div>
         </CardBody>
       </Card>
@@ -380,8 +390,8 @@ export default function FinanceLedger() {
         title="Official Payment Receipt"
         size="md"
       >
-        {activePayment && (
-          <div className="space-y-5 print:p-0">
+{activePayment && (
+            <div className="print-receipt space-y-5 print:p-0">
             <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 text-center">
               <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
                 <CheckCircle2 className="h-6 w-6" />

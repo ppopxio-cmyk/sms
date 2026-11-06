@@ -386,6 +386,26 @@ body {
   .print\:bg-white {
     background: white !important;
   }
+
+  /* POS-style: when printing a page that contains a .print-receipt, print ONLY the
+     receipt and nothing else on the page (no toolbars, no headers, no sidebars). */
+  body > *:not(.print-receipt):not(.print-receipt *) {
+    display: none !important;
+  }
+
+  .print-receipt {
+    display: block !important;
+    max-width: 80mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: 11px !important;
+    color: black !important;
+  }
+
+  .print-receipt * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
 }
 
 /* Scrollbars, but only where they are ours */
