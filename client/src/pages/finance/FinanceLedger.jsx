@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Building2,
   Calendar,
+  SearchCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../../lib/api';
@@ -47,6 +48,12 @@ export default function FinanceLedger() {
   // Reversal Modal
   const [reversingPayment, setReversingPayment] = useState(null);
   const [reversalReason, setReversalReason] = useState('');
+
+  // Verify by Receipt Number Modal
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [verifyReceiptNumber, setVerifyReceiptNumber] = useState('');
+  const [verifyResult, setVerifyResult] = useState(null);
+  const [verifying, setVerifying] = useState(false);
 
   const handleApplyFilter = () => {
     setIsFilterApplied(true);
@@ -101,6 +108,23 @@ export default function FinanceLedger() {
 
   const handlePrintModal = () => {
     window.print();
+  };
+
+  const handleVerifyReceipt = async () => {
+    if (!verifyReceiptNumber.trim()) return;
+    setVerifying(true);
+    try {
+      const res = await api.get(`/finance/payments/verify/${verifyReceiptNumber.trim()}`);
+      if (res.ok && res.data?.verification) {
+        setVerifyResult(res.data);
+      } else {
+        toast.error(res.data?.message || 'Receipt not found.');
+      }
+    } catch (err) {
+      toast.error(errorMessage(err, 'Network error while verifying receipt.'));
+    } finally {
+      setVerifying(false);
+    }
   };
 
   return (
@@ -184,6 +208,19 @@ export default function FinanceLedger() {
             >
               <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
               <span>Refresh</span>
+            </Button>
+
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setVerifyReceiptNumber('');
+                setVerifyResult(null);
+                setVerifyOpen(true);
+              }}
+            >
+              <SearchCheck className="h-4 w-4" />
+              <span>Verify by Receipt #</span>
             </Button>
           </div>
         </CardBody>
@@ -469,6 +506,129 @@ export default function FinanceLedger() {
             </div>
           </form>
         )}
+      </Modal>
+
+      {/* VERIFY BY RECEIPT NUMBER MODAL */}
+      <Modal
+        open={verifyOpen}
+        onClose={() => {
+          setVerifyOpen(false);
+          setVerifyReceiptNumber('');
+          setVerifyResult(null);
+        }}
+        title="Verify Payment by Receipt Number"
+        size="md"
+      >
+        <div className="space-y-4">
+          {!verifyResult ? (
+            <div>
+              <p className="text-xs text-slate-500 mb-4">
+                Enter an official receipt number to verify the payment details.
+              </p>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleVerifyReceipt();
+                }}
+                className="space-y-3"
+              >
+                <div>
+                  <label className="block text-xs font-semibold uppercase text-slate-600">
+                    Receipt Number
+                  </label>
+                  <input
+                    type="text"
+                    value={verifyReceiptNumber}
+                    onChange={(e) => setVerifyReceiptNumber(e.target.value.trim().toUpperCase())}
+                    placeholder="e.g. RCP-2019-001234"
+                    required
+                    className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm text-slate-800"
+                    autoFocus
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="outline" type="button" onClick={() => setVerifyOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    className="bg-brand-600 text-white hover:bg-brand-700"
+                    disabled={verifying || !verifyReceiptNumber.trim()}
+                  >
+                    {verifying ? 'Verifying...' : 'Verify Receipt'}
+                  </Button>
+                </div>
+              </form>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <div className="flex items-center gap-2 text-emerald-700">
+                  <CheckCircle2 className="h-5 w-5" />
+                  <span className="font-bold">Payment Verified / ክፍያ ተገርቧል</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-xs">
+                <div>
+                  <span className="text-slate-400">Receipt Number:</span>
+                  <p className="font-mono font-bold text-slate-800">{verifyResult.verification.receiptNumber}</p>
+                </div>
+                <div>
+                  <span className="text-slate-400">Status:</span>
+                  <p className="font-bold text-emerald-700">{verifyResult.verification.status.toUpperCase()}</p>
+                </div>
+                <div>
+                  <span className="text-slate-400">Student:</span>
+                  <p className="font-bold text-slate-800">{verifyResult.verification.student?.fullName || '—'}</p>
+                  <p className="font-mono text-[11px] text-slate-500">{verifyResult.verification.student?.studentId || '—'}</p>
+                </div>
+                <div>
+                  <span className="text-slate-400">Programme:</span>
+                  <p className="font-medium text-slate-800">{verifyResult.verification.student?.programme || '—'}</p>
+                </div>
+                <div>
+                  <span className="text-slate-400">Cycle:</span>
+                  <p className="font-medium text-slate-800">{verifyResult.verification.cycle?.title || '—'}</p>
+                </div>
+                <div>
+                  <span className="text-slate-400">Paid At:</span>
+                  <p className="font-medium text-slate-800">{formatEthiopian(verifyResult.verification.paidAt, { time: true })}</p>
+                </div>
+                <div>
+                  <span className="text-slate-400">Method:</span>
+                  <p className="font-medium text-slate-800">{verifyResult.verification.method.toUpperCase()}</p>
+                </div>
+                <div>
+                  <span className="text-slate-400">Bank Ref:</span>
+                  <p className="font-mono text-xs text-slate-800">{verifyResult.verification.bankReference}</p>
+                </div>
+                {verifyResult.verification.chapaReference && (
+                  <div>
+                    <span className="text-slate-400">Chapa Ref:</span>
+                    <p className="font-mono text-xs text-emerald-700">{verifyResult.verification.chapaReference}</p>
+                  </div>
+                )}
+                <div>
+                  <span className="text-slate-400">Amount:</span>
+                  <p className="font-mono text-sm font-bold text-slate-900">{verifyResult.verification.amountEtb} ETB</p>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" type="button" onClick={() => {
+                  setVerifyResult(null);
+                  setVerifyReceiptNumber('');
+                }}>
+                  Verify Another
+                </Button>
+                <Button variant="outline" onClick={() => setVerifyOpen(false)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
       </Modal>
     </div>
   );

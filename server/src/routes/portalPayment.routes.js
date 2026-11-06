@@ -7,6 +7,7 @@ import {
   getChapaPaymentResult,
   initializeChapaPortalPayment,
   verifyChapaPortalPayment,
+  listPublicPaymentCycles,
 } from '../controllers/portalPayment.controller.js';
 
 const router = Router();
@@ -35,6 +36,9 @@ const portalVerifyLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Public cycle listing — students pick an academic year, then a month, then land on
+// that cycle's portal (slug e.g. tikimt-2019) and pay by ID.
+router.get('/', listPublicPaymentCycles);
 router.get('/:hash', getCyclePublicDetails);
 router.post('/:hash/login', portalLoginLimiter, loginStudentPortal);
 router.post('/:hash/verify', portalVerifyLimiter, verifyPortalReceipt);

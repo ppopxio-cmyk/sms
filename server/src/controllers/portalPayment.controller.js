@@ -557,7 +557,42 @@ export const chapaWebhookHandler = asyncHandler(async (req, res) => {
 });
 
 /**
- * 8. GET /api/portal/monthly-payments/done/:paymentId
+ * 8. GET /api/portal/monthly-payments
+ * Public listing of every payment cycle grouped by Ethiopian academic year.
+ * Students use this to choose a year, then a month, then land on that cycle's
+ * portal (slug e.g. tikimt-2019) and pay by ID.
+ */
+export const listPublicPaymentCycles = asyncHandler(async (_req, res) => {
+  const cycles = await PaymentCycle.find({ deletedAt: null })
+    .sort({ ethYear: -1, ethMonth: 1 })
+    .lean();
+
+  const byYear = {};
+  for (const c of cycles) {
+    const y = String(c.ethYear);
+    if (!byYear[y]) byYear[y] = [];
+    byYear[y].push({
+      ethYear: c.ethYear,
+      ethMonth: c.ethMonth,
+      monthName: ETH_MONTHS[c.ethMonth - 1] || `Month ${c.ethMonth}`,
+      title: c.title,
+      slug: c.slug,
+      portalHash: c.portalHash,
+      status: c.status,
+      opensAt: c.opensAt,
+      dueAt: c.dueAt,
+    });
+  }
+
+  const years = Object.keys(byYear)
+    .sort((a, b) => Number(b) - Number(a))
+    .map((y) => ({ ethYear: Number(y), months: byYear[y] }));
+
+  res.json({ years });
+});
+
+/**
+ * 9. GET /api/portal/monthly-payments/done/:paymentId
  * Unified payment result page. Works for BOTH:
  *   - Chapa payments (redirected here by Chapa after checkout, keyed by PaymentAttempt._id)
  *   - CBE/cash/manual payments (existing flow, keyed by Payment.doneHash)

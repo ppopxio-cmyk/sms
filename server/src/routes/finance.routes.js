@@ -38,6 +38,7 @@ import {
   getStudentProfile,
   getSettings,
   updateSettings,
+  verifyPaymentByReceipt,
 } from '../controllers/finance.controller.js';
 
 const router = Router();
@@ -71,6 +72,7 @@ router.post('/charges/:chargeId/extend', requirePermission('finance:cycles'), ex
 // Ledger & Payments
 router.get('/ledger', requirePermission('finance:view'), listLedger);
 router.post('/payments/:id/reverse', requirePermission('finance:payments'), reversePaymentHandler);
+router.get('/payments/verify/:receiptNumber', requirePermission('finance:view'), verifyPaymentByReceipt);
 
 // Review Queue
 router.get('/review-queue', requirePermission('finance:view'), listReviewQueue);

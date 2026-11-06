@@ -3,7 +3,6 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   CheckCircle2,
   Printer,
-  ExternalLink,
   Building2,
   Calendar,
   FileCheck2,
@@ -12,6 +11,7 @@ import {
   Clock,
   RotateCcw,
   ArrowLeft,
+  Download,
 } from 'lucide-react';
 import Brand from '../../components/ui/Brand';
 import { formatEthiopian } from '../../lib/ethiopianDate';
@@ -152,7 +152,7 @@ export default function MonthlyPaymentDone() {
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-10 sm:px-6 print:bg-white print:p-0">
       <div className="mx-auto max-w-xl">
-        {/* Print & external receipt toolbar (hidden during print) */}
+        {/* Print & PDF download toolbar (hidden during print) */}
         <div className="mb-4 flex items-center justify-between print:hidden">
           <div className="flex items-center gap-2">
             <button
@@ -163,31 +163,28 @@ export default function MonthlyPaymentDone() {
               <Printer className="h-4 w-4 text-slate-500" />
               <span>Print Receipt</span>
             </button>
-            {confirmation.chapaReceiptUrl && (
-              <a
-                href={confirmation.chapaReceiptUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition"
-              >
-                <ExternalLink className="h-4 w-4" />
-                <span>View Chapa Official Receipt</span>
-              </a>
-            )}
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 cursor-pointer"
+            >
+              <Download className="h-4 w-4 text-slate-500" />
+              <span>Save as PDF</span>
+            </button>
           </div>
         </div>
 
         {/* Printable Official Receipt Card */}
         <div className="overflow-hidden rounded-3xl border border-slate-200/90 bg-white shadow-sm print:rounded-none print:border-none print:shadow-none">
           {/* Top Banner */}
-          <div className="border-b border-emerald-100 bg-emerald-50/70 p-6 text-center">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
-              <CheckCircle2 className="h-8 w-8" />
+          <div className="border-b border-slate-200 bg-white p-6 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-slate-300">
+              <CheckCircle2 className="h-8 w-8 text-slate-700" />
             </div>
             <h1 className="mt-3 text-xl font-bold text-slate-900">
               Official Payment Receipt
             </h1>
-            <p className="font-mono text-sm font-semibold text-emerald-800">
+            <p className="font-mono text-sm font-semibold text-slate-700">
               {confirmation.receiptNumber}
             </p>
             <p className="mt-1 text-xs text-slate-500">
@@ -203,7 +200,7 @@ export default function MonthlyPaymentDone() {
                 <p className="mt-1 text-xs text-slate-500">Haramaya Health Science College</p>
               </div>
               <div className="text-right">
-                <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
+                <span className="inline-flex rounded-full border border-slate-300 px-3 py-1 text-xs font-bold text-slate-700">
                   PAID & VERIFIED
                 </span>
                 <p className="mt-1 text-xs text-slate-400">
@@ -294,12 +291,12 @@ export default function MonthlyPaymentDone() {
             </div>
 
             {/* Total Paid banner */}
-            <div className="flex items-center justify-between rounded-2xl bg-brand-50 p-4">
+            <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div>
-                <p className="text-xs font-semibold text-brand-900">Total Settled Amount</p>
-                <p className="text-[11px] text-brand-700">All academic restrictions for this cycle cleared</p>
+                <p className="text-xs font-semibold text-slate-700">Total Settled Amount</p>
+                <p className="text-[11px] text-slate-500">All academic restrictions for this cycle cleared</p>
               </div>
-              <p className="font-mono text-2xl font-extrabold text-brand-700">
+              <p className="font-mono text-2xl font-extrabold text-slate-900">
                 {confirmation.amountEtb} ETB
               </p>
             </div>

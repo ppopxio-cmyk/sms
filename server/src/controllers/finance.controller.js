@@ -540,6 +540,58 @@ export const reversePaymentHandler = asyncHandler(async (req, res) => {
   res.json({ payment });
 });
 
+export const verifyPaymentByReceipt = asyncHandler(async (req, res) => {
+  const { receiptNumber } = req.params;
+  if (!receiptNumber || !String(receiptNumber).trim()) {
+    throw new AppError(400, 'RECEIPT_NUMBER_REQUIRED', 'Receipt number is required.');
+  }
+
+  const payment = await Payment.findOne({ receiptNumber: String(receiptNumber).trim() })
+    .populate('charge')
+    .populate('cycle', 'title ethYear ethMonth')
+    .populate('student', 'studentId fullName department program batch')
+    .lean();
+
+  if (!payment) {
+    throw new AppError(404, 'RECEIPT_NOT_FOUND', 'No payment found with that receipt number.');
+  }
+
+  const charge = payment.charge || null;
+  const cycle = payment.cycle || null;
+  const student = payment.student || null;
+
+  res.json({
+    verification: {
+      receiptNumber: payment.receiptNumber,
+      amountEtb: (payment.amount / 100).toFixed(2),
+      paidAt: payment.paidAt,
+      method: payment.method,
+      bankReference: payment.bankReference,
+      payerName: payment.payerName,
+      status: payment.status,
+      chapaReference: payment.chapaReference || null,
+      chapaReceiptUrl: payment.chapaReceiptUrl || null,
+      student: student
+        ? {
+            studentId: student.studentId,
+            fullName: student.fullName,
+            department: student.department?.name || '',
+            programme: student.program?.name || '',
+            batch: student.batch?.name || '',
+          }
+        : null,
+      cycle: cycle
+        ? {
+            title: cycle.title,
+            ethYear: cycle.ethYear,
+            ethMonth: cycle.ethMonth,
+          }
+        : null,
+      bank: cycle?.bank || null,
+    },
+  });
+});
+
 // 13. Review Queue
 export const listReviewQueue = asyncHandler(async (req, res) => {
   const { result = 'review_required', batchId, departmentId, courseId, programId, page = 1, limit = 25 } = req.query;
