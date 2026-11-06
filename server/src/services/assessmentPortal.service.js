@@ -21,7 +21,7 @@ import {
 } from './imagekit.service.js';
 import { notifyAdmins, notifyUser } from './notification.service.js';
 import { ownFilter } from './registrar.helpers.js';
-import { assertNoFinancialHold, checkStudentFinancialHold } from './finance.service.js';
+import { checkStudentFinancialHold } from './finance.service.js';
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const key = crypto.scryptSync(env.CODE_HMAC_SECRET, 'sms-assessment-portal', 32);
@@ -348,7 +348,6 @@ export async function verifyPortalAccess(hash, payload) {
   const state = portalState(assessment);
   const hold = await checkStudentFinancialHold(student._id);
   const canResubmit =
-    !hold.hasHold &&
     state === 'open' &&
     assessment.allowResubmission !== false &&
     (!submission || submission.status !== 'graded');
@@ -360,11 +359,11 @@ export async function verifyPortalAccess(hash, payload) {
     documentUrl: assessment.portalDocument?.filePath
       ? signedImageUrl(assessment.portalDocument.filePath, { expiresIn: 7200 })
       : null,
-    canSubmit: !hold.hasHold && state === 'open' && (!submission || canResubmit),
+    canSubmit: state === 'open' && (!submission || canResubmit),
     canResubmit: Boolean(submission && canResubmit),
     financialHold: hold.hasHold,
     financialHoldMessage: hold.hasHold
-      ? `Academic hold active: You have ${hold.overdueCount} unpaid monthly fee(s). Please complete your fee payment at /monthly-payments/${hold.overdueCharges[0]?.portalHash || ''} to submit.`
+      ? `Overdue monthly fees (${hold.totalOutstandingEtb} ETB) — official documents (transcript/certificate) remain blocked until cleared.`
       : null,
     paymentLink: hold.hasHold && hold.overdueCharges[0]?.portalHash
       ? `/monthly-payments/${hold.overdueCharges[0].portalHash}`
@@ -378,7 +377,7 @@ export async function receivePortalSubmission(hash, payload, buffer, { ip } = {}
     throw new AppError(409, 'PORTAL_CLOSED', 'This assessment is not accepting submissions any more.');
   }
   const student = await verifiedStudent(assessment, payload.studentNumber, payload.accessCode);
-  await assertNoFinancialHold(student._id, 'submitting this assessment');
+  // Overdue students may still submit assessments; only official documents stay blocked.
   const existing = await AssessmentSubmission.findOne({
     assessment: assessment._id,
     student: student._id,

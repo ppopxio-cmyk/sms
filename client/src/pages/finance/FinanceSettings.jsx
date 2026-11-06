@@ -8,6 +8,7 @@ import {
   Save,
   Loader2,
   Bell,
+  Wallet,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../../lib/api';
@@ -30,16 +31,14 @@ export default function FinanceSettings() {
       daysBefore: [3, 1, 0],
       notifyTeachersOnOverdue: true,
     },
+    monthlyDefaults: {
+      amount: 0,
+    },
     enforcement: {
-      blockAssessments: true,
-      blockTeacherResults: true,
       blockDocuments: true,
       blockGraduation: true,
-      blockRegistration: false,
     },
   });
-
-  // Sandbox Test Tool removed: payments now use Chapa — no CBE verification needed.
 
   const { data, isLoading } = useQuery({
     queryKey: ['finance', 'settings'],
@@ -62,12 +61,12 @@ export default function FinanceSettings() {
           daysBefore: data.reminders?.daysBefore || [3, 1, 0],
           notifyTeachersOnOverdue: data.reminders?.notifyTeachersOnOverdue ?? true,
         },
+        monthlyDefaults: {
+          amount: data.monthlyDefaults?.amount ?? 0,
+        },
         enforcement: {
-          blockAssessments: data.enforcement?.blockAssessments ?? true,
-          blockTeacherResults: data.enforcement?.blockTeacherResults ?? true,
           blockDocuments: data.enforcement?.blockDocuments ?? true,
           blockGraduation: data.enforcement?.blockGraduation ?? true,
-          blockRegistration: data.enforcement?.blockRegistration ?? false,
         },
       });
     }
@@ -93,18 +92,19 @@ export default function FinanceSettings() {
     <div className="space-y-6">
       <PageHeader
         title="Finance Configuration & Verifier Tools"
-        subtitle="Manage default college bank accounts, academic hold enforcement rules, grace periods, and verify live CBE receipts."
+        subtitle="Manage default college bank accounts, monthly payment amounts, grace periods, and academic hold enforcement rules."
         icon={Settings}
       />
 
+      {/* Two cards per row */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Settings Form */}
+        {/* LEFT COLUMN */}
         <div className="space-y-6">
           {/* Default Bank Card */}
           <Card>
             <CardHeader
               title="Official Receiving Bank Account"
-              subtitle="Default CBE bank details used as the target for new payment cycles and CBE receipt verification."
+              subtitle="Default CBE bank details used as the target for new payment cycles and transfers."
               icon={Building2}
             />
             <CardBody className="space-y-4">
@@ -202,31 +202,66 @@ export default function FinanceSettings() {
                     }
                     className="rounded text-brand-600 focus:ring-brand-500"
                   />
-                  <span>Send teachers a class summary notification of students on hold</span>
+                  <span>Send assigned teachers a per-programme notification of overdue students</span>
                 </label>
               </div>
             </CardBody>
           </Card>
+        </div>
 
-          {/* Academic Hold Block Toggles */}
+        {/* RIGHT COLUMN */}
+        <div className="space-y-6">
+          {/* Monthly Payment Defaults */}
           <Card>
             <CardHeader
-              title="Academic Hold Enforcement Rules"
-              subtitle="Select which academic workflows are strictly blocked when a student is on financial hold."
+              title="Monthly Payment Amount"
+              subtitle="Default per-month fee used when creating new payment cycles (per student, in ETB)."
+              icon={Wallet}
+            />
+            <CardBody className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-600">
+                  Default Monthly Fee (ETB)
+                </label>
+                <div className="mt-1 relative">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.monthlyDefaults.amount ? (form.monthlyDefaults.amount / 100).toFixed(2) : ''}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        monthlyDefaults: {
+                          amount: Math.round(Number(e.target.value || 0) * 100),
+                        },
+                      })
+                    }
+                    placeholder="e.g. 500.00"
+                    className="block w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm text-slate-800"
+                  />
+                </div>
+                <p className="mt-1 text-xs text-slate-400">
+                  Saved in centimes ({form.monthlyDefaults.amount}) — {((form.monthlyDefaults.amount || 0) / 100).toFixed(2)} ETB.
+                  Leave blank to have no preset.
+                </p>
+              </div>
+            </CardBody>
+          </Card>
+
+          {/* Academic Hold Enforcement */}
+          <Card>
+            <CardHeader
+              title="Financial Hold Enforcement Rules"
+              subtitle="Overdue students keep full access to classes, assessments, and marks. Choose what stays blocked."
               icon={ShieldCheck}
             />
             <CardBody className="space-y-3">
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-[11px] font-medium text-emerald-700">
+                Always allowed for overdue students: attendance marking, assessment/quiz submission, and course mark sheets.
+              </div>
+
               {[
-                {
-                  key: 'blockAssessments',
-                  label: 'Block Student Assessment / Quiz Submission',
-                  desc: 'Students receive hold warning with payment portal link instead of upload screen.',
-                },
-                {
-                  key: 'blockTeacherResults',
-                  label: 'Block Teacher Results Submission',
-                  desc: 'Displays a lock icon on teacher mark sheets; blocks submitting results for students on hold.',
-                },
                 {
                   key: 'blockDocuments',
                   label: 'Block Certificate, Transcript & ID Card Issuance',
@@ -236,11 +271,6 @@ export default function FinanceSettings() {
                   key: 'blockGraduation',
                   label: 'Block Graduation Evaluation',
                   desc: 'Marks student as ineligible for graduation with reason "Unpaid fees".',
-                },
-                {
-                  key: 'blockRegistration',
-                  label: 'Block New Course Registration (Optional)',
-                  desc: 'Prevent registering into future semester courses until all prior fees are settled.',
                 },
               ].map((item) => (
                 <label
@@ -280,7 +310,6 @@ export default function FinanceSettings() {
             </CardBody>
           </Card>
         </div>
-
       </div>
     </div>
   );

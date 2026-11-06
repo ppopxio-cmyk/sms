@@ -13,6 +13,7 @@ import { CourseOffering, CourseRegistration } from '../models/Offering.js';
 import { SystemSetting } from '../models/SystemSetting.js';
 import { audit } from './audit.service.js';
 import { notifyUsers } from './notification.service.js';
+import { sendFinanceNotification } from './mail.service.js';
 import { AppError } from '../utils/AppError.js';
 import { toEthiopian, ETH_MONTHS, fromEthiopian, parseEATDate } from '../utils/ethiopianDate.js';
 
@@ -130,9 +131,12 @@ export async function getStudentFinancialStatus(studentId) {
   return {
     state,
     hasHold,
-    canAttend: !hasHold,
-    canSubmitAssessments: !hasHold,
-    canSubmitMarks: !hasHold,
+    // Holding policy: overdue students may still attend class, submit assessments
+    // and have course marks entered. Only official document issuance
+    // (transcript / certificate / graduation) stays blocked until cleared.
+    canAttend: true,
+    canSubmitAssessments: true,
+    canSubmitMarks: true,
     canIssueDocuments: !hasHold,
     overdueCount: overdueCharges.length,
     overdueCharges,
@@ -235,7 +239,7 @@ export async function notifyAssignedTeachersHoldStatus(studentId, { isCleared, d
     } else {
       await notifyUsers(teacherIds, {
         title: 'Financial Hold Active',
-        message: `Academic hold active for ${studentName} (${student.studentId}) - ${deptName} / ${progName} ${batchName}. Outstanding fee: ${details?.title || 'Monthly Fee'} (${details?.amountEtb || '0.00'} ETB). Attendance marking and assessment submissions are restricted.`,
+        message: `Financial hold active for ${studentName} (${student.studentId}) - ${deptName} / ${progName} ${batchName}. Outstanding fee: ${details?.title || 'Monthly Fee'} (${details?.amountEtb || '0.00'} ETB). Attendance, assessments and marks continue as normal; official document issuance (transcript/certificate) stays blocked.`,
         type: 'financial_hold',
         link: '/teacher/classes',
       });
@@ -650,8 +654,10 @@ export async function reversePayment(paymentId, reason, userId) {
 /**
  * 10. Waivers
  */
-export async function createWaiver({ chargeId, amount, type = 'full', reason, userId }) {
-  const charge = await StudentCharge.findById(chargeId);
+export async function createWaiver({ chargeId, amount, type = 'full', reason, scholarshipCollege, sendEmail = true, userId }) {
+  const charge = await StudentCharge.findById(chargeId)
+    .populate('cycle', 'title ethYear ethMonth')
+    .populate('student', 'studentId fullName firstName lastName email');
   if (!charge) throw new AppError(404, 'CHARGE_NOT_FOUND', 'Charge not found.');
   if (charge.status === 'paid') {
     throw new AppError(400, 'ALREADY_PAID', 'Cannot waive an already paid charge.');
@@ -660,12 +666,13 @@ export async function createWaiver({ chargeId, amount, type = 'full', reason, us
   const waiverAmount = type === 'full' ? charge.amountDue : Math.round(Number(amount));
 
   const waiver = await Waiver.create({
-    student: charge.student,
-    cycle: charge.cycle,
+    student: charge.student._id,
+    cycle: charge.cycle._id,
     charge: charge._id,
     amount: waiverAmount,
     type,
     reason,
+    scholarshipCollege: scholarshipCollege || '',
     status: 'approved',
     approvedBy: userId,
     approvedAt: new Date(),
@@ -681,10 +688,41 @@ export async function createWaiver({ chargeId, amount, type = 'full', reason, us
   }
   await charge.save();
 
+  // Email confirmation to the student (best-effort; never blocks the waiver itself)
+  const studentEmail = charge.student?.email;
+  if (sendEmail && studentEmail) {
+    try {
+      const monthName = ETH_MONTHS[(charge.cycle.ethMonth || 1) - 1] || 'Unknown month';
+      await sendFinanceNotification({
+        to: studentEmail,
+        name: charge.student.fullName || charge.student.studentId,
+        subject: `Fee waiver approved · ${charge.cycle.title}`,
+        title: 'Fee Waiver Approved',
+        intro: 'Your monthly fee exemption has been officially approved by the Finance Office.',
+        paragraphs: [
+          'You no longer need to pay this month on the student payment portal. This message is your confirmation.',
+        ],
+        rows: [
+          ['Student', `${charge.student.fullName || ''} (${charge.student.studentId || ''})`],
+          ['Fee cycle', `${charge.cycle.title} — ${monthName}`],
+          ['Waiver type', type === 'full' ? 'Full waiver' : 'Partial waiver'],
+          ['Waiver amount', (waiverAmount / 100).toFixed(2) + ' ETB'],
+          ['Reason', reason || '-'],
+          ...(scholarshipCollege ? [['Granted by', scholarshipCollege]] : []),
+        ],
+        footerNote: 'Keep this email for your records. Contact the Finance Office if any detail above looks wrong.',
+      });
+      waiver.emailSentAt = new Date();
+      await waiver.save();
+    } catch {
+      // email failure must not roll back an approved waiver
+    }
+  }
+
   // Notify assigned teachers if student is now fully cleared
-  const postHold = await checkStudentFinancialHold(charge.student);
+  const postHold = await checkStudentFinancialHold(charge.student._id || charge.student);
   if (!postHold.hasHold) {
-    void notifyAssignedTeachersHoldStatus(charge.student, {
+    void notifyAssignedTeachersHoldStatus(charge.student._id || charge.student, {
       isCleared: true,
       details: { title: 'Tuition Fee Exemption', amountEtb: (waiverAmount / 100).toFixed(2) },
     });
@@ -696,7 +734,7 @@ export async function createWaiver({ chargeId, amount, type = 'full', reason, us
     action: 'finance.waiver_created',
     targetType: 'Waiver',
     targetId: waiver._id,
-    meta: { studentId: charge.studentId, amount: waiverAmount, type, reason },
+    meta: { studentId: charge.studentId, amount: waiverAmount, type, reason, scholarshipCollege: scholarshipCollege || '' },
   });
 
   return { waiver, charge };

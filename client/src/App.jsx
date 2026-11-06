@@ -85,6 +85,7 @@ const FinanceDashboard = lazy(() => import('./pages/finance/FinanceDashboard.jsx
 const FinancePaymentCycles = lazy(() => import('./pages/finance/FinancePaymentCycles.jsx'));
 const FinanceCollections = lazy(() => import('./pages/finance/FinanceCollections.jsx'));
 const FinanceLedger = lazy(() => import('./pages/finance/FinanceLedger.jsx'));
+const FinanceAwards = lazy(() => import('./pages/finance/FinanceAwards.jsx'));
 const FinanceAnalytics = lazy(() => import('./pages/finance/FinanceAnalytics.jsx'));
 const FinanceOverdueHolds = lazy(() => import('./pages/finance/FinanceOverdueHolds.jsx'));
 const FinanceWaivers = lazy(() => import('./pages/finance/FinanceWaivers.jsx'));
@@ -281,10 +282,12 @@ export default function App() {
               <Route path="/accountant/cycles" element={<FinancePaymentCycles />} />
               <Route path="/accountant/collections" element={<FinanceCollections />} />
               <Route path="/accountant/ledger" element={<FinanceLedger />} />
+              <Route path="/accountant/awards" element={<FinanceAwards />} />
               <Route path="/accountant/analytics" element={<FinanceAnalytics />} />
               <Route path="/accountant/overdue" element={<FinanceOverdueHolds />} />
               <Route path="/accountant/waivers" element={<FinanceWaivers />} />
-              <Route path="/accountant/students/:id" element={<StudentFinanceProfile />} />
+              <Route path="/accountant/collections/students/:id" element={<StudentFinanceProfile />} />
+              <Route path="/accountant/students/:id" element={<Navigate to="/accountant/collections" replace />} />
               <Route path="/accountant/reports" element={<FinanceReports />} />
               <Route path="/accountant/settings" element={<FinanceSettings />} />
               <Route path="/accountant/my-account" element={<Me />} />

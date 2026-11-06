@@ -10,8 +10,8 @@ export default function AccountantAcademicFilter({
   setSelectedBatch,
   selectedDepartment,
   setSelectedDepartment,
-  selectedCourse,
-  setSelectedCourse,
+  selectedProgram,
+  setSelectedProgram,
   isApplied,
   onApply,
   onReset,
@@ -47,22 +47,32 @@ export default function AccountantAcademicFilter({
 
   const departments = structureData?.departments || [];
   const programs = structureData?.programs || [];
-  const allCourses = structureData?.courses || [];
 
-  // Cascading courses for selected department
-  const filteredCourses = useMemo(() => {
-    if (!selectedDepartment) return allCourses;
-    return allCourses.filter(
-      (c) => String(c.department?.id || c.department?._id || c.department) === String(selectedDepartment)
-    );
-  }, [allCourses, selectedDepartment]);
+  // Cascading programmes for selected batch / department
+  const filteredPrograms = useMemo(() => {
+    let list = programs;
+    if (selectedBatch) {
+      const bDoc = batches.find((b) => String(b.id) === String(selectedBatch));
+      if (bDoc?.program) {
+        list = list.filter((p) => String(p.id) === String(bDoc.program) || String(p._id) === String(bDoc.program));
+      }
+    }
+    if (selectedDepartment) {
+      list = list.filter(
+        (p) =>
+          !p.department ||
+          String(p.department?.id || p.department?._id || p.department) === String(selectedDepartment)
+      );
+    }
+    return list;
+  }, [programs, batches, selectedBatch, selectedDepartment]);
 
   // Handle Batch Change: auto-detect and set Department
   const handleBatchChange = (batchId) => {
     setSelectedBatch(batchId);
     if (!batchId) {
       setSelectedDepartment('');
-      setSelectedCourse('');
+      setSelectedProgram('');
       return;
     }
 
@@ -73,26 +83,28 @@ export default function AccountantAcademicFilter({
       if (deptId) {
         setSelectedDepartment(String(deptId));
       }
+      // Programme is implied by the batch, preselect it
+      setSelectedProgram(String(bDoc.program));
     }
   };
 
   // Handle Department Change
   const handleDepartmentChange = (deptId) => {
     setSelectedDepartment(deptId);
-    // If selected course is not in the new department, reset it
-    if (selectedCourse && deptId) {
-      const stillValid = allCourses.some(
-        (c) =>
-          String(c.id) === String(selectedCourse) &&
-          String(c.department?.id || c.department?._id || c.department) === String(deptId)
+    if (selectedProgram && deptId) {
+      const stillValid = programs.some(
+        (p) =>
+          String(p.id) === String(selectedProgram) &&
+          (!p.department ||
+            String(p.department?.id || p.department?._id || p.department) === String(deptId))
       );
       if (!stillValid) {
-        setSelectedCourse('');
+        setSelectedProgram('');
       }
     }
   };
 
-  const canApply = Boolean(selectedBatch || selectedDepartment || selectedCourse);
+  const canApply = Boolean(selectedBatch || selectedDepartment || selectedProgram);
 
   return (
     <Card className="border-slate-200 shadow-sm">
@@ -102,7 +114,7 @@ export default function AccountantAcademicFilter({
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-800 uppercase tracking-wider">
               <Filter className="h-4 w-4 text-brand-600" />
-              <span>Academic Filter: Batch → Department → Course</span>
+              <span>Academic Filter: Batch → Department → Programme</span>
             </div>
             {isApplied && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
@@ -156,22 +168,22 @@ export default function AccountantAcademicFilter({
               </select>
             </div>
 
-            {/* 3. Course */}
+            {/* 3. Programme */}
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1 flex items-center gap-1.5">
                 <BookOpen className="h-3.5 w-3.5 text-cyan-600" />
-                <span>3. Course</span>
+                <span>3. Programme</span>
               </label>
               <select
-                value={selectedCourse}
-                onChange={(e) => setSelectedCourse(e.target.value)}
+                value={selectedProgram}
+                onChange={(e) => setSelectedProgram(e.target.value)}
                 disabled={isLoading}
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-800 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 disabled:bg-slate-50"
               >
-                <option value="">All Courses in Department</option>
-                {filteredCourses.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.code ? `[${c.code}] ` : ''}{c.name}
+                <option value="">All Programmes</option>
+                {filteredPrograms.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
                   </option>
                 ))}
               </select>
@@ -186,12 +198,12 @@ export default function AccountantAcademicFilter({
               ) : !selectedDepartment ? (
                 <span>Step 2: Confirm or choose the target <strong className="text-slate-700">Department</strong>.</span>
               ) : (
-                <span>Step 3: Choose a specific <strong className="text-slate-700">Course</strong> or leave as all department courses.</span>
+                <span>Step 3: Choose a specific <strong className="text-slate-700">Programme</strong> or leave as all programmes.</span>
               )}
             </p>
 
             <div className="flex items-center gap-2">
-              {(selectedBatch || selectedDepartment || selectedCourse || isApplied) && (
+              {(selectedBatch || selectedDepartment || selectedProgram || isApplied) && (
                 <Button
                   type="button"
                   variant="outline"
@@ -223,7 +235,7 @@ export default function AccountantAcademicFilter({
   );
 }
 
-export function SelectToViewCard({ title = 'Select to View', message = 'Please select a Batch, Department, and Course in the filter above, then click View Records to display matching data.' }) {
+export function SelectToViewCard({ title = 'Select to View', message = 'Please select a Batch, Department, or Programme in the filter above, then click View Records to display matching data.' }) {
   return (
     <Card className="border-dashed border-slate-200 bg-slate-50/50">
       <CardBody className="py-16 text-center">

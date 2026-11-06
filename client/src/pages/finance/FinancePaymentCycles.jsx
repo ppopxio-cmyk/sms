@@ -210,8 +210,17 @@ export default function FinancePaymentCycles() {
       const aPaid = a.status === 'paid' ? 1 : 0;
       const bPaid = b.status === 'paid' ? 1 : 0;
       if (studentSort === 'paidFirst') {
+        // Paid students first — ordered by payment date & time (most recent on top),
+        // then unpaid charges by their due date (soonest due on top).
         if (aPaid !== bPaid) return bPaid - aPaid;
-        return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+        if (aPaid) {
+          const aPay = new Date(a.paidAt || a.updatedAt || 0).getTime();
+          const bPay = new Date(b.paidAt || b.updatedAt || 0).getTime();
+          return bPay - aPay;
+        }
+        const aDue = new Date(a.dueAt || 0).getTime();
+        const bDue = new Date(b.dueAt || 0).getTime();
+        return aDue - bDue;
       }
       const aT = new Date(a.createdAt || 0).getTime();
       const bT = new Date(b.createdAt || 0).getTime();
@@ -1334,7 +1343,7 @@ export default function FinancePaymentCycles() {
               </Button>
               {paidDetail?.student?._id && (
                 <Link
-                  to={`/finance/students/${paidDetail.student._id}`}
+                  to={`/accountant/collections/students/${paidDetail.student._id}`}
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                 >
                   <ExternalLink className="h-4 w-4" />

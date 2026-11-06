@@ -1,288 +1,316 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   FileBarChart,
   Download,
   Printer,
   Calendar,
-  Building2,
   TrendingUp,
-  RefreshCw,
-  Table,
+  Wallet,
+  FileText,
+  FileSpreadsheet,
+  CircleDollarSign,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { api } from '../../lib/api';
+import { api, errorMessage } from '../../lib/api';
+import { downloadExport } from '../../lib/download';
 import PageHeader from '../../components/ui/PageHeader';
-import Card, { CardBody, CardHeader } from '../../components/ui/Card';
+import Card, { CardBody } from '../../components/ui/Card';
 import StatCard from '../../components/ui/StatCard';
 import Button from '../../components/ui/Button';
 import { SkeletonPage } from '../../components/ui/Skeleton';
-import { ETH_MONTHS, formatEthiopian } from '../../lib/ethiopianDate';
+import { ETH_MONTHS } from '../../lib/ethiopianDate';
 
-const ETH_MONTHS_NAMES = [
-  { en: 'Meskerem', am: 'መስከረም', num: 1 },
-  { en: 'Tikimt', am: 'ጥቅምት', num: 2 },
-  { en: 'Hidar', am: 'ኅዳር', num: 3 },
-  { en: 'Tahsas', am: 'ታኅሣሥ', num: 4 },
-  { en: 'Tir', am: 'ጥር', num: 5 },
-  { en: 'Yekatit', am: 'የካቲት', num: 6 },
-  { en: 'Megabit', am: 'መጋቢት', num: 7 },
-  { en: 'Miazia', am: 'ሚያዝያ', num: 8 },
-  { en: 'Ginbot', am: 'ግንቦት', num: 9 },
-  { en: 'Sene', am: 'ሰኔ', num: 10 },
-  { en: 'Hamle', am: 'ሐምሌ', num: 11 },
-  { en: 'Nehase', am: 'ነሐሴ', num: 12 },
-  { en: 'Pagume', am: 'ጳጉሜ', num: 13 },
-];
+const money = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function FinanceReports() {
-  const [selectedYear, setSelectedYear] = useState(2019);
+  const [selectedYear, setSelectedYear] = useState('');
+  const [exporting, setExporting] = useState('');
+
+  // Real academic years that have payment cycles on record
+  const { data: yearsData, isLoading: yearsLoading } = useQuery({
+    queryKey: ['finance', 'reportYears'],
+    queryFn: async () => {
+      const res = await api.get('/finance/reports/years');
+      return res.data?.years || [];
+    },
+  });
+
+  useEffect(() => {
+    if (!selectedYear && yearsData?.length) {
+      setSelectedYear(String(yearsData[0].ethYear));
+    }
+  }, [yearsData, selectedYear]);
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['finance', 'reports', selectedYear],
     queryFn: async () => {
-      const res = await api.get('/finance/dashboard');
+      const res = await api.get('/finance/reports', { params: { ethYear: selectedYear } });
       return res.data;
     },
+    enabled: Boolean(selectedYear),
   });
 
-  const { data: cyclesData } = useQuery({
-    queryKey: ['finance', 'cycles-all', selectedYear],
-    queryFn: async () => {
-      const res = await api.get('/finance/cycles', {
-        params: { ethYear: selectedYear, limit: 100 },
-      });
-      return res.data?.cycles || [];
-    },
-  });
-
-  if (isLoading) {
+  if (yearsLoading) {
     return <SkeletonPage cards={3} />;
   }
 
-  // Aggregate stats across the 13 Ethiopian months
-  const monthlyData = ETH_MONTHS_NAMES.map((m) => {
-    const cycle = (cyclesData || []).find((c) => c.ethMonth === m.num);
-    const collectedEtb = cycle ? parseFloat(cycle.collectedEtb || '0') : 0;
-    const outstandingEtb = cycle ? parseFloat(cycle.outstandingEtb || '0') : 0;
-    const totalBilled = collectedEtb + outstandingEtb;
-    const rate = totalBilled > 0 ? Math.round((collectedEtb / totalBilled) * 100) : 0;
+  if (!yearsData?.length) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Finance Reports"
+          subtitle="Yearly reports per Ethiopian academic year of billing."
+          icon={FileBarChart}
+        />
+        <Card>
+          <CardBody className="p-10 text-center">
+            <FileBarChart className="mx-auto h-10 w-10 text-slate-300" />
+            <p className="mt-3 text-sm font-semibold text-slate-700">No payment cycles exist yet.</p>
+            <p className="text-xs text-slate-400">Reports become available once monthly payment cycles are created.</p>
+          </CardBody>
+        </Card>
+      </div>
+    );
+  }
 
-    return {
-      monthNumber: m.num,
-      nameEn: m.en,
-      nameAm: m.am,
-      hasCycle: Boolean(cycle),
-      cycleTitle: cycle?.title || '—',
-      studentsCount: cycle?.totalStudents || 0,
-      paidCount: cycle?.paidCount || 0,
-      collectedEtb,
-      outstandingEtb,
-      totalBilled,
-      rate,
-    };
-  });
+  const totals = data?.totals || {};
+  const monthRows = data?.monthRows || [];
+  const programmeRows = data?.programmeRows || [];
+  const methodRows = data?.methodRows || [];
 
-  const yearTotalCollected = monthlyData.reduce((acc, m) => acc + m.collectedEtb, 0);
-  const yearTotalBilled = monthlyData.reduce((acc, m) => acc + m.totalBilled, 0);
-  const overallRate = yearTotalBilled > 0 ? Math.round((yearTotalCollected / yearTotalBilled) * 100) : 0;
-
-  const handleExportCsv = () => {
-    const headers = [
-      'Month #',
-      'Month Name (EN)',
-      'Month Name (AM)',
-      'Cycle Title',
-      'Students Billed',
-      'Students Paid',
-      'Collected (ETB)',
-      'Outstanding (ETB)',
-      'Total Billed (ETB)',
-      'Collection Rate (%)',
-    ];
-
-    const rows = monthlyData.map((m) => [
-      m.monthNumber,
-      m.nameEn,
-      m.nameAm,
-      `"${m.cycleTitle}"`,
-      m.studentsCount,
-      m.paidCount,
-      m.collectedEtb.toFixed(2),
-      m.outstandingEtb.toFixed(2),
-      m.totalBilled.toFixed(2),
-      `${m.rate}%`,
-    ]);
-
-    const csvContent =
-      'data:text/csv;charset=utf-8,' +
-      [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Finance_Report_${selectedYear}_EC.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success('Excel/CSV export downloaded!');
+  const handleExport = async (format) => {
+    setExporting(format);
+    try {
+      await downloadExport(
+        `/finance/reports/export?ethYear=${selectedYear}&format=${format}`,
+        `Finance-Report-${selectedYear}EC.${format}`,
+      );
+      toast.success(`${format.toUpperCase()} report downloaded.`);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not generate the export.'));
+    } finally {
+      setExporting('');
+    }
   };
+
+  const exportBar = (
+    <div className="flex flex-wrap items-center gap-2">
+      <select
+        value={selectedYear}
+        onChange={(e) => setSelectedYear(e.target.value)}
+        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 shadow-sm"
+      >
+        {yearsData.map((y) => (
+          <option key={y.ethYear} value={y.ethYear}>
+            {y.ethYear} EC Academic Year
+          </option>
+        ))}
+      </select>
+
+      <Button size="sm" onClick={() => window.print()}>
+        <Printer className="h-4 w-4" />
+        <span>Print Official Report</span>
+      </Button>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`Annual Academic Performance & Financial Reports (${selectedYear} EC)`}
-        subtitle="Official 13-month Ethiopian calendar academic fee report for executive review, auditing, and college records."
+        title={`Finance Report ${selectedYear} EC`}
+        subtitle="Official yearly 12-month Ethiopian calendar fee collection report for executive review and college records."
         icon={FileBarChart}
-        actions={
-          <div className="flex items-center gap-2">
-            <select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(Number(e.target.value))}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 shadow-sm"
-            >
-              {[2018, 2019, 2020, 2021].map((y) => (
-                <option key={y} value={y}>
-                  {y} EC Academic Year
-                </option>
-              ))}
-            </select>
-
-            <Button variant="outline" size="sm" onClick={handleExportCsv}>
-              <Download className="h-4 w-4" />
-              <span>Export CSV/Excel</span>
-            </Button>
-
-            <Button size="sm" onClick={() => window.print()}>
-              <Printer className="h-4 w-4" />
-              <span>Print Official Report</span>
-            </Button>
-          </div>
-        }
+        actions={exportBar}
       />
 
-      {/* Summary Cards */}
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard
-          icon={TrendingUp}
-          label="Total Collected (Year)"
-          value={`${yearTotalCollected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ETB`}
-          hint={`Across 13 Ethiopian months of ${selectedYear} EC`}
-          tone="emerald"
-        />
-        <StatCard
-          icon={Calendar}
-          label="Total Billed"
-          value={`${yearTotalBilled.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ETB`}
-          hint="Sum of all issued monthly fee charges"
-          tone="indigo"
-        />
-        <StatCard
-          icon={FileBarChart}
-          label="Overall Settlement Rate"
-          value={`${overallRate}%`}
-          hint="College-wide fee collection efficiency"
-          tone="violet"
-        />
+      {/* Export toolbar */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center overflow-hidden rounded-xl border border-slate-200 shadow-sm">
+          <span className="flex items-center gap-1 bg-slate-50 px-2.5 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+            <Download className="h-3.5 w-3.5" /> Export Yearly Report
+          </span>
+          <button
+            type="button"
+            onClick={() => handleExport('pdf')}
+            className="border-l border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-rose-600 hover:bg-rose-50"
+          >
+            PDF
+          </button>
+          <button
+            type="button"
+            onClick={() => handleExport('docx')}
+            className="border-l border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-sky-600 hover:bg-sky-50"
+          >
+            Word
+          </button>
+          <button
+            type="button"
+            onClick={() => handleExport('xlsx')}
+            className="border-l border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-emerald-600 hover:bg-emerald-50"
+          >
+            Excel
+          </button>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => refetch()}
+          disabled={isFetching || Boolean(exporting)}
+        >
+          <span>Refresh</span>
+        </Button>
+        {exporting && (
+          <span className="flex items-center gap-2 text-xs font-semibold text-brand-700">
+            <span className="h-3 w-3 animate-spin rounded-full border-2 border-brand-400 border-t-transparent" />
+            Generating {exporting.toUpperCase()}…
+          </span>
+        )}
       </div>
 
-      {/* 13-Month Performance Table */}
-      <Card>
-        <CardHeader
-          title={`13 Ethiopian Months Fee Breakdown (${selectedYear} EC)`}
-          subtitle="Complete monthly breakdown from Meskerem (Month 1) through Pagume (Month 13)."
-          icon={Table}
-        />
-        <CardBody className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[950px] border-collapse text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-100 bg-slate-50/50 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  <th className="py-3.5 pl-6 pr-4">#</th>
-                  <th className="py-3.5 px-4">Month Name (EN / AM)</th>
-                  <th className="py-3.5 px-4">Cycle Title</th>
-                  <th className="py-3.5 px-4">Students Billed</th>
-                  <th className="py-3.5 px-4">Students Paid</th>
-                  <th className="py-3.5 px-4">Collected (ETB)</th>
-                  <th className="py-3.5 px-4">Outstanding (ETB)</th>
-                  <th className="py-3.5 px-4">Collection Rate</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {monthlyData.map((m) => (
-                  <tr key={m.monthNumber} className="transition hover:bg-slate-50/70">
-                    <td className="py-3.5 pl-6 pr-4 font-mono text-xs text-slate-400">
-                      {m.monthNumber}
-                    </td>
-
-                    <td className="py-3.5 px-4 font-medium text-slate-800">
-                      {m.nameEn}{' '}
-                      <span className="font-normal text-slate-400 text-xs">
-                        ({m.nameAm})
-                      </span>
-                    </td>
-
-                    <td className="py-3.5 px-4 text-xs text-slate-600">
-                      {m.cycleTitle}
-                    </td>
-
-                    <td className="py-3.5 px-4 font-mono text-xs text-slate-700">
-                      {m.studentsCount}
-                    </td>
-
-                    <td className="py-3.5 px-4 font-mono text-xs text-emerald-700">
-                      {m.paidCount}
-                    </td>
-
-                    <td className="py-3.5 px-4 font-mono font-bold text-slate-900">
-                      {m.collectedEtb > 0
-                        ? `${m.collectedEtb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ETB`
-                        : '—'}
-                    </td>
-
-                    <td className="py-3.5 px-4 font-mono text-xs text-slate-600">
-                      {m.outstandingEtb > 0
-                        ? `${m.outstandingEtb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ETB`
-                        : '—'}
-                    </td>
-
-                    <td className="py-3.5 px-4">
-                      {m.hasCycle ? (
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs font-semibold text-slate-700">
-                            {m.rate}%
-                          </span>
-                          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-100">
-                            <div
-                              className="h-full rounded-full bg-emerald-500"
-                              style={{ width: `${m.rate}%` }}
-                            />
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-slate-400">Not Created</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t-2 border-slate-200 bg-slate-50/70 font-semibold text-slate-900">
-                  <td colSpan={5} className="py-4 pl-6 pr-4 text-xs uppercase tracking-wider text-slate-600">
-                    Total Academic Year Collections ({selectedYear} EC)
-                  </td>
-                  <td className="py-4 px-4 font-mono text-base font-bold text-emerald-800">
-                    {yearTotalCollected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ETB
-                  </td>
-                  <td colSpan={2} className="py-4 px-4 font-mono text-sm text-slate-700">
-                    {overallRate}% Overall Efficiency
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
+      {isLoading || !data ? (
+        <SkeletonPage cards={2} />
+      ) : (
+        <>
+          {/* Summary Cards */}
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard
+              icon={TrendingUp}
+              label="Total Collected (Year)"
+              value={`${money(totals.paid)} ETB`}
+              hint={`${totals.payments || 0} payments across ${totals.cycles || 0} cycles`}
+              tone="emerald"
+            />
+            <StatCard
+              icon={Wallet}
+              label="Total Billed"
+              value={`${money(totals.billed)} ETB`}
+              hint={`${totals.charges || 0} monthly charges`}
+              tone="indigo"
+            />
+            <StatCard
+              icon={CircleDollarSign}
+              label="Outstanding"
+              value={`${money(totals.outstanding)} ETB`}
+              hint="Unpaid & partially paid charges"
+              tone="rose"
+            />
+            <StatCard
+              icon={Calendar}
+              label="Academic Year"
+              value={`${data.ethYear} EC`}
+              hint="Ethiopian calendar"
+              tone="slate"
+            />
           </div>
-        </CardBody>
-      </Card>
+
+          {/* Per-month table */}
+          <Card>
+            <CardBody className="p-0">
+              <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Monthly Collection — {selectedYear} EC</h3>
+                  <p className="text-xs text-slate-400">Payments received per Ethiopian month.</p>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 bg-slate-50/50 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                      <th className="py-3 pl-6 pr-4">Month</th>
+                      <th className="py-3 px-4">Charges</th>
+                      <th className="py-3 px-4">Payments</th>
+                      <th className="py-3 px-4">Paid ETB</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {monthRows.map((r) => (
+                      <tr key={r.month} className="transition hover:bg-slate-50/70">
+                        <td className="py-3 pl-6 pr-4 text-xs font-semibold text-slate-700">
+                          {r.month}. {ETH_MONTHS[Number(r.month) - 1] || '—'}
+                        </td>
+                        <td className="py-3 px-4 text-xs text-slate-500">{r.charges}</td>
+                        <td className="py-3 px-4 text-xs text-slate-500">{r.paidCount}</td>
+                        <td className="py-3 px-4 font-mono text-xs font-bold text-slate-900">{money(r.paid)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardBody>
+          </Card>
+
+          {/* Per-programme + per-method */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardBody className="p-0">
+                <div className="border-b border-slate-100 px-6 py-4">
+                  <h3 className="text-sm font-bold text-slate-900">Collection by Programme</h3>
+                  <p className="text-xs text-slate-400">Outstanding balances grouped per study programme.</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[460px] border-collapse text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 bg-slate-50/50 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                        <th className="py-3 pl-6 pr-4">Programme</th>
+                        <th className="py-3 px-3">Charges</th>
+                        <th className="py-3 px-3">Billed</th>
+                        <th className="py-3 px-3">Paid</th>
+                        <th className="py-3 pr-6">Outstanding</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {programmeRows.map((r) => (
+                        <tr key={r.programme} className="transition hover:bg-slate-50/70">
+                          <td className="py-3 pl-6 pr-4 text-xs font-semibold text-slate-700">{r.programme}</td>
+                          <td className="py-3 px-3 text-xs text-slate-500">{r.charges}</td>
+                          <td className="py-3 px-3 font-mono text-xs text-slate-600">{money(r.billed)}</td>
+                          <td className="py-3 px-3 font-mono text-xs text-emerald-600">{money(r.paid)}</td>
+                          <td className="py-3 pr-6 font-mono text-xs font-bold text-rose-600">{money(r.outstanding)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardBody>
+            </Card>
+
+            <Card>
+              <CardBody className="p-0">
+                <div className="border-b border-slate-100 px-6 py-4">
+                  <h3 className="text-sm font-bold text-slate-900">Payments by Method</h3>
+                  <p className="text-xs text-slate-400">Confirmed money received per settlement channel.</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[320px] border-collapse text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 bg-slate-50/50 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                        <th className="py-3 pl-6 pr-4">Method</th>
+                        <th className="py-3 pr-6 text-right">Amount (ETB)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {methodRows.map((r) => (
+                        <tr key={r.method} className="transition hover:bg-slate-50/70">
+                          <td className="py-3 pl-6 pr-4 text-xs font-semibold text-slate-700">{r.method}</td>
+                          <td className="py-3 pr-6 text-right font-mono text-xs font-bold text-slate-900">{money(r.amount)}</td>
+                        </tr>
+                      ))}
+                      {!methodRows.length && (
+                        <tr>
+                          <td colSpan={2} className="py-6 pl-6 text-xs text-slate-400">
+                            No payments recorded in this year.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardBody>
+            </Card>
+          </div>
+        </>
+      )}
     </div>
   );
 }

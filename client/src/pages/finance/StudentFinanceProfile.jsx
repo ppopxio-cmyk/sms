@@ -1,4 +1,5 @@
 import { useParams, Link, useLocation } from 'react-router-dom';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   User,
@@ -15,19 +16,25 @@ import {
   Building2,
   Printer,
   ShieldAlert,
+  Download,
+  FileSpreadsheet,
+  FileText,
 } from 'lucide-react';
-import { api } from '../../lib/api';
+import { api, errorMessage } from '../../lib/api';
+import { downloadExport } from '../../lib/download';
 import PageHeader from '../../components/ui/PageHeader';
 import Card, { CardBody, CardHeader } from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import { SkeletonPage } from '../../components/ui/Skeleton';
 import { formatEthiopian } from '../../lib/ethiopianDate';
+import { toast } from 'sonner';
 
 export default function StudentFinanceProfile({ readOnly = false }) {
   const { id } = useParams();
   const location = useLocation();
   const isRegistrar = readOnly || location.pathname.startsWith('/registrar');
+  const [exporting, setExporting] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['finance', 'student', id],
@@ -52,6 +59,27 @@ export default function StudentFinanceProfile({ readOnly = false }) {
   const backLink = isRegistrar ? `/registrar/students/${id}` : '/accountant/collections';
   const backLabel = isRegistrar ? '← Back to Student Record' : '← Back to Collections';
 
+  const fullName = student.fullName || student.name || 'Student';
+  const photoUrl = student.photo?.url || student.photo?.filePath || null;
+  const departmentName = student.department?.name || student.department || '—';
+  const programmeName = student.program?.name || student.programme || '—';
+  const batchName = student.batch?.name || student.batch || '—';
+
+  const handleExport = async (format) => {
+    setExporting(format);
+    try {
+      await downloadExport(
+        `/finance/students/${id}/export?format=${format}`,
+        `Fee-Statement-${student.studentId || 'student'}.${format}`,
+      );
+      toast.success(`${format.toUpperCase()} statement downloaded.`);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not generate the export.'));
+    } finally {
+      setExporting('');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -68,31 +96,35 @@ export default function StudentFinanceProfile({ readOnly = false }) {
       {/* Student Banner */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex items-center gap-4">
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-brand-600 text-2xl font-bold text-white shadow-sm overflow-hidden">
-            {student.photo?.url || student.photo?.filePath ? (
+          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-brand-600 text-2xl font-bold text-white shadow-sm overflow-hidden">
+            {photoUrl ? (
               <img
-                src={student.photo.url || student.photo.filePath}
-                alt={student.fullName}
+                src={photoUrl}
+                alt={fullName}
                 className="h-full w-full object-cover"
               />
             ) : (
-              (student.fullName || 'S')[0]
+              (fullName || 'S')[0]
             )}
           </div>
 
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-slate-900">{student.fullName}</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl font-bold text-slate-900">{fullName}</h1>
               {holdStatus.hasHold ? (
-                <Badge tone="rose">ACADEMIC HOLD ACTIVE</Badge>
+                <Badge tone="rose">ACADEMIC HOLD — DOCUMENTS BLOCKED</Badge>
               ) : (
                 <Badge tone="emerald">FEES IN GOOD STANDING</Badge>
               )}
             </div>
 
-            <p className="font-mono text-xs text-slate-500 mt-0.5">
-              ID: {student.studentId} • {student.program?.name || student.department?.name || 'Department'} • {student.batch?.name || 'Batch'}
-            </p>
+            <div className="mt-1 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-600">
+              <span className="font-mono font-semibold text-slate-800">ID: {student.studentId || '—'}</span>
+              <span><strong className="text-slate-500">Department:</strong> {departmentName}</span>
+              <span><strong className="text-slate-500">Programme:</strong> {programmeName}</span>
+              <span><strong className="text-slate-500">Batch:</strong> {batchName}</span>
+              {student.studentCategory && <span><strong className="text-slate-500">Category:</strong> {student.studentCategory}</span>}
+            </div>
 
             <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-slate-500">
               {student.phone && (
@@ -107,14 +139,36 @@ export default function StudentFinanceProfile({ readOnly = false }) {
                   <span>{student.email}</span>
                 </div>
               )}
+              {student.sex && student.sex !== 'unspecified' && (
+                <div className="flex items-center gap-1">
+                  <User className="h-3.5 w-3.5 text-slate-400" />
+                  <span className="capitalize">{student.sex}</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        <Button variant="outline" size="sm" onClick={() => window.print()}>
-          <Printer className="h-4 w-4" />
-          <span>Print Statement</span>
-        </Button>
+        <div className="flex flex-col items-end gap-2">
+          <Button variant="outline" size="sm" onClick={() => window.print()}>
+            <Printer className="h-4 w-4" />
+            <span>Print Statement</span>
+          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="primary" size="sm" disabled={Boolean(exporting)} onClick={() => handleExport('pdf')}>
+              <Download className="h-4 w-4" />
+              <span>{exporting === 'pdf' ? 'PDF…' : 'PDF'}</span>
+            </Button>
+            <Button variant="outline" size="sm" disabled={Boolean(exporting)} onClick={() => handleExport('docx')}>
+              <FileText className="h-4 w-4" />
+              <span>{exporting === 'docx' ? 'Word…' : 'Word'}</span>
+            </Button>
+            <Button variant="outline" size="sm" disabled={Boolean(exporting)} onClick={() => handleExport('xlsx')}>
+              <FileSpreadsheet className="h-4 w-4" />
+              <span>{exporting === 'xlsx' ? 'Excel…' : 'Excel'}</span>
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* Financial Summary Cards */}

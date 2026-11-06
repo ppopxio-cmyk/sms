@@ -531,6 +531,20 @@ export async function getCollegeBranding() {
   }
 }
 
+// Generic institutional email reusable by finance flows (waivers, overdue notices,
+// statements). Custom rows/paragraphs come pre-escaped from the caller where needed.
+export function sendFinanceNotification({ to, name, subject, title, intro, rows = [], paragraphs = [], footerNote }) {
+  const rowsHtml = rows.length ? detailCard(rows.map(([k, v]) => row(k, v)).join('')) : '';
+  const paras = paragraphs.map((p, i) => para(p, { muted: i < paragraphs.length - 1 ? false : false }));
+  const body = para(`Hi ${hi(name)},<br>${esc(intro || '')}`) + paras.join('') + rowsHtml + (footerNote ? note(footerNote) : '');
+  return deliver({
+    to,
+    subject,
+    html: layout({ preheader: intro ? String(intro).slice(0, 140) : subject, title, accent: title, body }),
+    text: [intro, ...paragraphs.map((p) => String(p).replace(/<[^>]+>/g, '')), ...rows.map(([k, v]) => `${k}: ${v}`)].filter(Boolean).join('\n'),
+  });
+}
+
 function collegeSocialBlock(b) {
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px;padding-top:16px;border-top:1px dashed #cbd5e1;">
     <tr><td align="center">

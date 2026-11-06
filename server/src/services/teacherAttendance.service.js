@@ -382,9 +382,9 @@ export async function attendanceRoster(teacherId, assignmentId, query) {
         note: record?.notes ?? '',
         markedAt: record?.markedAt ?? null,
         financialHold: Boolean(hold),
-        canMarkPresent: !hold,
+        canMarkPresent: true,
         financialHoldMessage: hold
-          ? 'Financial hold active: Unpaid monthly fees. Student cannot be marked present until cleared by finance.'
+          ? 'Overdue monthly fees — official documents (transcript/certificate) remain blocked until cleared.'
           : null,
       };
     });
@@ -424,27 +424,8 @@ export async function saveAttendance(teacherId, assignmentId, payload) {
     }
   }
 
-  // Financial Clearance: Check students being marked present or late
-  const presentStudentIds = payload.records
-    .filter((r) => r.status === 'present' || r.status === 'late')
-    .map((r) => r.studentId);
-
-  if (presentStudentIds.length) {
-    const overdueCharges = await StudentCharge.find({
-      student: { $in: presentStudentIds },
-      status: 'unpaid',
-      dueAt: { $lt: new Date() },
-    }).select('student').lean();
-
-    if (overdueCharges.length > 0) {
-      throw new AppError(
-        403,
-        'STUDENT_FINANCIAL_HOLD',
-        'One or more students have active financial holds and cannot be marked present until cleared by finance.',
-        { heldStudents: overdueCharges.map((c) => String(c.student)) }
-      );
-    }
-  }
+  // Overdue students may still be marked present/late; the academic hold only
+  // blocks official documents (transcript / certificate), not class attendance.
 
   const existing = await AttendanceSheet.findOne({ offering: assignmentId, dateKey: payload.date, period }).lean();
   if (!existing) {

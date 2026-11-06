@@ -16,9 +16,13 @@ import {
   Eye,
   RefreshCw,
   MoreVertical,
+  Download,
+  FileText,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../../lib/api';
+import { downloadExport } from '../../lib/download';
 import PageHeader from '../../components/ui/PageHeader';
 import Card, { CardBody, CardHeader } from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
@@ -29,14 +33,55 @@ import { SkeletonRows } from '../../components/ui/Skeleton';
 import { formatEthiopian } from '../../lib/ethiopianDate';
 import AccountantAcademicFilter, { SelectToViewCard } from '../../components/finance/AccountantAcademicFilter';
 
+function ExportButtonsBlock({ exporting, onExport }) {
+  if (exporting) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-700">
+        <span className="h-3 w-3 animate-spin rounded-full border-2 border-brand-400 border-t-transparent" />
+        <span>Generating {exporting.toUpperCase()}…</span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center overflow-hidden rounded-xl border border-slate-200 shadow-sm">
+      <span className="flex items-center gap-1 bg-slate-50 px-2.5 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+        <Download className="h-3.5 w-3.5" /> Export
+      </span>
+      <button
+        type="button"
+        onClick={() => onExport('pdf')}
+        className="border-l border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-rose-600 hover:bg-rose-50"
+      >
+        PDF
+      </button>
+      <button
+        type="button"
+        onClick={() => onExport('docx')}
+        className="border-l border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-sky-600 hover:bg-sky-50"
+      >
+        Word
+      </button>
+      <button
+        type="button"
+        onClick={() => onExport('xlsx')}
+        className="border-l border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-emerald-600 hover:bg-emerald-50"
+      >
+        Excel
+      </button>
+    </div>
+  );
+}
+
 export default function FinanceCollections() {
   const queryClient = useQueryClient();
 
-  // Academic Filter (Batch -> Department -> Course)
+  // Academic Filter (Batch -> Department -> Programme)
   const [selectedBatch, setSelectedBatch] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('');
-  const [selectedCourse, setSelectedCourse] = useState('');
+  const [selectedProgram, setSelectedProgram] = useState('');
   const [isFilterApplied, setIsFilterApplied] = useState(false);
+  const [exporting, setExporting] = useState('');
+  const toastIdCollections = `collectionsexport`;
 
   // Filters
   const [search, setSearch] = useState('');
@@ -77,9 +122,29 @@ export default function FinanceCollections() {
   const handleResetFilter = () => {
     setSelectedBatch('');
     setSelectedDepartment('');
-    setSelectedCourse('');
+    setSelectedProgram('');
     setIsFilterApplied(false);
     setPage(1);
+  };
+
+  const handleExportCollections = async (format) => {
+    setExporting(format);
+    const tid = toast.loading(`Generating ${format.toUpperCase()} export…`);
+    try {
+      const params = new URLSearchParams({ format });
+      if (search) params.set('search', search);
+      if (status) params.set('status', status);
+      if (overdueOnly) params.set('overdueOnly', 'true');
+      if (selectedBatch) params.set('batchId', selectedBatch);
+      if (selectedDepartment) params.set('departmentId', selectedDepartment);
+      if (selectedProgram) params.set('programId', selectedProgram);
+      await downloadExport(`/finance/collections/export?${params.toString()}`, `student-fee-collections.${format}`);
+      toast.success(`${format.toUpperCase()} exported.`, { id: tid });
+    } catch (err) {
+      toast.error(errorMessage(err, 'Export failed.'), { id: tid });
+    } finally {
+      setExporting('');
+    }
   };
 
   // Fetch collections - only when filter applied
@@ -87,7 +152,7 @@ export default function FinanceCollections() {
     queryKey: [
       'finance',
       'collections',
-      { search, status, overdueOnly, batchId: selectedBatch, departmentId: selectedDepartment, courseId: selectedCourse, page, isFilterApplied },
+      { search, status, overdueOnly, batchId: selectedBatch, departmentId: selectedDepartment, programId: selectedProgram, page, isFilterApplied },
     ],
     queryFn: async () => {
       const res = await api.get('/finance/collections', {
@@ -97,7 +162,7 @@ export default function FinanceCollections() {
           overdueOnly: overdueOnly ? 'true' : undefined,
           batchId: selectedBatch || undefined,
           departmentId: selectedDepartment || undefined,
-          courseId: selectedCourse || undefined,
+          programId: selectedProgram || undefined,
           page,
           limit: 25,
         },
@@ -166,14 +231,14 @@ export default function FinanceCollections() {
         icon={Receipt}
       />
 
-      {/* Cascading Academic Filter: Batch -> Department -> Course */}
+      {/* Cascading Academic Filter: Batch -> Department -> Programme */}
       <AccountantAcademicFilter
         selectedBatch={selectedBatch}
         setSelectedBatch={setSelectedBatch}
         selectedDepartment={selectedDepartment}
         setSelectedDepartment={setSelectedDepartment}
-        selectedCourse={selectedCourse}
-        setSelectedCourse={setSelectedCourse}
+        selectedProgram={selectedProgram}
+        setSelectedProgram={setSelectedProgram}
         isApplied={isFilterApplied}
         onApply={handleApplyFilter}
         onReset={handleResetFilter}
@@ -182,7 +247,7 @@ export default function FinanceCollections() {
       {!isFilterApplied ? (
         <SelectToViewCard
           title="Select to View Fee Collections"
-          message="Please select a Batch, Department, and Course above, then click View Records to display student fee charges."
+          message="Please select a Batch, Department, or Programme above, then click View Records to display student fee charges."
         />
       ) : (
         <>
@@ -240,6 +305,11 @@ export default function FinanceCollections() {
               <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
               <span>Refresh</span>
             </Button>
+
+            <ExportButtonsBlock
+              exporting={exporting}
+              onExport={handleExportCollections}
+            />
           </div>
         </CardBody>
       </Card>
@@ -276,15 +346,32 @@ export default function FinanceCollections() {
                   {data.charges.map((charge) => (
                     <tr key={charge.id} className="transition hover:bg-slate-50/70">
                       <td className="py-3.5 pl-6 pr-4">
-                        <Link
-                          to={`/accountant/students/${charge.student?._id || charge.student}`}
-                          className="font-semibold text-slate-800 hover:text-brand-600"
-                        >
-                          {charge.studentName}
-                        </Link>
-                        <p className="font-mono text-xs text-slate-400">
-                          {charge.studentId} • {charge.programme || charge.department || 'General'}
-                        </p>
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200">
+                            {(charge.student?.photo?.url || charge.student?.photo?.filePath) ? (
+                              <img
+                                src={charge.student.photo.url || charge.student.photo.filePath}
+                                alt={charge.studentName}
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center bg-brand-50 text-xs font-bold text-brand-700">
+                                {(charge.studentName || 'S').slice(0, 1)}
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <Link
+                              to={`/accountant/collections/students/${charge.student?._id || charge.student}`}
+                              className="font-semibold text-slate-800 hover:text-brand-600"
+                            >
+                              {charge.studentName}
+                            </Link>
+                            <p className="font-mono text-xs text-slate-400">
+                              {charge.studentId} • {charge.programme || charge.department || 'General'}
+                            </p>
+                          </div>
+                        </div>
                       </td>
 
                       <td className="py-3.5 px-4">
@@ -385,7 +472,7 @@ export default function FinanceCollections() {
                             </>
                           )}
 
-                          <Link to={`/accountant/students/${charge.student?._id || charge.student}`}>
+                          <Link to={`/accountant/collections/students/${charge.student?._id || charge.student}`}>
                             <Button variant="ghost" size="sm" title="View Statement">
                               <Eye className="h-3.5 w-3.5" />
                             </Button>

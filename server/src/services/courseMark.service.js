@@ -336,7 +336,7 @@ export async function courseMarksDetail(teacherId, assignmentId) {
             }
           : null,
         financialHoldMessage: charge
-          ? `Financial hold active: ${charge.cycle?.title || 'Fee'} (${((charge.amountDue || 0) / 100).toFixed(2)} ETB overdue). Marks cannot be submitted.`
+          ? `Overdue: ${charge.cycle?.title || 'Fee'} (${((charge.amountDue || 0) / 100).toFixed(2)} ETB). Marks entry allowed; transcript/certificate stays blocked until cleared.`
           : null,
       };
     });
@@ -471,36 +471,31 @@ async function prepareSubmission(teacherId, assignmentId) {
   const results = await Result.find(ownFilter({ offering: assignmentId, student: { $in: studentIds } })).lean();
   if (!registrations.length) throw new AppError(409, 'NO_STUDENTS', 'There are no registered students in this course.');
 
-  // Block result submission for students with active financial holds
-  const overdueCharges = await StudentCharge.find({
-    student: { $in: studentIds },
-    status: 'unpaid',
-    dueAt: { $lt: new Date() },
-  }).select('student').lean();
-  const holdSet = new Set(overdueCharges.map((c) => String(c.student)));
+  // Overdue students' marks are submitted together with everyone else; the
+  // financial hold only blocks transcript / certificate documents, not grades.
 
-  const eligibleResults = results.filter((row) => !holdSet.has(String(row.student)));
-  const eligibleStudentIds = studentIds.filter((id) => !holdSet.has(String(id)));
+  const allResults = results;
+  const allStudentIds = studentIds;
 
-  if (!eligibleStudentIds.length) {
-    throw new AppError(409, 'NO_ELIGIBLE_STUDENTS', 'All students in this class currently have active financial holds. Marks cannot be submitted until fees are settled.');
+  if (!allStudentIds.length) {
+    throw new AppError(409, 'NO_ELIGIBLE_STUDENTS', 'There are no eligible students in this class.');
   }
 
-  if (eligibleResults.length !== eligibleStudentIds.length) {
-    throw new AppError(409, 'MARKS_INCOMPLETE', 'Enter marks for every eligible student before submitting.');
+  if (allResults.length !== allStudentIds.length) {
+    throw new AppError(409, 'MARKS_INCOMPLETE', 'Enter marks for every registered student before submitting.');
   }
 
-  const incompleteEligible = eligibleResults.filter((row) => !completeResult(policy, row) || row.totalMark === null);
+  const incompleteEligible = allResults.filter((row) => !completeResult(policy, row) || row.totalMark === null);
   if (incompleteEligible.length) {
-    throw new AppError(409, 'MARKS_INCOMPLETE', 'Calculate every eligible student’s total before submitting.');
+    throw new AppError(409, 'MARKS_INCOMPLETE', 'Calculate every student’s total before submitting.');
   }
 
   return {
     assignment,
-    results: eligibleResults,
+    results: allResults,
     grading,
     totalRegistered: registrations.length,
-    heldCount: holdSet.size,
+    heldCount: 0,
   };
 }
 

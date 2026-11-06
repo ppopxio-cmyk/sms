@@ -25,6 +25,16 @@ import {
   resolveReviewAttempt,
   listOverdueHolds,
   notifyOverdueHoldsHandler,
+  notifyProgrammeOverdueTeachers,
+  searchStudents,
+  exportStudentStatement,
+  exportCollections,
+  listAwardPayments,
+  createAwardPayment,
+  deleteAwardPayment,
+  getAcademicYears,
+  getYearlyReport,
+  exportYearlyReport,
   getStudentProfile,
   getSettings,
   updateSettings,
@@ -69,13 +79,27 @@ router.post('/review-queue/:id/resolve', requirePermission('finance:review'), re
 // Overdue & Holds
 router.get('/overdue', requirePermission('finance:view'), listOverdueHolds);
 router.post('/overdue/notify', requirePermission('finance:cycles'), notifyOverdueHoldsHandler);
+router.post('/overdue/notify-teachers', requirePermission('finance:cycles'), notifyProgrammeOverdueTeachers);
 
 // Waivers
 router.get('/waivers', requirePermission('finance:view'), listWaivers);
 router.post('/waivers/:id/revoke', requirePermission('finance:waivers'), revokeWaiverHandler);
 
-// Student Profile
+// Student Profile, search & exports
+router.get('/students/search', requirePermission('finance:view'), searchStudents);
+router.get('/students/:id/export', requirePermission('finance:view'), exportStudentStatement);
 router.get('/students/:id', requirePermission('finance:view'), getStudentProfile);
+router.get('/collections/export', requirePermission('finance:view'), exportCollections);
+
+// Award Payments
+router.get('/awards', requirePermission('finance:view'), listAwardPayments);
+router.post('/awards', requirePermission('finance:payments'), createAwardPayment);
+router.delete('/awards/:id', requirePermission('finance:payments'), deleteAwardPayment);
+
+// Reports (real academic years) & export
+router.get('/reports/years', requirePermission('finance:view'), getAcademicYears);
+router.get('/reports/export', requirePermission('finance:view'), exportYearlyReport);
+router.get('/reports', requirePermission('finance:view'), getYearlyReport);
 
 // Settings
 router.get('/settings', requirePermission('finance:view'), getSettings);

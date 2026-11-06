@@ -30,10 +30,10 @@ import AccountantAcademicFilter, { SelectToViewCard } from '../../components/fin
 export default function FinanceLedger() {
   const queryClient = useQueryClient();
 
-  // Academic Filter (Batch -> Department -> Course)
+  // Academic Filter (Batch -> Department -> Programme)
   const [selectedBatch, setSelectedBatch] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('');
-  const [selectedCourse, setSelectedCourse] = useState('');
+  const [selectedProgram, setSelectedProgram] = useState('');
   const [isFilterApplied, setIsFilterApplied] = useState(false);
 
   const [search, setSearch] = useState('');
@@ -56,7 +56,7 @@ export default function FinanceLedger() {
   const handleResetFilter = () => {
     setSelectedBatch('');
     setSelectedDepartment('');
-    setSelectedCourse('');
+    setSelectedProgram('');
     setIsFilterApplied(false);
     setPage(1);
   };
@@ -65,7 +65,7 @@ export default function FinanceLedger() {
     queryKey: [
       'finance',
       'ledger',
-      { search, status, method, batchId: selectedBatch, departmentId: selectedDepartment, courseId: selectedCourse, page, isFilterApplied },
+      { search, status, method, batchId: selectedBatch, departmentId: selectedDepartment, programId: selectedProgram, page, isFilterApplied },
     ],
     queryFn: async () => {
       const res = await api.get('/finance/ledger', {
@@ -75,7 +75,7 @@ export default function FinanceLedger() {
           method: method || undefined,
           batchId: selectedBatch || undefined,
           departmentId: selectedDepartment || undefined,
-          courseId: selectedCourse || undefined,
+          programId: selectedProgram || undefined,
           page,
           limit: 25,
         },
@@ -111,14 +111,14 @@ export default function FinanceLedger() {
         icon={BookOpen}
       />
 
-      {/* Cascading Academic Filter: Batch -> Department -> Course */}
+      {/* Cascading Academic Filter: Batch -> Department -> Programme */}
       <AccountantAcademicFilter
         selectedBatch={selectedBatch}
         setSelectedBatch={setSelectedBatch}
         selectedDepartment={selectedDepartment}
         setSelectedDepartment={setSelectedDepartment}
-        selectedCourse={selectedCourse}
-        setSelectedCourse={setSelectedCourse}
+        selectedProgram={selectedProgram}
+        setSelectedProgram={setSelectedProgram}
         isApplied={isFilterApplied}
         onApply={handleApplyFilter}
         onReset={handleResetFilter}
@@ -127,7 +127,7 @@ export default function FinanceLedger() {
       {!isFilterApplied ? (
         <SelectToViewCard
           title="Select to View Payments Ledger"
-          message="Please select a Batch, Department, and Course above, then click View Records to display confirmed payments."
+          message="Please select a Batch, Department, or Programme above, then click View Records to display confirmed payments."
         />
       ) : (
         <>
@@ -234,7 +234,7 @@ export default function FinanceLedger() {
 
                       <td className="py-3.5 px-4">
                         <Link
-                          to={`/accountant/students/${p.student?._id || p.student}`}
+                          to={`/accountant/collections/students/${p.student?._id || p.student}`}
                           className="font-medium text-slate-800 hover:text-brand-600"
                         >
                           {p.student?.fullName || p.payerName}

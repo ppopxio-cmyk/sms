@@ -110,6 +110,9 @@ const financeSchema = new mongoose.Schema(
       blockProgression: { type: Boolean, default: false },
       blockPublishing: { type: Boolean, default: false },
     },
+    monthlyDefaults: {
+      amount: { type: Number, min: 0, max: 100000000, default: 0 },
+    },
   },
   { _id: false },
 );

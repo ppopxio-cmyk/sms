@@ -155,6 +155,8 @@ const waiverSchema = new mongoose.Schema(
     amount: { type: Number, required: true, min: 0 }, // Integer santim
     type: { type: String, enum: ['full', 'partial'], default: 'full' },
     reason: { type: String, required: true, trim: true, maxlength: 500 },
+    scholarshipCollege: { type: String, default: '', trim: true, maxlength: 160 }, // which college / organisation granted the exemption
+    emailSentAt: { type: Date, default: null },
     status: {
       type: String,
       enum: ['pending', 'approved', 'revoked'],
@@ -221,3 +223,36 @@ const studentNotificationSchema = new mongoose.Schema(
 studentNotificationSchema.index({ student: 1, createdAt: -1 });
 
 export const StudentNotification = mongoose.model('StudentNotification', studentNotificationSchema);
+
+// AwardPayment: prize money recorded by the accountant for students who won
+// competitions (1st/2nd/3rd/4th place). Paid as cash or via transfer with a proof link.
+const awardPaymentSchema = new mongoose.Schema(
+  {
+    student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true, index: true },
+    studentId: { type: String, required: true, uppercase: true, trim: true, index: true },
+    studentName: { type: String, required: true, trim: true },
+    programme: { type: String, default: '', trim: true },
+    batch: { type: String, default: '', trim: true },
+    competition: { type: String, required: true, trim: true, maxlength: 160, index: true },
+    place: {
+      type: String,
+      enum: ['1st', '2nd', '3rd', '4th'],
+      required: true,
+    },
+    amount: { type: Number, required: true, min: 1 }, // Integer santim
+    method: {
+      type: String,
+      enum: ['cash', 'transfer'],
+      default: 'cash',
+    },
+    proofUrl: { type: String, default: '', trim: true, maxlength: 500 }, // transfer payment proof link
+    awardedAt: { type: Date, default: Date.now, index: true },
+    notes: { type: String, default: '', trim: true, maxlength: 500 },
+    recordedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  },
+  { timestamps: true }
+);
+
+awardPaymentSchema.index({ competition: 1, awardedAt: -1 });
+
+export const AwardPayment = mongoose.model('AwardPayment', awardPaymentSchema);

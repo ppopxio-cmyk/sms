@@ -7,6 +7,7 @@ import {
   UserCheck,
   AlertTriangle,
   Gift,
+  Trophy,
   FileBarChart,
   Settings,
   Sparkles,
@@ -20,6 +21,7 @@ const financeNavSections = [
       { to: '/accountant/cycles', label: 'Payment Cycles', icon: CalendarDays },
       { to: '/accountant/collections', label: 'Collections', icon: Receipt },
       { to: '/accountant/ledger', label: 'Payments Ledger', icon: BookOpen },
+      { to: '/accountant/awards', label: 'Award Payments', icon: Trophy },
     ],
   },
   {

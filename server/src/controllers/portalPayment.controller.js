@@ -580,96 +580,112 @@ export const getChapaPaymentResult = asyncHandler(async (req, res) => {
 
   const cleanId = String(paymentId).trim();
 
-  // 1. Try Chapa flow: PaymentAttempt keyed by its _id
-  const attempt = await PaymentAttempt.findById(cleanId)
-    .populate({
-      path: 'charge',
-      populate: { path: 'cycle', populate: { path: 'student' } },
-    })
-    .lean();
+  try {
+    // 1. Try Chapa flow: PaymentAttempt keyed by its _id.
+    //    NOTE: the student lives on the StudentCharge (charge.student),
+    //    NOT on PaymentCycle — populating cycle.student would throw a
+    //    Mongoose StrictModePopulateError (production 500 cause).
+    const attempt = await PaymentAttempt.findById(cleanId)
+      .populate({
+        path: 'charge',
+        populate: [
+          { path: 'cycle' },
+          { path: 'student', select: 'studentId fullName firstName lastName' },
+        ],
+      })
+      .lean();
 
-  if (attempt) {
-    const charge = attempt.charge;
-    const cycle = charge?.cycle;
-    const student = cycle?.student;
+    if (attempt) {
+      const charge = attempt.charge;
+      const cycle = charge?.cycle;
+      const student = charge?.student;
 
-    // Already confirmed in MongoDB — return immediately
-    if (charge?.status === 'paid' && charge.payment) {
-      const payment = await Payment.findById(charge.payment).lean();
-      if (payment) {
+      // Already confirmed in MongoDB — return immediately
+      if (charge?.status === 'paid' && charge.payment) {
+        const payment = await Payment.findById(charge.payment).lean();
+        if (payment) {
+          return res.json({
+            status: 'success',
+            alreadyPaid: true,
+            confirmation: buildConfirmation(payment, charge, cycle, student),
+          });
+        }
+      }
+
+      // Not confirmed — perform server-side Chapa verification
+      const txRef = attempt.parsedReference;
+      if (!txRef) {
+        return res.json({
+          status: 'pending',
+          message: 'Payment reference not yet recorded. Please try again shortly.',
+        });
+      }
+
+      logger.info({ txRef }, 'Verifying Chapa transaction for payment attempt');
+      const chapaVerifyRes = await verifyChapaTransaction(txRef);
+      
+      if (chapaVerifyRes.status !== 200 || !chapaVerifyRes.data) {
+        logger.warn({ txRef, chapaStatus: chapaVerifyRes.status, chapaData: chapaVerifyRes.data }, 'Chapa verification returned non-200');
+        return res.json({
+          status: 'pending',
+          message: 'Chapa has not confirmed this payment yet. Please try again in a moment.',
+        });
+      }
+
+      const verifiedData = chapaVerifyRes.data?.data || chapaVerifyRes.data;
+      logger.info({ txRef, verifiedStatus: verifiedData?.status }, 'Chapa verification response received');
+
+      const processResult = await processVerifiedChapaPayment({
+        txRef,
+        verifiedData,
+        ipAddress: req.ip || '',
+      });
+
+      if (processResult.status === 'success') {
+        const payment = await Payment.findById(processResult.payment?._id || processResult.payment).lean();
         return res.json({
           status: 'success',
-          alreadyPaid: true,
+          alreadyPaid: processResult.alreadyPaid || false,
           confirmation: buildConfirmation(payment, charge, cycle, student),
         });
       }
-    }
 
-    // Not confirmed — perform server-side Chapa verification
-    const txRef = attempt.parsedReference;
-    if (!txRef) {
-      return res.json({
-        status: 'pending',
-        message: 'Payment reference not yet recorded. Please try again shortly.',
+      if (processResult.status === 'pending') {
+        return res.status(202).json({
+          status: 'pending',
+          message: processResult.message || 'Payment is still being processed by Chapa.',
+        });
+      }
+
+      return res.status(400).json({
+        status: 'failed',
+        message: processResult.message || 'Payment verification failed.',
       });
     }
 
-    const chapaVerifyRes = await verifyChapaTransaction(txRef);
-    if (chapaVerifyRes.status !== 200 || !chapaVerifyRes.data) {
-      return res.json({
-        status: 'pending',
-        message: 'Chapa has not confirmed this payment yet. Please try again in a moment.',
-      });
+    // 2. Fallback: CBE/cash/manual flow keyed by Payment.doneHash
+    const payment = await Payment.findOne({ doneHash: cleanId })
+      .populate('charge')
+      .populate('cycle')
+      .populate('student')
+      .lean();
+
+    if (!payment) {
+      throw new AppError(404, 'PAYMENT_NOT_FOUND', 'Payment confirmation not found or payment was reversed.');
     }
 
-    const verifiedData = chapaVerifyRes.data?.data || chapaVerifyRes.data;
-    const processResult = await processVerifiedChapaPayment({
-      txRef,
-      verifiedData,
-      ipAddress: req.ip || '',
+    const charge = payment.charge || null;
+    const cycle = payment.cycle || null;
+    const student = payment.student || null;
+
+    res.json({
+      status: payment.status === 'confirmed' ? 'success' : 'failed',
+      confirmation: buildConfirmation(payment, charge, cycle, student),
     });
-
-    if (processResult.status === 'success') {
-      const payment = await Payment.findById(processResult.payment?._id || processResult.payment).lean();
-      return res.json({
-        status: 'success',
-        alreadyPaid: processResult.alreadyPaid || false,
-        confirmation: buildConfirmation(payment, charge, cycle, student),
-      });
-    }
-
-    if (processResult.status === 'pending') {
-      return res.status(202).json({
-        status: 'pending',
-        message: processResult.message || 'Payment is still being processed by Chapa.',
-      });
-    }
-
-    return res.status(400).json({
-      status: 'failed',
-      message: processResult.message || 'Payment verification failed.',
-    });
+  } catch (err) {
+    logger.error({ err: err.message, stack: err.stack, paymentId: cleanId }, 'Error in getChapaPaymentResult');
+    throw new AppError(500, 'SERVER_ERROR', `Something went wrong on our side: ${err.message}`);
   }
-
-  // 2. Fallback: CBE/cash/manual flow keyed by Payment.doneHash
-  const payment = await Payment.findOne({ doneHash: cleanId })
-    .populate('charge')
-    .populate('cycle')
-    .populate('student')
-    .lean();
-
-  if (!payment) {
-    throw new AppError(404, 'PAYMENT_NOT_FOUND', 'Payment confirmation not found or payment was reversed.');
-  }
-
-  const charge = payment.charge || null;
-  const cycle = payment.cycle || null;
-  const student = payment.student || null;
-
-  res.json({
-    status: payment.status === 'confirmed' ? 'success' : 'failed',
-    confirmation: buildConfirmation(payment, charge, cycle, student),
-  });
 });
 
 function buildConfirmation(payment, charge, cycle, student) {
