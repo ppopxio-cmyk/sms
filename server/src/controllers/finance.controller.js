@@ -44,9 +44,13 @@ import {
   buildListCsv,
   buildListDocx,
   buildListPdf,
+  buildCollectionsMonthlyExportXlsx,
+  buildCollectionsMonthlyExportDocx,
+  buildCollectionsMonthlyExportPdf,
 } from '../services/finance-export.service.js';
 import { sendFinanceNotification } from '../services/mail.service.js';
 import { getAssignedTeacherUserIdsForStudent, getStudentFinancialStatus } from '../services/finance.service.js';
+import { photoView } from '../services/imagekit.service.js';
 
 async function resolveStudentIdsForAcademicFilter({ batchId, departmentId, programId, courseId }) {
   if (!batchId && !departmentId && !programId && !courseId) return null;
@@ -417,12 +421,27 @@ export const listCollections = asyncHandler(async (req, res) => {
   ]);
 
   const now = new Date();
-  const enriched = charges.map((c) => ({
-    ...c,
-    id: String(c._id),
-    isOverdue: c.status === 'unpaid' && new Date(c.dueAt) < now,
-    amountDueEtb: (c.amountDue / 100).toFixed(2),
-  }));
+  const enriched = charges.map((c) => {
+    const photo = photoView(c.student?.photo);
+    return {
+      ...c,
+      id: String(c._id),
+      isOverdue: c.status === 'unpaid' && new Date(c.dueAt) < now,
+      amountDueEtb: (c.amountDue / 100).toFixed(2),
+      student: c.student
+        ? {
+            ...c.student,
+            photo: photo
+              ? {
+                  ...photo,
+                  url: photo.url,
+                  thumbnailUrl: photo.thumbnailUrl,
+                }
+              : null,
+          }
+        : null,
+    };
+  });
 
   res.json({ charges: enriched, total, page: Number(page), pages: Math.ceil(total / Number(limit)) });
 });
@@ -464,6 +483,133 @@ export const revokeWaiverHandler = asyncHandler(async (req, res) => {
   const result = await revokeWaiver(id, req.body.reason, req.user?.id);
   audit({ req, action: 'finance.waiver_revoked', targetType: 'Waiver', targetId: id, meta: { reason: req.body.reason } });
   res.json({ waiver: result });
+});
+
+// Temporary in-memory storage for 2FA waiver authorization codes
+const waiverAuthCodes = new Map();
+
+export const requestWaiverVerificationCode = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user || !user.email) {
+    throw new AppError(400, 'NO_EMAIL', 'Your accountant account does not have a registered email address.');
+  }
+
+  // 6-digit numeric OTP code
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+
+  waiverAuthCodes.set(String(user._id || user.id), {
+    codeHash,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    email: user.email,
+  });
+
+  await sendFinanceNotification({
+    to: user.email,
+    title: 'Financial Waiver / Scholarship 2FA Code',
+    message: `Your 6-digit verification code to authorize student fee waivers/scholarships is: ${code}. Valid for 10 minutes. If you did not initiate this request, contact system administration.`,
+  }).catch((err) => {
+    // Log error but don't crash
+  });
+
+  res.json({ success: true, message: `Verification code sent to ${user.email}.` });
+});
+
+export const batchApplyWaivers = asyncHandler(async (req, res) => {
+  const { studentId, cycleIds, type = 'full', amount, reason, scholarshipCollege, verificationCode } = req.body;
+
+  if (!studentId || !Array.isArray(cycleIds) || cycleIds.length === 0) {
+    throw new AppError(400, 'FIELD_REQUIRED', 'Please select a student and at least one monthly cycle.');
+  }
+  if (!reason || !String(reason).trim()) {
+    throw new AppError(400, 'REASON_REQUIRED', 'A reason for granting the waiver/scholarship is required.');
+  }
+  if (!verificationCode || !String(verificationCode).trim()) {
+    throw new AppError(400, 'CODE_REQUIRED', 'Please enter the 6-digit verification code sent to your email.');
+  }
+
+  const userId = String(req.user?._id || req.user?.id);
+  const record = waiverAuthCodes.get(userId);
+  if (!record || Date.now() > record.expiresAt) {
+    throw new AppError(400, 'CODE_EXPIRED', 'Verification code has expired. Please click Request Code to get a fresh code.');
+  }
+
+  const inputHash = crypto.createHash('sha256').update(String(verificationCode).trim()).digest('hex');
+  if (inputHash !== record.codeHash) {
+    throw new AppError(400, 'CODE_INVALID', 'Invalid verification code. Please check your email and try again.');
+  }
+
+  // Find student
+  const student = await Student.findOne({
+    $or: [
+      { studentId: String(studentId).toUpperCase().trim() },
+      { _id: mongoose.Types.ObjectId.isValid(studentId) ? studentId : null },
+    ],
+  });
+  if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'Student record not found.');
+
+  const createdWaivers = [];
+
+  for (const cycleId of cycleIds) {
+    let charge = await StudentCharge.findOne({ student: student._id, cycle: cycleId });
+    const cycle = await PaymentCycle.findById(cycleId);
+    if (!cycle) continue;
+
+    if (!charge) {
+      charge = await StudentCharge.create({
+        student: student._id,
+        cycle: cycle._id,
+        studentId: student.studentId,
+        studentName: student.fullName || `${student.firstName} ${student.lastName}`,
+        department: student.department || '',
+        programme: student.programme || '',
+        batch: student.batch || '',
+        category: student.studentCategory || 'regular',
+        amountDue: cycle.amount,
+        dueAt: cycle.dueAt,
+        status: 'unpaid',
+      });
+    }
+
+    if (charge.status === 'paid' || charge.status === 'waived') {
+      continue;
+    }
+
+    const waiverAmount = type === 'partial' ? Math.round(Number(amount) * 100) : charge.amountDue;
+    const result = await createWaiver({
+      chargeId: charge._id,
+      amount: waiverAmount,
+      type,
+      reason: String(reason).trim(),
+      scholarshipCollege: scholarshipCollege || '',
+      sendEmail: true,
+      userId: req.user?.id,
+    });
+
+    createdWaivers.push(result.waiver);
+  }
+
+  // Delete used code
+  waiverAuthCodes.delete(userId);
+
+  audit({
+    req,
+    action: 'finance.batch_waiver_granted',
+    targetType: 'Student',
+    targetId: student._id,
+    meta: {
+      studentId: student.studentId,
+      grantedCount: createdWaivers.length,
+      reason,
+      scholarshipCollege,
+    },
+  });
+
+  res.json({
+    success: true,
+    message: `Successfully granted waivers for ${createdWaivers.length} month cycle(s).`,
+    grantedCount: createdWaivers.length,
+  });
 });
 
 export const listWaivers = asyncHandler(async (req, res) => {
@@ -742,9 +888,20 @@ export const listOverdueHolds = asyncHandler(async (req, res) => {
 
   if (search) {
     const s = String(search).trim();
+    const studentMatches = await Student.find({
+      $or: [
+        { studentId: new RegExp(s, 'i') },
+        { fullName: new RegExp(s, 'i') },
+        { firstName: new RegExp(s, 'i') },
+        { lastName: new RegExp(s, 'i') },
+      ],
+    }).select('_id').lean();
+    const matchedIds = studentMatches.map((sm) => sm._id);
+
     filter.$or = [
       { studentId: new RegExp(s, 'i') },
       { studentName: new RegExp(s, 'i') },
+      { student: { $in: matchedIds } },
     ];
   }
 
@@ -767,11 +924,12 @@ export const listOverdueHolds = asyncHandler(async (req, res) => {
     const sKey = String(c.student?._id || c.student);
     if (!studentMap.has(sKey)) {
       const st = c.student || {};
+      const p = photoView(st.photo);
       studentMap.set(sKey, {
         id: sKey,
         studentId: st.studentId || c.studentId,
         fullName: st.fullName || c.studentName,
-        photoUrl: st.photo?.url || st.photo?.filePath || null,
+        photoUrl: p?.thumbnailUrl || p?.url || null,
         programme: st.program?._id ? programNameMap.get(String(st.program._id)) : c.programme || '',
         batch: st.batch?.name || c.batch || '',
         charges: [],
@@ -1019,6 +1177,8 @@ export const getStudentProfile = asyncHandler(async (req, res) => {
     .populate('batch', 'name')
     .lean();
   if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'Student record not found.');
+  const pv = photoView(student.photo);
+  student.photo = pv ? { ...pv, url: pv.url, thumbnailUrl: pv.thumbnailUrl } : student.photo;
 
   const [charges, payments, waivers, holdStatus] = await Promise.all([
     StudentCharge.find({ student: student._id })
@@ -1168,18 +1328,22 @@ export const searchStudents = asyncHandler(async (req, res) => {
     .lean();
 
   res.json({
-    students: students.map((s) => ({
-      id: String(s._id),
-      studentId: s.studentId,
-      fullName: s.fullName,
-      department: s.department?.name || '',
-      programme: s.program?.name || '',
-      batch: s.batch?.name || '',
-      category: s.studentCategory || 'regular',
-      photoUrl: s.photo?.url || s.photo?.filePath || null,
-      phone: s.phone || '',
-      email: s.email || '',
-    })),
+    students: students.map((s) => {
+      const p = photoView(s.photo);
+      return {
+        id: String(s._id),
+        _id: String(s._id),
+        studentId: s.studentId,
+        fullName: s.fullName,
+        department: s.department?.name || '',
+        programme: s.program?.name || '',
+        batch: s.batch?.name || '',
+        category: s.studentCategory || 'regular',
+        photoUrl: p?.thumbnailUrl || p?.url || null,
+        phone: s.phone || '',
+        email: s.email || '',
+      };
+    }),
   });
 });
 
@@ -1208,6 +1372,8 @@ async function buildStudentFinanceSnapshot(id) {
     .populate('batch', 'name')
     .lean();
   if (!student) throw new AppError(404, 'STUDENT_NOT_FOUND', 'Student record not found.');
+  const pv = photoView(student.photo);
+  student.photo = pv ? { ...pv, url: pv.url, thumbnailUrl: pv.thumbnailUrl } : student.photo;
 
   const [charges, payments, waivers, holdStatus] = await Promise.all([
     StudentCharge.find({ student: student._id })
@@ -1347,12 +1513,18 @@ export const exportCollections = asyncHandler(async (req, res) => {
   }
 
   const {
+    ethYear,
     cycleId, department, programme, batch, category, status, search, overdueOnly,
     batchId, departmentId, courseId, programId,
   } = req.query;
 
   const filter = {};
   if (cycleId) filter.cycle = cycleId;
+  else if (ethYear) {
+    const cyclesOfYear = await PaymentCycle.find({ ethYear: Number(ethYear) }).select('_id').lean();
+    filter.cycle = { $in: cyclesOfYear.map((c) => c._id) };
+  }
+
   if (department) filter.department = new RegExp(department, 'i');
   if (programme) filter.programme = new RegExp(programme, 'i');
   if (batch) filter.batch = new RegExp(batch, 'i');
@@ -1375,40 +1547,116 @@ export const exportCollections = asyncHandler(async (req, res) => {
     .populate('student', 'studentId fullName photo department program batch')
     .populate('payment', 'receiptNumber method bankReference paidAt payerName')
     .sort({ createdAt: 1 })
-    .limit(5000)
+    .limit(10000)
     .lean();
 
   const programNameMap = await getProgramNameMap();
-  const rows = charges.map((c) => ({
-    studentId: c.student?.studentId || c.studentId,
-    studentName: c.student?.fullName || c.studentName,
-    programme: c.student?.program?._id ? programNameMap.get(String(c.student.program._id)) : c.programme || '',
-    department: c.department || '',
-    batch: c.student?.batch?.name || c.batch || '',
-    cycle: c.cycle?.title || '-',
-    month: c.cycle?.ethMonth || '',
-    year: c.cycle?.ethYear || '',
-    amountDueEtb: (c.amountDue / 100).toFixed(2),
-    status: String(c.status || '').toUpperCase(),
-    receiptNumber: c.payment?.receiptNumber || '',
-    method: c.payment?.method ? String(c.payment.method).replace(/_/g, ' ').toUpperCase() : '',
-    paidAt: c.paidAt ? new Date(c.paidAt).toISOString().slice(0, 10) : '',
-  }));
 
+  // Group charges by Ethiopian month
+  const monthsMap = new Map();
+  for (const c of charges) {
+    const mNum = c.cycle?.ethMonth || 1;
+    const yNum = c.cycle?.ethYear || Number(ethYear) || 2019;
+    const mKey = `${yNum}-${String(mNum).padStart(2, '0')}`;
+    if (!monthsMap.has(mKey)) {
+      monthsMap.set(mKey, {
+        monthIndex: mNum,
+        monthName: ETH_MONTHS[mNum - 1] || `Month ${mNum}`,
+        ethYear: yNum,
+        cycleTitle: c.cycle?.title || `${ETH_MONTHS[mNum - 1] || 'Month'} ${yNum}`,
+        totalStudents: 0,
+        paidStudents: 0,
+        unpaidStudents: 0,
+        waivedStudents: 0,
+        totalBilledSantim: 0,
+        totalCollectedSantim: 0,
+        rows: [],
+      });
+    }
+
+    const group = monthsMap.get(mKey);
+    group.totalStudents++;
+    const amt = c.amountDue || 0;
+    group.totalBilledSantim += amt;
+    if (c.status === 'paid') {
+      group.paidStudents++;
+      group.totalCollectedSantim += amt;
+    } else if (c.status === 'waived') {
+      group.waivedStudents++;
+    } else {
+      group.unpaidStudents++;
+    }
+
+    group.rows.push({
+      studentId: c.student?.studentId || c.studentId || '-',
+      studentName: c.student?.fullName || c.studentName || '-',
+      programme: c.student?.program?._id ? programNameMap.get(String(c.student.program._id)) : c.programme || '',
+      department: c.department || '',
+      batch: c.student?.batch?.name || c.batch || '',
+      cycle: c.cycle?.title || '-',
+      month: c.cycle?.ethMonth || '',
+      year: c.cycle?.ethYear || '',
+      amountDueEtb: (amt / 100).toFixed(2),
+      status: String(c.status || '').toUpperCase(),
+      receiptNumber: c.payment?.receiptNumber || '',
+      method: c.payment?.method ? String(c.payment.method).replace(/_/g, ' ').toUpperCase() : '',
+      paidAt: c.paidAt ? new Date(c.paidAt).toISOString().slice(0, 10) : '',
+    });
+  }
+
+  // Sorted months
+  const sortedKeys = Array.from(monthsMap.keys()).sort();
+  const monthsData = sortedKeys.map((k) => {
+    const g = monthsMap.get(k);
+    return {
+      monthIndex: g.monthIndex,
+      monthName: g.monthName,
+      ethYear: g.ethYear,
+      cycleTitle: g.cycleTitle,
+      totalStudents: g.totalStudents,
+      paidStudents: g.paidStudents,
+      unpaidStudents: g.unpaidStudents,
+      waivedStudents: g.waivedStudents,
+      totalBilledEtb: (g.totalBilledSantim / 100).toFixed(2),
+      totalCollectedEtb: (g.totalCollectedSantim / 100).toFixed(2),
+      rows: g.rows,
+    };
+  });
+
+  const selectedYearLabel = ethYear || (monthsData[0]?.ethYear ?? 'All');
   const meta = {
-    Rows: rows.length,
-    Programme: rowProgrammeLabel(rows, programme) || programme || '-',
-    Status: status || (overdueOnly === 'true' ? 'overdue only' : 'all'),
+    AcademicYear: `${selectedYearLabel} EC`,
+    TotalMonths: monthsData.length,
+    TotalRecords: charges.length,
+    Status: status || (overdueOnly === 'true' ? 'Overdue Only' : 'All'),
   };
 
-  const filename = `Payment-Status-Programme-${Date.now()}`;
+  const filename = `Fee-Collections-${selectedYearLabel}-EC-${Date.now()}`;
   let buffer;
-  if (format === 'xlsx') buffer = await buildListXlsx({ title: 'Payment Status Report', meta, rows });
-  else if (format === 'docx') buffer = await buildListDocx({ title: 'Payment Status Report', meta, rows });
-  else if (format === 'pdf') buffer = await buildListPdf({ title: 'Payment Status Report', meta, rows });
-  else buffer = buildListCsv(rows);
+  if (format === 'xlsx') {
+    buffer = await buildCollectionsMonthlyExportXlsx({
+      title: `Student Fee Collections — Academic Year ${selectedYearLabel} EC`,
+      meta,
+      monthsData,
+    });
+  } else if (format === 'docx') {
+    buffer = await buildCollectionsMonthlyExportDocx({
+      title: `Student Fee Collections — Academic Year ${selectedYearLabel} EC`,
+      meta,
+      monthsData,
+    });
+  } else if (format === 'pdf') {
+    buffer = await buildCollectionsMonthlyExportPdf({
+      title: `Student Fee Collections — Academic Year ${selectedYearLabel} EC`,
+      meta,
+      monthsData,
+    });
+  } else {
+    const flatRows = monthsData.flatMap((m) => m.rows);
+    buffer = buildListCsv(flatRows);
+  }
 
-  audit({ req, action: 'finance.collections_exported', targetType: 'StudentCharge', meta: { format, rows: rows.length } });
+  audit({ req, action: 'finance.collections_exported', targetType: 'StudentCharge', meta: { format, rows: charges.length, ethYear } });
   sendExport(res, { buffer, format, filename });
 });
 
@@ -1453,12 +1701,15 @@ export const listAwardPayments = asyncHandler(async (req, res) => {
   ]);
 
   res.json({
-    awards: awards.map((a) => ({
-      ...a,
-      id: String(a._id),
-      amountEtb: (a.amount / 100).toFixed(2),
-      photoUrl: a.student?.photo?.url || a.student?.photo?.filePath || null,
-    })),
+    awards: awards.map((a) => {
+      const p = photoView(a.student?.photo);
+      return {
+        ...a,
+        id: String(a._id),
+        amountEtb: (a.amount / 100).toFixed(2),
+        photoUrl: p?.thumbnailUrl || p?.url || null,
+      };
+    }),
     competitions: byCompetition.map((c) => ({
       name: c._id,
       count: c.count,
@@ -1472,8 +1723,11 @@ export const listAwardPayments = asyncHandler(async (req, res) => {
 });
 
 export const createAwardPayment = asyncHandler(async (req, res) => {
-  const { student, competition, place, amountEtb, method, proofUrl, awardedAt, notes } = req.body;
-  if (!student || !competition || !place || !amountEtb) {
+  const { student, studentId, competition, place, amountEtb, amount, method, proofUrl, awardedAt, notes } = req.body;
+  const targetStudent = student || studentId;
+  const targetAmount = amountEtb !== undefined ? Number(amountEtb) : amount !== undefined ? Number(amount) / 100 : undefined;
+
+  if (!targetStudent || !competition || !place || targetAmount === undefined || isNaN(targetAmount)) {
     throw new AppError(400, 'FIELD_REQUIRED', 'Student, competition, place and amount are required.');
   }
   if (!['1st', '2nd', '3rd', '4th'].includes(String(place))) {
@@ -1487,16 +1741,16 @@ export const createAwardPayment = asyncHandler(async (req, res) => {
   }
 
   let studentDoc;
-  if (mongoose.Types.ObjectId.isValid(student)) {
-    studentDoc = await Student.findById(student);
+  if (mongoose.Types.ObjectId.isValid(targetStudent)) {
+    studentDoc = await Student.findById(targetStudent);
   }
   if (!studentDoc) {
-    studentDoc = await Student.findOne({ studentId: String(student).toUpperCase().trim() });
+    studentDoc = await Student.findOne({ studentId: String(targetStudent).toUpperCase().trim() });
   }
   if (!studentDoc) throw new AppError(404, 'STUDENT_NOT_FOUND', 'Student not found by id or student number.');
 
-  const amount = Math.round(Number(amountEtb) * 100);
-  if (!Number.isFinite(amount) || amount < 1) {
+  const amountSantim = Math.round(targetAmount * 100);
+  if (!Number.isFinite(amountSantim) || amountSantim < 1) {
     throw new AppError(400, 'BAD_AMOUNT', 'Enter a valid award amount.');
   }
 
@@ -1508,7 +1762,7 @@ export const createAwardPayment = asyncHandler(async (req, res) => {
     batch: studentDoc.batch || '',
     competition: String(competition).trim(),
     place,
-    amount,
+    amount: amountSantim,
     method: method || 'cash',
     proofUrl: proofUrl || '',
     awardedAt: awardedAt ? new Date(awardedAt) : new Date(),
@@ -1629,37 +1883,57 @@ export const exportYearlyReport = asyncHandler(async (req, res) => {
     throw new AppError(400, 'BAD_FORMAT', 'Format must be one of pdf, docx, xlsx, csv.');
   }
 
-  // Reuse the same aggregation by calling the service directly
+  // Support both full year and single month export
   const ethYear = Number(req.query.ethYear) || (await latestEthYear());
+  const ethMonth = req.query.ethMonth ? Number(req.query.ethMonth) : null;
 
-  // Minimal duplicate of getYearlyReport logic for export
-  const cycles = await PaymentCycle.find({ ethYear }).lean();
+  const cycleFilter = { ethYear };
+  if (ethMonth) cycleFilter.ethMonth = ethMonth;
+
+  const cycles = await PaymentCycle.find(cycleFilter).lean();
   const cycleIds = cycles.map((c) => c._id);
   const [yearCharges, yearPayments] = await Promise.all([
-    StudentCharge.find({ cycle: { $in: cycleIds } }).populate('cycle', 'ethYear ethMonth').populate('student', 'program programme').lean(),
-    Payment.find({ cycle: { $in: cycleIds } }).populate('cycle', 'ethYear ethMonth').lean(),
+    StudentCharge.find({ cycle: { $in: cycleIds } })
+      .populate('cycle', 'ethYear ethMonth title')
+      .populate('student', 'studentId fullName program batch')
+      .lean(),
+    Payment.find({ cycle: { $in: cycleIds } })
+      .populate('cycle', 'ethYear ethMonth')
+      .lean(),
   ]);
   const programNameMap = await getProgramNameMap();
 
   const rows = yearCharges.map((c) => ({
-    studentId: c.studentId,
-    studentName: c.studentName,
+    studentId: c.student?.studentId || c.studentId,
+    studentName: c.student?.fullName || c.studentName,
     programme: c.student?.program?._id ? programNameMap.get(String(c.student.program._id)) || '' : c.programme || '',
-    batch: c.batch || '',
-    cycle: `${c.cycle?.ethMonth}/${c.cycle?.ethYear}`,
+    batch: c.student?.batch?.name || c.batch || '',
+    cycle: c.cycle?.title || `${c.cycle?.ethMonth}/${c.cycle?.ethYear}`,
     amountDueEtb: (c.amountDue / 100).toFixed(2),
     status: String(c.status || '').toUpperCase(),
     paidAt: c.paidAt ? new Date(c.paidAt).toISOString().slice(0, 10) : '',
   }));
 
-  const meta = { EthYear: ethYear, Cycles: cycles.length, Charges: rows.length };
-  const filename = `Finance-Report-EC-${ethYear}`;
+  const monthName = ethMonth ? ETH_MONTHS[ethMonth - 1] || `Month ${ethMonth}` : null;
+  const reportTitle = monthName
+    ? `Finance Report — ${monthName} EC ${ethYear}`
+    : `Finance Report EC ${ethYear}`;
+  const meta = {
+    EthYear: `${ethYear} EC`,
+    Period: monthName || 'Full Academic Year',
+    Cycles: cycles.length,
+    Charges: rows.length,
+  };
+  const filename = monthName
+    ? `Finance-Report-${monthName}-EC-${ethYear}`
+    : `Finance-Report-EC-${ethYear}`;
+
   let buffer;
-  if (format === 'xlsx') buffer = await buildListXlsx({ title: `Finance Report EC ${ethYear}`, meta, rows });
-  else if (format === 'docx') buffer = await buildListDocx({ title: `Finance Report EC ${ethYear}`, meta, rows });
-  else if (format === 'pdf') buffer = await buildListPdf({ title: `Finance Report EC ${ethYear}`, meta, rows });
+  if (format === 'xlsx') buffer = await buildListXlsx({ title: reportTitle, meta, rows });
+  else if (format === 'docx') buffer = await buildListDocx({ title: reportTitle, meta, rows });
+  else if (format === 'pdf') buffer = await buildListPdf({ title: reportTitle, meta, rows });
   else buffer = buildListCsv(rows);
 
-  audit({ req, action: 'finance.report_exported', targetType: 'PaymentCycle', meta: { ethYear, format, rows: rows.length } });
+  audit({ req, action: 'finance.report_exported', targetType: 'PaymentCycle', meta: { ethYear, ethMonth, format, rows: rows.length } });
   sendExport(res, { buffer, format, filename });
 });

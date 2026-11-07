@@ -11,6 +11,8 @@ import {
   FileBarChart,
   Settings,
   Sparkles,
+  BarChart3,
+  Megaphone,
 } from 'lucide-react';
 
 const financeNavSections = [
@@ -22,6 +24,7 @@ const financeNavSections = [
       { to: '/accountant/collections', label: 'Collections', icon: Receipt },
       { to: '/accountant/ledger', label: 'Payments Ledger', icon: BookOpen },
       { to: '/accountant/awards', label: 'Award Payments', icon: Trophy },
+      { to: '/accountant/announcements', label: 'Announcements', icon: Megaphone },
     ],
   },
   {
@@ -34,6 +37,7 @@ const financeNavSections = [
   {
     title: 'Analytics & Admin',
     items: [
+      { to: '/accountant/analytics', label: 'Finance Analytics', icon: BarChart3 },
       { to: '/accountant/reports', label: 'Reports & 13-Months', icon: FileBarChart },
       { to: '/accountant/settings', label: 'Finance Settings', icon: Settings },
     ],

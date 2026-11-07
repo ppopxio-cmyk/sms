@@ -18,6 +18,8 @@ import {
   recordPaymentHandler,
   createWaiverHandler,
   revokeWaiverHandler,
+  requestWaiverVerificationCode,
+  batchApplyWaivers,
   listWaivers,
   extendDeadlineHandler,
   listLedger,
@@ -87,6 +89,8 @@ router.post('/overdue/notify-teachers', requirePermission('finance:cycles'), not
 
 // Waivers
 router.get('/waivers', requirePermission('finance:view'), listWaivers);
+router.post('/waivers/request-code', requirePermission('finance:waivers'), requestWaiverVerificationCode);
+router.post('/waivers/batch-apply', requirePermission('finance:waivers'), batchApplyWaivers);
 router.post('/waivers/:id/revoke', requirePermission('finance:waivers'), revokeWaiverHandler);
 
 // Student Profile, search & exports

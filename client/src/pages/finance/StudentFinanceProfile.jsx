@@ -35,6 +35,7 @@ export default function StudentFinanceProfile({ readOnly = false }) {
   const location = useLocation();
   const isRegistrar = readOnly || location.pathname.startsWith('/registrar');
   const [exporting, setExporting] = useState('');
+  const [imgError, setImgError] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['finance', 'student', id],
@@ -96,15 +97,16 @@ export default function StudentFinanceProfile({ readOnly = false }) {
       {/* Student Banner */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex items-center gap-4">
-          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-brand-600 text-2xl font-bold text-white shadow-sm overflow-hidden">
-            {photoUrl ? (
+          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-2xl font-bold text-slate-600 shadow-sm overflow-hidden border border-slate-200">
+            {photoUrl && !imgError ? (
               <img
                 src={photoUrl}
                 alt={fullName}
                 className="h-full w-full object-cover"
+                onError={() => setImgError(true)}
               />
             ) : (
-              (fullName || 'S')[0]
+              <User className="h-10 w-10 text-slate-400" />
             )}
           </div>
 

@@ -5,7 +5,7 @@ export const PERMISSIONS = {
   'sessions:terminate': ['ADMIN'],
   'audit:read': ['ADMIN'],
   'users:manage': ['ADMIN'],
-  'announcements:manage': ['ADMIN'],
+  'announcements:manage': ['ADMIN', 'ACCOUNTANT'],
   'settings:manage': ['ADMIN'],
   'exports:manage': ['ADMIN'],
   'registrar:dashboard': ['REGISTRAR'],

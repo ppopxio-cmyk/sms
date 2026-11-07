@@ -81,7 +81,23 @@ export default function FinanceCollections() {
   const [selectedProgram, setSelectedProgram] = useState('');
   const [isFilterApplied, setIsFilterApplied] = useState(false);
   const [exporting, setExporting] = useState('');
+  const [exportYear, setExportYear] = useState('');
   const toastIdCollections = `collectionsexport`;
+
+  // Real academic years for export
+  const { data: yearsData } = useQuery({
+    queryKey: ['finance', 'reportYears'],
+    queryFn: async () => {
+      const res = await api.get('/finance/academic-years');
+      return res.data?.years || [];
+    },
+  });
+
+  useEffect(() => {
+    if (!exportYear && yearsData?.length) {
+      setExportYear(String(yearsData[0].ethYear));
+    }
+  }, [yearsData, exportYear]);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -132,13 +148,17 @@ export default function FinanceCollections() {
     const tid = toast.loading(`Generating ${format.toUpperCase()} export…`);
     try {
       const params = new URLSearchParams({ format });
+      if (exportYear) params.set('ethYear', exportYear);
       if (search) params.set('search', search);
       if (status) params.set('status', status);
       if (overdueOnly) params.set('overdueOnly', 'true');
       if (selectedBatch) params.set('batchId', selectedBatch);
       if (selectedDepartment) params.set('departmentId', selectedDepartment);
       if (selectedProgram) params.set('programId', selectedProgram);
-      await downloadExport(`/finance/collections/export?${params.toString()}`, `student-fee-collections.${format}`);
+      await downloadExport(
+        `/finance/collections/export?${params.toString()}`,
+        `student-fee-collections-${exportYear || 'all'}-EC.${format}`
+      );
       toast.success(`${format.toUpperCase()} exported.`, { id: tid });
     } catch (err) {
       toast.error(errorMessage(err, 'Export failed.'), { id: tid });
@@ -306,6 +326,24 @@ export default function FinanceCollections() {
               <span>Refresh</span>
             </Button>
 
+            <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Year:</span>
+              <select
+                value={exportYear}
+                onChange={(e) => setExportYear(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-slate-800 outline-none cursor-pointer"
+              >
+                {yearsData?.map((y) => (
+                  <option key={y.ethYear} value={y.ethYear}>
+                    {y.ethYear} EC
+                  </option>
+                ))}
+                {(!yearsData || yearsData.length === 0) && (
+                  <option value={new Date().getFullYear() - 7}>{new Date().getFullYear() - 7} EC</option>
+                )}
+              </select>
+            </div>
+
             <ExportButtonsBlock
               exporting={exporting}
               onExport={handleExportCollections}
@@ -347,18 +385,25 @@ export default function FinanceCollections() {
                     <tr key={charge.id} className="transition hover:bg-slate-50/70">
                       <td className="py-3.5 pl-6 pr-4">
                         <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200">
-                            {(charge.student?.photo?.url || charge.student?.photo?.filePath) ? (
+                          <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200">
+                            {charge.student?.photo?.url || charge.student?.photo?.filePath ? (
                               <img
                                 src={charge.student.photo.url || charge.student.photo.filePath}
                                 alt={charge.studentName}
                                 className="h-full w-full object-cover"
+                                onError={(e) => {
+                                  e.currentTarget.style.display = 'none';
+                                  const fallback = e.currentTarget.parentElement.querySelector('.avatar-fallback');
+                                  if (fallback) fallback.style.display = 'flex';
+                                }}
                               />
-                            ) : (
-                              <div className="flex h-full w-full items-center justify-center bg-brand-50 text-xs font-bold text-brand-700">
-                                {(charge.studentName || 'S').slice(0, 1)}
-                              </div>
-                            )}
+                            ) : null}
+                            <div
+                              className="avatar-fallback flex h-full w-full items-center justify-center bg-slate-100 text-slate-500"
+                              style={{ display: charge.student?.photo?.url || charge.student?.photo?.filePath ? 'none' : 'flex' }}
+                            >
+                              <User className="h-5 w-5 text-slate-400" />
+                            </div>
                           </div>
                           <div>
                             <Link

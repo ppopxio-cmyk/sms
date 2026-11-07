@@ -68,12 +68,13 @@ export default function FinanceOverdueHolds() {
       });
       return res.data;
     },
-    enabled: isFilterApplied,
+    enabled: isFilterApplied || Boolean(search.trim()),
   });
 
   const students = data?.students || [];
   const programmes = data?.programmes || [];
   const summary = data?.summary || {};
+  const showResults = isFilterApplied || Boolean(search.trim());
 
   const notifyMutation = useMutation({
     mutationFn: async () => {
@@ -122,11 +123,11 @@ export default function FinanceOverdueHolds() {
         </div>
       </div>
 
-      {!isFilterApplied ? (
+      {!showResults ? (
         <EmptyState
           icon={AlertTriangle}
-          title="Search or open the list"
-          message="Type a student ID/name in the box above to see overdue months, or press Refresh to list all overdue students."
+          title="Search or apply academic filter"
+          message="Type a student ID or name in the box above to see overdue months, or select an academic batch/department."
         />
       ) : (
         <>

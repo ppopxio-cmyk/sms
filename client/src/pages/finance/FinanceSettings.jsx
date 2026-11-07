@@ -9,6 +9,7 @@ import {
   Loader2,
   Bell,
   Wallet,
+  Video,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../../lib/api';
@@ -19,6 +20,7 @@ import { SkeletonPage } from '../../components/ui/Skeleton';
 
 export default function FinanceSettings() {
   const queryClient = useQueryClient();
+  const [amountInput, setAmountInput] = useState('');
 
   const [form, setForm] = useState({
     defaultBank: {
@@ -34,6 +36,7 @@ export default function FinanceSettings() {
     monthlyDefaults: {
       amount: 0,
     },
+    tutorialVideoUrl: '',
     enforcement: {
       blockDocuments: true,
       blockGraduation: true,
@@ -50,6 +53,8 @@ export default function FinanceSettings() {
 
   useEffect(() => {
     if (data) {
+      const amt = data.monthlyDefaults?.amount ?? 0;
+      setAmountInput(amt ? String(amt / 100) : '');
       setForm({
         defaultBank: {
           bank: data.defaultBank?.bank || 'Commercial Bank of Ethiopia',
@@ -62,8 +67,9 @@ export default function FinanceSettings() {
           notifyTeachersOnOverdue: data.reminders?.notifyTeachersOnOverdue ?? true,
         },
         monthlyDefaults: {
-          amount: data.monthlyDefaults?.amount ?? 0,
+          amount: amt,
         },
+        tutorialVideoUrl: data.tutorialVideoUrl || '',
         enforcement: {
           blockDocuments: data.enforcement?.blockDocuments ?? true,
           blockGraduation: data.enforcement?.blockGraduation ?? true,
@@ -227,23 +233,50 @@ export default function FinanceSettings() {
                   <input
                     type="number"
                     min="0"
-                    step="0.01"
-                    value={form.monthlyDefaults.amount ? (form.monthlyDefaults.amount / 100).toFixed(2) : ''}
-                    onChange={(e) =>
+                    step="any"
+                    value={amountInput}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setAmountInput(val);
                       setForm({
                         ...form,
                         monthlyDefaults: {
-                          amount: Math.round(Number(e.target.value || 0) * 100),
+                          amount: val === '' ? 0 : Math.round(Number(val) * 100),
                         },
-                      })
-                    }
-                    placeholder="e.g. 500.00"
-                    className="block w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm text-slate-800"
+                      });
+                    }}
+                    placeholder="e.g. 800"
+                    className="block w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm text-slate-800 focus:border-brand-500 focus:outline-none"
                   />
                 </div>
                 <p className="mt-1 text-xs text-slate-400">
-                  Saved in centimes ({form.monthlyDefaults.amount}) — {((form.monthlyDefaults.amount || 0) / 100).toFixed(2)} ETB.
-                  Leave blank to have no preset.
+                  Amount: {amountInput ? `${amountInput} ETB` : 'No default preset'}.
+                </p>
+              </div>
+            </CardBody>
+          </Card>
+
+          {/* Global Tutorial Video */}
+          <Card>
+            <CardHeader
+              title="Official Portal Tutorial Video"
+              subtitle="Global YouTube embed link shown to students across all monthly payment cycles."
+              icon={Video}
+            />
+            <CardBody className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-600">
+                  YouTube Tutorial Embed Link
+                </label>
+                <input
+                  type="url"
+                  value={form.tutorialVideoUrl || ''}
+                  onChange={(e) => setForm({ ...form, tutorialVideoUrl: e.target.value })}
+                  placeholder="e.g. https://www.youtube.com/watch?v=VIDEO_ID or https://youtu.be/VIDEO_ID"
+                  className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none"
+                />
+                <p className="mt-1 text-xs text-slate-400">
+                  Shared across all monthly fee portals. Students can watch it anytime or skip.
                 </p>
               </div>
             </CardBody>

@@ -85,11 +85,13 @@ export default function FinanceAwards() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
+      const studentId = pickedStudent?._id || pickedStudent?.id;
       const res = await api.post('/finance/awards', {
-        student: pickedStudent._id,
+        student: studentId,
         competition: form.competition,
         place: form.place,
         amount: Math.round(Number(form.amount) * 100),
+        amountEtb: form.amount,
         method: form.method,
         proofUrl: form.proofUrl || undefined,
         notes: form.notes || undefined,

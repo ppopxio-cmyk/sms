@@ -387,19 +387,30 @@ body {
     background: white !important;
   }
 
-  /* POS-style: when printing a page that contains a .print-receipt, print ONLY the
-     receipt and nothing else on the page (no toolbars, no headers, no sidebars). */
-  body > *:not(.print-receipt):not(.print-receipt *) {
+  /* Clean print view: hide navigation, headers, sidebars, buttons, and decorative elements */
+  #root {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+
+  nav, aside, header:not(.print-header), footer, .no-print, [class*="print:hidden"] {
     display: none !important;
   }
 
+  /* Printable receipt voucher layout */
   .print-receipt {
     display: block !important;
-    max-width: 80mm !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    font-size: 11px !important;
-    color: black !important;
+    width: 100% !important;
+    max-width: 210mm !important;
+    margin: 0 auto !important;
+    padding: 24px !important;
+    background: white !important;
+    color: #0f172a !important;
+    box-shadow: none !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 12px !important;
   }
 
   .print-receipt * {

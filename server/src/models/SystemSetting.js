@@ -113,6 +113,7 @@ const financeSchema = new mongoose.Schema(
     monthlyDefaults: {
       amount: { type: Number, min: 0, max: 100000000, default: 0 },
     },
+    tutorialVideoUrl: { type: String, trim: true, default: '' },
   },
   { _id: false },
 );

@@ -285,6 +285,7 @@ export default function App() {
               <Route path="/accountant/collections" element={<FinanceCollections />} />
               <Route path="/accountant/ledger" element={<FinanceLedger />} />
               <Route path="/accountant/awards" element={<FinanceAwards />} />
+              <Route path="/accountant/announcements" element={<AdminAnnouncements />} />
               <Route path="/accountant/analytics" element={<FinanceAnalytics />} />
               <Route path="/accountant/overdue" element={<FinanceOverdueHolds />} />
               <Route path="/accountant/waivers" element={<FinanceWaivers />} />

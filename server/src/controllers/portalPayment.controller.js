@@ -69,16 +69,15 @@ export const getCyclePublicDetails = asyncHandler(async (req, res) => {
     throw new AppError(404, 'NOT_FOUND', 'This monthly payment link does not exist, has closed, or is not yet open.');
   }
 
-  const now = new Date();
-  if (cycle.opensAt && now < cycle.opensAt) {
-    throw new AppError(404, 'NOT_FOUND', 'This payment portal has not yet opened.');
-  }
-
   // Calculate late fee if overdue
   const lateFee = calculateOverdueLateFee(cycle.dueAt, cycle.amount);
 
   // Format Ethiopian label
   const ethMonthName = ETH_MONTHS[cycle.ethMonth - 1] || 'Month';
+
+  // Global settings for tutorial video fallback
+  const settings = await SystemSetting.findOne({ key: 'global' }).lean();
+  const globalTutorial = settings?.finance?.tutorialVideoUrl || '';
 
   res.json({
     cycle: {
@@ -90,7 +89,7 @@ export const getCyclePublicDetails = asyncHandler(async (req, res) => {
       monthName: ethMonthName,
       amount: cycle.amount,
       amountEtb: (cycle.amount / 100).toFixed(2),
-      tutorialVideoUrl: cycle.tutorialVideoUrl || '',
+      tutorialVideoUrl: cycle.tutorialVideoUrl || globalTutorial || '',
       daysOverdue: lateFee.daysOverdue,
       overduePenaltyEtb: lateFee.penaltyEtb,
       totalAmountEtb: (lateFee.totalAmountSantim / 100).toFixed(2),
@@ -573,6 +572,9 @@ export const chapaWebhookHandler = asyncHandler(async (req, res) => {
  * portal (slug e.g. tikimt-2019) and pay by ID.
  */
 export const listPublicPaymentCycles = asyncHandler(async (_req, res) => {
+  const settings = await SystemSetting.findOne({ key: 'global' }).lean();
+  const globalTutorial = settings?.finance?.tutorialVideoUrl || '';
+
   const cycles = await PaymentCycle.find({ deletedAt: null, status: { $in: ['open', 'closed'] } })
     .sort({ ethYear: -1, ethMonth: 1 })
     .lean();
@@ -593,7 +595,7 @@ export const listPublicPaymentCycles = asyncHandler(async (_req, res) => {
       dueAt: c.dueAt,
       amount: c.amount,
       amountEtb: (c.amount / 100).toFixed(2),
-      tutorialVideoUrl: c.tutorialVideoUrl || '',
+      tutorialVideoUrl: c.tutorialVideoUrl || globalTutorial || '',
     });
   }
 
@@ -601,7 +603,7 @@ export const listPublicPaymentCycles = asyncHandler(async (_req, res) => {
     .sort((a, b) => Number(b) - Number(a))
     .map((y) => ({ ethYear: Number(y), months: byYear[y] }));
 
-  res.json({ years });
+  res.json({ years, tutorialVideoUrl: globalTutorial });
 });
 
 /**

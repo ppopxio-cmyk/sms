@@ -25,6 +25,7 @@ const money = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDig
 
 export default function FinanceReports() {
   const [selectedYear, setSelectedYear] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState('');
   const [exporting, setExporting] = useState('');
 
   // Real academic years that have payment cycles on record
@@ -79,12 +80,15 @@ export default function FinanceReports() {
   const programmeRows = data?.programmeRows || [];
   const methodRows = data?.methodRows || [];
 
-  const handleExport = async (format) => {
+  const handleExport = async (format, overrideMonth = null) => {
+    const monthToExport = overrideMonth !== null ? overrideMonth : selectedMonth;
     setExporting(format);
     try {
+      const monthParam = monthToExport ? `&ethMonth=${monthToExport}` : '';
+      const monthLabel = monthToExport ? `-${ETH_MONTHS[Number(monthToExport) - 1] || 'Month'}` : '';
       await downloadExport(
-        `/finance/reports/export?ethYear=${selectedYear}&format=${format}`,
-        `Finance-Report-${selectedYear}EC.${format}`,
+        `/finance/reports/export?ethYear=${selectedYear}${monthParam}&format=${format}`,
+        `Finance-Report${monthLabel}-${selectedYear}EC.${format}`,
       );
       toast.success(`${format.toUpperCase()} report downloaded.`);
     } catch (err) {
@@ -126,9 +130,25 @@ export default function FinanceReports() {
 
       {/* Export toolbar */}
       <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Period:</span>
+          <select
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="bg-transparent text-xs font-semibold text-slate-800 outline-none cursor-pointer"
+          >
+            <option value="">Full Academic Year (12 Months)</option>
+            {ETH_MONTHS.slice(0, 12).map((m, idx) => (
+              <option key={idx + 1} value={idx + 1}>
+                {idx + 1}. {m}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="flex items-center overflow-hidden rounded-xl border border-slate-200 shadow-sm">
           <span className="flex items-center gap-1 bg-slate-50 px-2.5 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
-            <Download className="h-3.5 w-3.5" /> Export Yearly Report
+            <Download className="h-3.5 w-3.5" /> Export {selectedMonth ? ETH_MONTHS[Number(selectedMonth) - 1] : 'Yearly'}
           </span>
           <button
             type="button"
@@ -221,6 +241,7 @@ export default function FinanceReports() {
                       <th className="py-3 px-4">Charges</th>
                       <th className="py-3 px-4">Payments</th>
                       <th className="py-3 px-4">Paid ETB</th>
+                      <th className="py-3 pr-6 text-right">Export Month</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -232,6 +253,26 @@ export default function FinanceReports() {
                         <td className="py-3 px-4 text-xs text-slate-500">{r.charges}</td>
                         <td className="py-3 px-4 text-xs text-slate-500">{r.paidCount}</td>
                         <td className="py-3 px-4 font-mono text-xs font-bold text-slate-900">{money(r.paid)}</td>
+                        <td className="py-3 pr-6 text-right">
+                          <div className="flex justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleExport('xlsx', r.month)}
+                              className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50"
+                              title={`Export ${ETH_MONTHS[Number(r.month) - 1]} to Excel`}
+                            >
+                              Excel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleExport('pdf', r.month)}
+                              className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50"
+                              title={`Export ${ETH_MONTHS[Number(r.month) - 1]} to PDF`}
+                            >
+                              PDF
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

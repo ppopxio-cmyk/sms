@@ -109,15 +109,44 @@ export default function FinancePaymentCycles() {
     title: 'Tikimt 2019',
     ethYear: 2019,
     ethMonth: 2,
-    openDay: 11,
-    dueDay: 18,
+    openDay: 25,
+    dueEthYear: 2019,
+    dueEthMonth: 2,
+    dueDay: 30,
     amountEtb: '1500',
-    tutorialVideoUrl: '',
     targetAll: true,
   });
-  const [showTutorialInput, setShowTutorialInput] = useState(false);
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [showGlobalTutorialModal, setShowGlobalTutorialModal] = useState(false);
+  const [globalTutorialInput, setGlobalTutorialInput] = useState('');
+  const [savingTutorial, setSavingTutorial] = useState(false);
+
+  // Fetch global finance settings for default amounts and tutorial link
+  const { data: financeSettings } = useQuery({
+    queryKey: ['finance', 'settings'],
+    queryFn: async () => (await api.get('/finance/settings')).data?.finance,
+  });
+
+  const handleOpenGlobalTutorial = () => {
+    setGlobalTutorialInput(financeSettings?.tutorialVideoUrl || '');
+    setShowGlobalTutorialModal(true);
+  };
+
+  const handleSaveGlobalTutorial = async (e) => {
+    e.preventDefault();
+    setSavingTutorial(true);
+    try {
+      await api.put('/finance/settings', { tutorialVideoUrl: globalTutorialInput.trim() });
+      queryClient.invalidateQueries({ queryKey: ['finance', 'settings'] });
+      toast.success('Global YouTube tutorial embed link updated for all monthly payment cycles!');
+      setShowGlobalTutorialModal(false);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to save tutorial link'));
+    } finally {
+      setSavingTutorial(false);
+    }
+  };
 
   // Action modals
   const [qrModalCycle, setQrModalCycle] = useState(null);
@@ -238,8 +267,12 @@ export default function FinancePaymentCycles() {
   const createMutation = useMutation({
     mutationFn: async (payload) => {
       const amountSantim = Math.round(parseFloat(payload.amountEtb) * 100);
-      const openDate = fromEthiopian(payload.ethYear, payload.ethMonth, Number(payload.openDay) || 11);
-      const dueDate = fromEthiopian(payload.ethYear, payload.ethMonth, Number(payload.dueDay) || 18);
+      const openDate = fromEthiopian(Number(payload.ethYear), Number(payload.ethMonth), Number(payload.openDay) || 25);
+      const dueYear = Number(payload.dueEthYear) || Number(payload.ethYear);
+      const dueMonth = Number(payload.dueEthMonth) || Number(payload.ethMonth);
+      const dueDay = Number(payload.dueDay) || 30;
+      const dueDate = fromEthiopian(dueYear, dueMonth, dueDay);
+
       const res = await api.post('/finance/cycles', {
         title: payload.title,
         ethYear: Number(payload.ethYear),
@@ -247,7 +280,6 @@ export default function FinancePaymentCycles() {
         opensAt: openDate ? openDate.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
         dueAt: dueDate ? dueDate.toISOString().slice(0, 10) : new Date(Date.now() + 15 * 86400000).toISOString().slice(0, 10),
         amount: amountSantim,
-        tutorialVideoUrl: payload.tutorialVideoUrl ? payload.tutorialVideoUrl.trim() : undefined,
         targets: { all: payload.targetAll },
       });
       return res.data;
@@ -255,7 +287,6 @@ export default function FinancePaymentCycles() {
     onSuccess: (res) => {
       toast.success('Payment cycle created as draft.');
       setShowCreateModal(false);
-      setShowTutorialInput(false);
       queryClient.invalidateQueries({ queryKey: ['finance', 'cycles'] });
       setSelectedCycleId(res.cycle?._id || res.cycle?.id);
       setDetailTab('overview');
@@ -377,6 +408,14 @@ export default function FinancePaymentCycles() {
             >
               <Trash2 className="h-4 w-4" />
               <span>Delete All Cycles</span>
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleOpenGlobalTutorial}
+              title="Configure single global tutorial video embed link for all monthly portals"
+            >
+              <Video className="h-4 w-4 text-brand-600" />
+              <span>+ Embed Tutorial Link</span>
             </Button>
             <Button onClick={() => setShowCreateModal(true)}>
               <Plus className="h-4 w-4" />
@@ -778,7 +817,7 @@ export default function FinancePaymentCycles() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
-                Opening Day (Ethiopian Calendar)
+                Opening Day (1 - 30)
               </label>
               <div className="relative mt-1">
                 <input
@@ -788,7 +827,7 @@ export default function FinancePaymentCycles() {
                   value={createForm.openDay}
                   onChange={(e) => setCreateForm({ ...createForm, openDay: Number(e.target.value) })}
                   className="block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
-                  placeholder="e.g. 11"
+                  placeholder="25"
                   required
                 />
                 <span className="absolute right-3 top-2 text-xs font-semibold text-slate-400">
@@ -796,31 +835,46 @@ export default function FinancePaymentCycles() {
                 </span>
               </div>
               <p className="mt-1 text-[11px] text-slate-500">
-                Opens on {ETH_MONTHS[createForm.ethMonth - 1]} {createForm.openDay}, {createForm.ethYear} E.C.
+                Opens: {ETH_MONTHS[createForm.ethMonth - 1]} {createForm.openDay}, {createForm.ethYear} E.C.
               </p>
             </div>
 
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
-                Due Day (Ethiopian Calendar)
+                Due Month & Closing Day (1 - 30)
               </label>
-              <div className="relative mt-1">
+              <div className="grid grid-cols-2 gap-1.5 mt-1">
+                <select
+                  value={createForm.dueEthMonth || createForm.ethMonth}
+                  onChange={(e) => {
+                    const dm = Number(e.target.value);
+                    setCreateForm({
+                      ...createForm,
+                      dueEthMonth: dm,
+                      dueEthYear: dm < createForm.ethMonth ? createForm.ethYear + 1 : createForm.ethYear,
+                    });
+                  }}
+                  className="block w-full rounded-xl border border-slate-200 px-2 py-2 text-xs text-slate-900 focus:border-brand-500 focus:outline-none"
+                >
+                  {ETH_MONTHS.map((m, idx) => (
+                    <option key={m} value={idx + 1}>
+                      {idx + 1}. {m}
+                    </option>
+                  ))}
+                </select>
                 <input
                   type="number"
                   min="1"
                   max="30"
                   value={createForm.dueDay}
                   onChange={(e) => setCreateForm({ ...createForm, dueDay: Number(e.target.value) })}
-                  className="block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
-                  placeholder="e.g. 18"
+                  className="block w-full rounded-xl border border-slate-200 px-2 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
+                  placeholder="30"
                   required
                 />
-                <span className="absolute right-3 top-2 text-xs font-semibold text-slate-400">
-                  {ETH_MONTHS[createForm.ethMonth - 1]}
-                </span>
               </div>
               <p className="mt-1 text-[11px] text-slate-500">
-                Due by {ETH_MONTHS[createForm.ethMonth - 1]} {createForm.dueDay}, {createForm.ethYear} E.C.
+                Closes: {ETH_MONTHS[(createForm.dueEthMonth || createForm.ethMonth) - 1]} {createForm.dueDay}, {createForm.dueEthYear || createForm.ethYear} E.C.
               </p>
             </div>
           </div>
@@ -846,47 +900,6 @@ export default function FinancePaymentCycles() {
               className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
               required
             />
-          </div>
-
-          <div>
-            {!showTutorialInput && !createForm.tutorialVideoUrl ? (
-              <button
-                type="button"
-                onClick={() => setShowTutorialInput(true)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-dashed border-brand-300 bg-brand-50/50 px-3 py-2 text-xs font-semibold text-brand-700 hover:bg-brand-100/70 transition"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>+ Embed Tutorial Link</span>
-              </button>
-            ) : (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700">
-                    Embedded Tutorial Link (YouTube URL)
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowTutorialInput(false);
-                      setCreateForm({ ...createForm, tutorialVideoUrl: '' });
-                    }}
-                    className="text-[11px] font-semibold text-slate-400 hover:text-slate-600"
-                  >
-                    Remove
-                  </button>
-                </div>
-                <input
-                  type="url"
-                  value={createForm.tutorialVideoUrl}
-                  onChange={(e) => setCreateForm({ ...createForm, tutorialVideoUrl: e.target.value })}
-                  placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
-                  className="block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900 focus:border-brand-500 focus:outline-none"
-                />
-                <p className="text-[11px] text-slate-500">
-                  Optional YouTube video. A tutorial button will appear at the top of this month's payment portal for students.
-                </p>
-              </div>
-            )}
           </div>
 
           <div className="flex justify-end gap-2 pt-3">
@@ -1552,6 +1565,54 @@ export default function FinancePaymentCycles() {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* GLOBAL EMBED TUTORIAL MODAL */}
+      <Modal
+        open={showGlobalTutorialModal}
+        onClose={() => setShowGlobalTutorialModal(false)}
+        title="Embed Tutorial Video Link (All Months)"
+        size="md"
+      >
+        <form onSubmit={handleSaveGlobalTutorial} className="space-y-4">
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Attach an official tutorial YouTube video once. This embed link is automatically shared across all monthly fee portals (e.g. Tikimt, Hidar, etc.). Students can watch how to pay or skip it without background audio playback.
+          </p>
+
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700">
+              YouTube Video Embed / Watch URL
+            </label>
+            <input
+              type="url"
+              value={globalTutorialInput}
+              onChange={(e) => setGlobalTutorialInput(e.target.value)}
+              placeholder="e.g. https://www.youtube.com/watch?v=VIDEO_ID or https://youtu.be/VIDEO_ID"
+              className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
+              autoFocus
+            />
+            <p className="mt-1 text-[11px] text-slate-400">
+              Accepts standard YouTube links, short links, or embed links.
+            </p>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setShowGlobalTutorialModal(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={savingTutorial}
+              className="bg-brand-600 text-white hover:bg-brand-700"
+            >
+              {savingTutorial ? 'Saving...' : 'Save Global Tutorial Link'}
+            </Button>
+          </div>
+        </form>
       </Modal>
     </div>
   );
