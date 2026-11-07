@@ -26,6 +26,32 @@ import {
   Loader2,
   Printer,
 } from 'lucide-react';
+import {
+  CalendarDays,
+  Plus,
+  Copy,
+  Check,
+  ExternalLink,
+  QrCode,
+  Users,
+  CheckCircle2,
+  Clock,
+  AlertTriangle,
+  Play,
+  Square,
+  RefreshCw,
+  Ban,
+  Trash2,
+  Calendar,
+  DollarSign,
+  Search,
+  Filter,
+  ArrowRight,
+  ShieldAlert,
+  Loader2,
+  Printer,
+  Video, // Added
+} from 'lucide-react';
 import { toast } from 'sonner';
 import QRCode from 'qrcode';
 import { api, errorMessage } from '../../lib/api';
