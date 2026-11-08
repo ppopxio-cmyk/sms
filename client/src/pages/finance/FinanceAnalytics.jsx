@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
+  AlertCircle,
   CalendarDays,
   RefreshCw,
   Download,
@@ -33,9 +34,7 @@ import { api } from '../../lib/api';
 import PageHeader from '../../components/ui/PageHeader';
 import Card, { CardBody, CardHeader } from '../../components/ui/Card';
 import StatCard from '../../components/ui/StatCard';
-import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
-import { formatEthiopian } from '../../lib/ethiopianDate';
 
 const COLORS = ['#0284c7', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#84cc16', '#f97316'];
 
@@ -47,29 +46,59 @@ const RANGE_OPTIONS = [
 ];
 
 function downloadSvgAsPng(svgEl, filename) {
-  const canvas = document.createElement('canvas');
+  if (!svgEl) return;
+
+  const bounds = svgEl.getBoundingClientRect();
+  const width = Math.ceil(bounds.width || svgEl.clientWidth || 0);
+  const height = Math.ceil(bounds.height || svgEl.clientHeight || 0);
+
+  if (!width || !height) return;
+
   const scale = 2;
-  canvas.width = svgEl.offsetWidth * scale;
-  canvas.height = svgEl.offsetHeight * scale;
+  const canvas = document.createElement('canvas');
+  canvas.width = width * scale;
+  canvas.height = height * scale;
+
   const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
   ctx.scale(scale, scale);
-  const data = new XMLSerializer().serializeToString(svgEl);
+
+  // Work on a clone so exporting does not modify the on-screen chart.
+  const svgClone = svgEl.cloneNode(true);
+  svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  svgClone.setAttribute('width', String(width));
+  svgClone.setAttribute('height', String(height));
+
+  // Explicit dimensions help the browser rasterize the SVG reliably.
+  const svgMarkup = new XMLSerializer().serializeToString(svgClone);
+
   const img = new Image();
-  img.crossOrigin = 'anonymous';
   img.onload = () => {
-    ctx.drawImage(img, 0, 0);
-    const a = document.createElement('a');
-    a.download = `${filename || 'chart'}.png`;
-    a.href = canvas.toDataURL('image/png');
-    a.click();
+    try {
+      ctx.drawImage(img, 0, 0, width, height);
+
+      const link = document.createElement('a');
+      link.download = `${filename || 'chart'}.png`;
+      link.href = canvas.toDataURL('image/png');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (error) {
+      console.error('Unable to export chart as PNG:', error);
+    }
   };
-  img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(data)));
+  img.onerror = () => {
+    console.error('Unable to render chart SVG for PNG export.');
+  };
+  img.src = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgMarkup)))}`;
 }
 
 function CaptureChart({ children, filename }) {
   const ref = useRef(null);
   const download = useCallback(() => {
-    if (ref.current) downloadSvgAsPng(ref.current, filename);
+    const svg = ref.current?.querySelector('svg');
+    if (svg) downloadSvgAsPng(svg, filename);
   }, [filename]);
   return (
     <div ref={ref}>
@@ -116,14 +145,13 @@ export default function FinanceAnalytics() {
     { name: 'Waived', value: statusSplit.waived || 0, color: '#8b5cf6' },
   ].filter((d) => d.value > 0);
 
-  const methodPieData = paymentMethodBreakdown.map((m) => ({
-    name: m.method || 'other',
-    value: m.totalSantim || 0,
-    color: COLORS[methodPieData.indexOf(m) % COLORS.length],
+  // Use the map index for the color. Referencing methodPieData here would
+  // access the variable before its initialization and crash the page.
+  const methodPieData = paymentMethodBreakdown.map((method, index) => ({
+    name: method.method || 'other',
+    value: Number(method.totalSantim || 0),
+    color: COLORS[index % COLORS.length],
   }));
-  methodPieData.forEach((d, i) => {
-    if (!d.color) d.color = COLORS[i % COLORS.length];
-  });
 
   const cycleStatusPie = Object.entries(cycleStatusCounts).map(([k, v], i) => ({
     name: k || 'unknown',
@@ -167,7 +195,7 @@ export default function FinanceAnalytics() {
     <div className="space-y-6">
       <PageHeader
         title="Finance Analytics"
-        subtitle="8 live charts with real collected data from Chapa payments. Filter by time range and download any chart as PNG."
+        subtitle="10 live charts with finance data. Filter by time range and download any chart as PNG."
         icon={BarChart3}
         actions={
           <div className="flex items-center gap-2">
