@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '../../lib/api';
+import { printPaymentReceiptVoucher } from '../../lib/printVoucher';
 import PageHeader from '../../components/ui/PageHeader';
 import Card, { CardBody, CardHeader } from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
@@ -31,21 +32,14 @@ import { EmptyState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';
 import { formatEthiopian, toEthiopian } from '../../lib/ethiopianDate';
 import Brand from '../../components/ui/Brand';
-import AccountantAcademicFilter, { SelectToViewCard } from '../../components/finance/AccountantAcademicFilter';
+import { FileClock } from 'lucide-react';
 
 export default function FinanceLedger() {
   const queryClient = useQueryClient();
 
-  // Academic Filter (Batch -> Department -> Programme)
-  const [selectedBatch, setSelectedBatch] = useState('');
-  const [selectedDepartment, setSelectedDepartment] = useState('');
-  const [selectedProgram, setSelectedProgram] = useState('');
-  const [isFilterApplied, setIsFilterApplied] = useState(false);
-
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [method, setMethod] = useState('');
-  const [page, setPage] = useState(1);
 
   // View / Print Receipt Modal
   const [activePayment, setActivePayment] = useState(null);
@@ -133,42 +127,25 @@ export default function FinanceLedger() {
     }
   };
 
-  const handleApplyFilter = () => {
-    setIsFilterApplied(true);
-    setPage(1);
-  };
-
-  const handleResetFilter = () => {
-    setSelectedBatch('');
-    setSelectedDepartment('');
-    setSelectedProgram('');
-    setIsFilterApplied(false);
-    setPage(1);
-  };
-
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: [
-      'finance',
-      'ledger',
-      { search, status, method, batchId: selectedBatch, departmentId: selectedDepartment, programId: selectedProgram, page, isFilterApplied },
-    ],
+    queryKey: ['finance', 'ledger', 'recent', { search, status, method }],
     queryFn: async () => {
       const res = await api.get('/finance/ledger', {
         params: {
           search: search || undefined,
           status: status || undefined,
           method: method || undefined,
-          batchId: selectedBatch || undefined,
-          departmentId: selectedDepartment || undefined,
-          programId: selectedProgram || undefined,
-          page,
-          limit: 25,
+          page: 1,
+          limit: search || status || method ? 200 : 20,
         },
       });
       return res.data;
     },
-    enabled: isFilterApplied,
   });
+
+  const paymentsList = data?.payments || [];
+  const isFilteredList = Boolean(search || status || method);
+  const visiblePayments = isFilteredList ? paymentsList : paymentsList.slice(0, 20);
 
   const reverseMutation = useMutation({
     mutationFn: async ({ paymentId, reason }) => {
@@ -185,7 +162,21 @@ export default function FinanceLedger() {
   });
 
   const handlePrintModal = () => {
-    window.print();
+    if (!activePayment) return;
+    printPaymentReceiptVoucher({
+      receiptNumber: activePayment.receiptNumber,
+      status: activePayment.status,
+      studentName: activePayment.student?.fullName || activePayment.payerName,
+      studentId: activePayment.student?.studentId,
+      cycleTitle: activePayment.cycle?.title || 'Fee',
+      amountEtb: activePayment.amountEtb,
+      method: activePayment.method,
+      bankReference: activePayment.bankReference,
+      payerName: activePayment.payerName,
+      paidAt: activePayment.paidAt,
+      recordedBy: activePayment.recordedBy?.name || activePayment.recordedBy?.email || '',
+      chapaReference: activePayment.chapaReference || '',
+    });
   };
 
   const handleVerifyReceipt = async () => {
@@ -252,28 +243,23 @@ export default function FinanceLedger() {
         </div>
       </div>
 
-      {/* Cascading Academic Filter: Batch -> Department -> Programme */}
-      <AccountantAcademicFilter
-        selectedBatch={selectedBatch}
-        setSelectedBatch={setSelectedBatch}
-        selectedDepartment={selectedDepartment}
-        setSelectedDepartment={setSelectedDepartment}
-        selectedProgram={selectedProgram}
-        setSelectedProgram={setSelectedProgram}
-        isApplied={isFilterApplied}
-        onApply={handleApplyFilter}
-        onReset={handleResetFilter}
-      />
+      {/* Recent Activity Banner */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-brand-100 bg-brand-50/50 px-4 py-3">
+        <div className="flex items-center gap-2 text-xs font-semibold text-brand-900">
+          <FileClock className="h-4 w-4 text-brand-600" />
+          <span>
+            {isFilteredList
+              ? `Search results — ${paymentsList.length} payment(s) found (showing recent matches)`
+              : `Latest 20 official payments — newest first`}
+          </span>
+        </div>
+        <span className="text-[11px] text-slate-500">
+          Ledger totals: {data?.total ?? paymentsList.length} recorded payment(s)
+        </span>
+      </div>
 
-      {!isFilterApplied ? (
-        <SelectToViewCard
-          title="Select to View Payments Ledger"
-          message="Please select a Batch, Department, or Programme above, then click View Records to display confirmed payments."
-        />
-      ) : (
-        <>
-          {/* Filter toolbar */}
-          <Card>
+      {/* Filter toolbar */}
+      <Card>
         <CardBody className="p-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[220px]">
@@ -281,10 +267,7 @@ export default function FinanceLedger() {
               <input
                 type="text"
                 value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setPage(1);
-                }}
+                onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by receipt number, FT ref, or payer name..."
                 className="w-full rounded-xl border border-slate-200 pl-9 pr-4 py-2 text-xs text-slate-800 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none"
               />
@@ -292,10 +275,7 @@ export default function FinanceLedger() {
 
             <select
               value={status}
-              onChange={(e) => {
-                setStatus(e.target.value);
-                setPage(1);
-              }}
+              onChange={(e) => setStatus(e.target.value)}
               className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-700 focus:border-brand-500 focus:outline-none"
             >
               <option value="">All Payments</option>
@@ -305,10 +285,7 @@ export default function FinanceLedger() {
 
             <select
               value={method}
-              onChange={(e) => {
-                setMethod(e.target.value);
-                setPage(1);
-              }}
+              onChange={(e) => setMethod(e.target.value)}
               className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-700 focus:border-brand-500 focus:outline-none"
             >
               <option value="">All Methods</option>
@@ -338,7 +315,7 @@ export default function FinanceLedger() {
             <div className="p-6">
               <SkeletonRows rows={8} />
             </div>
-          ) : !data?.payments?.length ? (
+          ) : !visiblePayments.length ? (
             <div className="p-10">
               <EmptyState
                 icon={BookOpen}
@@ -356,13 +333,13 @@ export default function FinanceLedger() {
                     <th className="py-3.5 px-4">Cycle</th>
                     <th className="py-3.5 px-4">Amount</th>
                     <th className="py-3.5 px-4">Method & Ref</th>
-                    <th className="py-3.5 px-4">Paid At</th>
+                    <th className="py-3.5 px-4">Paid At (Date & Time)</th>
                     <th className="py-3.5 px-4">Status</th>
                     <th className="py-3.5 pr-6 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {data.payments.map((p) => (
+                  {visiblePayments.map((p) => (
                     <tr key={p.id} className="transition hover:bg-slate-50/70">
                       <td className="py-3.5 pl-6 pr-4">
                         <button
@@ -447,36 +424,16 @@ export default function FinanceLedger() {
             </div>
           )}
 
-          {/* Pagination */}
-          {data?.pages > 1 && (
+          {/* Footer note */}
+          {data && (
             <div className="flex items-center justify-between border-t border-slate-100 p-4">
               <p className="text-xs text-slate-500">
-                Page {data.page} of {data.pages} ({data.total} total payments)
+                Showing {visiblePayments.length} of {data.total ?? visiblePayments.length} recorded payment(s). Use the search and filters above to find older entries.
               </p>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={page <= 1}
-                  onClick={() => setPage(page - 1)}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={page >= data.pages}
-                  onClick={() => setPage(page + 1)}
-                >
-                  Next
-                </Button>
-              </div>
             </div>
-          )}
-        </CardBody>
-      </Card>
-      </>
-      )}
+           )}
+         </CardBody>
+       </Card>
 
       {/* OFFICIAL RECEIPT VIEW / PRINT MODAL */}
       <Modal

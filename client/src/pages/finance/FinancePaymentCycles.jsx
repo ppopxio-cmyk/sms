@@ -30,6 +30,7 @@ import {
 import { toast } from 'sonner';
 import QRCode from 'qrcode';
 import { api, errorMessage } from '../../lib/api';
+import { printPaymentReceiptVoucher } from '../../lib/printVoucher';
 import PageHeader from '../../components/ui/PageHeader';
 import Card, { CardBody, CardHeader } from '../../components/ui/Card';
 import StatCard from '../../components/ui/StatCard';
@@ -417,7 +418,16 @@ export default function FinancePaymentCycles() {
               <Video className="h-4 w-4 text-brand-600" />
               <span>+ Embed Tutorial Link</span>
             </Button>
-            <Button onClick={() => setShowCreateModal(true)}>
+            <Button
+              onClick={() => {
+                // Seed default amount from Finance Settings (stored in santim).
+                const preset = financeSettings?.monthlyDefaults?.amount;
+                if (preset) {
+                  setCreateForm((f) => ({ ...f, amountEtb: (preset / 100).toFixed(2) }));
+                }
+                setShowCreateModal(true);
+              }}
+            >
               <Plus className="h-4 w-4" />
               <span>Create Fee Cycle</span>
             </Button>
@@ -1488,7 +1498,22 @@ export default function FinancePaymentCycles() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => window.print()}
+                onClick={() =>
+                  printPaymentReceiptVoucher({
+                    receiptNumber: paidDetail.payment.receiptNumber,
+                    status: paidDetail.payment.status || 'confirmed',
+                    studentName: paidDetail.studentName,
+                    studentId: paidDetail.studentId,
+                    programme: paidDetail.programme || '',
+                    cycleTitle: paidDetail.cycleTitle || paidDetail.cycle?.title || 'Fee',
+                    amountEtb: (paidDetail.amountDue / 100).toFixed(2),
+                    method: paidDetail.payment.method,
+                    bankReference: paidDetail.payment.bankReference,
+                    payerName: paidDetail.studentName,
+                    paidAt: paidDetail.payment.paidAt,
+                    recordedBy: paidDetail.recordedBy?.name || paidDetail.payment.recordedBy?.name || '',
+                  })
+                }
               >
                 <Printer className="h-4 w-4" />
                 <span>Print Receipt</span>

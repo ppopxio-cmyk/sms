@@ -4,6 +4,7 @@ import { Student } from '../models/Student.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { verifyCbeReceipt } from '../services/cbeVerifier.service.js';
+import { SystemSetting } from '../models/SystemSetting.js';
 import { toEthiopian, ETH_MONTHS } from '../utils/ethiopianDate.js';
 import { calculateOverdueLateFee } from '../utils/lateFee.js';
 import { normalizePhone } from '../utils/phone.js';

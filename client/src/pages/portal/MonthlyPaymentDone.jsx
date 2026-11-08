@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import Brand from '../../components/ui/Brand';
 import { formatEthiopian } from '../../lib/ethiopianDate';
+import { printPaymentReceiptVoucher } from '../../lib/printVoucher';
 
 export default function MonthlyPaymentDone() {
   const { paymentId } = useParams();
@@ -83,7 +84,27 @@ export default function MonthlyPaymentDone() {
   }, [paymentId]);
 
   const handlePrint = () => {
-    window.print();
+    if (!confirmation) return;
+    printPaymentReceiptVoucher({
+      receiptNumber: confirmation.receiptNumber,
+      status: 'confirmed',
+      studentName: confirmation.student?.fullName,
+      studentId: confirmation.student?.studentId,
+      programme: [
+        confirmation.student?.program?.name || confirmation.student?.programme,
+        confirmation.student?.batch?.name || confirmation.student?.batch,
+      ].filter(Boolean).join(' • '),
+      cycleTitle: confirmation.cycle?.title,
+      amountEtb: confirmation.amountEtb,
+      method: confirmation.method,
+      bankReference: confirmation.bankReference,
+      chapaReference: confirmation.chapaReference,
+      payerName: confirmation.payerName,
+      receivingAccount: confirmation.bank
+        ? `${confirmation.bank.accountNumber} (${confirmation.bank.bank})`
+        : '',
+      paidAt: confirmation.paidAt,
+    });
   };
 
   const returnToPortal = () => {

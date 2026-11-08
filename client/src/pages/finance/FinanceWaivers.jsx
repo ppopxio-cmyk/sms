@@ -3,10 +3,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
   Gift,
+  Award,
   Search,
   RefreshCw,
   RotateCcw,
-  Plus,
   User,
   Mail,
   X,
@@ -46,6 +46,8 @@ export default function FinanceWaivers() {
 
   // New-waiver wizard state
   const [wizardOpen, setWizardOpen] = useState(false);
+  // 'waiver' = fee exemption (only UNPAID months), 'scholarship' = sponsor-funded award
+  const [wizardMode, setWizardMode] = useState('waiver');
   const [wizardStep, setWizardStep] = useState(1);
   const [studentQuery, setStudentQuery] = useState('');
   const [pickedStudent, setPickedStudent] = useState(null);
@@ -134,6 +136,34 @@ export default function FinanceWaivers() {
     enabled: wizardOpen && studentQuery.trim().length >= 2,
   });
 
+  // Finance settings (default fee amounts) + picked student's charge ledger.
+  const { data: financeSettings } = useQuery({
+    queryKey: ['finance', 'settings'],
+    queryFn: async () => (await api.get('/finance/settings')).data?.finance,
+  });
+
+  const pickedStudentProfile = useQuery({
+    queryKey: ['finance', 'waiverStudentProfile', pickedStudent?.id || pickedStudent?._id],
+    queryFn: async () => {
+      const sid = pickedStudent.id || pickedStudent._id;
+      const res = await api.get(`/finance/students/${sid}`);
+      return res.data;
+    },
+    enabled: wizardOpen && Boolean(pickedStudent) && wizardMode === 'waiver',
+  });
+
+  // In waiver mode we only ever show the student's UNPAID monthly charges.
+  const unpaidCharges = (pickedStudentProfile.data?.charges || []).filter((c) => c.status === 'unpaid');
+
+  const openWizard = (mode) => {
+    resetWizard();
+    setWizardMode(mode);
+    // Seed the default partial/fee amount from Finance Settings (stored in santim).
+    const preset = financeSettings?.monthlyDefaults?.amount;
+    if (preset) setWAmount((preset / 100).toFixed(2));
+    setWizardOpen(true);
+  };
+
   const resetWizard = () => {
     setWizardOpen(false);
     setWizardStep(1);
@@ -148,19 +178,37 @@ export default function FinanceWaivers() {
     setCodeRequested(false);
   };
 
-  const toggleCycle = (id) => {
-    setSelectedCycleIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  };
-
   const handleSelectAllCycles = () => {
-    const allIds = (yearCyclesQuery.data || []).map((c) => c._id || c.id);
-    setSelectedCycleIds(allIds);
+    if (wizardMode === 'waiver') {
+      setSelectedCycleIds(unpaidCharges.map((c) => c.cycle?._id));
+    } else {
+      setSelectedCycleIds((yearCyclesQuery.data || []).map((c) => c._id || c.id));
+    }
   };
 
   const handleClearAllCycles = () => {
     setSelectedCycleIds([]);
+  };
+
+  // Auto-computed total waived amount for the current selection.
+  const waivedTotalEtb = (() => {
+    if (wizardMode === 'waiver') {
+      const selectedCharges = unpaidCharges.filter((c) => selectedCycleIds.includes(c.cycle?._id));
+      if (wType === 'full') {
+        return selectedCharges.reduce((sum, c) => sum + c.amountDue / 100, 0);
+      }
+      return Number(wAmount || 0) * selectedCharges.length;
+    }
+    // Scholarship mode: full fee of each picked year cycle.
+    const picked = (yearCyclesQuery.data || []).filter((c) => selectedCycleIds.includes(c._id || c.id));
+    if (wType === 'full') return picked.reduce((sum, c) => sum + c.amount / 100, 0);
+    return Number(wAmount || 0) * picked.length;
+  })();
+
+  const toggleCycle = (id) => {
+    setSelectedCycleIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
   };
 
   // 2FA code request mutation
@@ -222,17 +270,25 @@ export default function FinanceWaivers() {
         subtitle="Full and partial fee exemptions, scholarship approvals, and waiver revocation audit trail."
         icon={Gift}
         actions={
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => {
-              resetWizard();
-              setWizardOpen(true);
-            }}
-          >
-            <Plus className="h-4 w-4" />
-            <span>+ Grant Waiver / Scholarship</span>
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-purple-200 text-purple-700 hover:bg-purple-50"
+              onClick={() => openWizard('waiver')}
+            >
+              <Gift className="h-4 w-4" />
+              <span>+ Grant Fee Waiver</span>
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => openWizard('scholarship')}
+            >
+              <Award className="h-4 w-4" />
+              <span>+ Grant Scholarship</span>
+            </Button>
+          </div>
         }
       />
 
@@ -279,15 +335,21 @@ export default function FinanceWaivers() {
 
             <div className="flex items-center gap-2">
               <Button
+                variant="outline"
+                size="sm"
+                className="border-purple-200 text-purple-700 hover:bg-purple-50"
+                onClick={() => openWizard('waiver')}
+              >
+                <Gift className="h-4 w-4" />
+                <span>+ Grant Fee Waiver</span>
+              </Button>
+              <Button
                 variant="primary"
                 size="sm"
-                onClick={() => {
-                  resetWizard();
-                  setWizardOpen(true);
-                }}
+                onClick={() => openWizard('scholarship')}
               >
-                <Plus className="h-4 w-4" />
-                <span>+ Grant Waiver / Scholarship</span>
+                <Award className="h-4 w-4" />
+                <span>+ Grant Scholarship</span>
               </Button>
               <Button
                 variant="outline"
@@ -313,7 +375,7 @@ export default function FinanceWaivers() {
                   <EmptyState
                     icon={Gift}
                     title="No waivers found"
-                    message="Use the “New Waiver” button to grant a fee exemption for a specific month."
+                    message={'Use the "+ Grant Fee Waiver" or "+ Grant Scholarship" buttons to grant a student fee exemption for specific months.'}
                   />
                 </div>
               ) : (
@@ -412,7 +474,11 @@ export default function FinanceWaivers() {
       )}
 
       {/* GRANT FEE WAIVER / SCHOLARSHIP WIZARD */}
-      <Modal open={wizardOpen} onClose={resetWizard} title="Grant Fee Waiver / Scholarship">
+      <Modal
+        open={wizardOpen}
+        onClose={resetWizard}
+        title={wizardMode === 'scholarship' ? 'Grant Scholarship' : 'Grant Fee Waiver'}
+      >
         <div className="space-y-4">
           {/* Step Indicators */}
           <div className="flex items-center justify-between border-b border-slate-100 pb-3 text-xs font-semibold">
@@ -502,7 +568,7 @@ export default function FinanceWaivers() {
             </div>
           )}
 
-          {/* STEP 2: Academic Year & Month Cycles Multi-Selection */}
+          {/* STEP 2: Month Selection — mode aware */}
           {wizardStep === 2 && pickedStudent && (
             <div className="space-y-3">
               {/* Picked Student Summary */}
@@ -524,103 +590,187 @@ export default function FinanceWaivers() {
                 </Button>
               </div>
 
-              {/* Academic Year Selector */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600">
-                    Academic Year (EC)
-                  </label>
-                  <p className="text-[11px] text-slate-400">Select year to load monthly fee cycles.</p>
-                </div>
-                <select
-                  value={selectedEthYear}
-                  onChange={(e) => {
-                    setSelectedEthYear(e.target.value);
-                    setSelectedCycleIds([]);
-                  }}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm outline-none focus:border-purple-500"
-                >
-                  {academicYears.map((y) => (
-                    <option key={y.ethYear} value={y.ethYear}>
-                      {y.ethYear} EC Academic Year
-                    </option>
-                  ))}
-                  {(!academicYears || academicYears.length === 0) && (
-                    <option value={new Date().getFullYear() - 7}>{new Date().getFullYear() - 7} EC</option>
-                  )}
-                </select>
-              </div>
+              {/* WAIVER MODE: only the student's UNPAID monthly charges */}
+              {wizardMode === 'waiver' ? (
+                <>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] font-medium text-amber-800">
+                    Fee waivers apply only to <strong>unpaid months</strong> on this student's account. Paid, waived, or reversed months are hidden automatically.
+                  </div>
 
-              {/* Month cycles multi-selection toolbar */}
-              <div className="flex items-center justify-between border-t border-slate-100 pt-2">
-                <span className="text-xs font-semibold text-slate-700">
-                  Select month cycles to grant waiver:
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleSelectAllCycles}
-                    className="text-[11px] font-semibold text-purple-600 hover:text-purple-800"
-                  >
-                    Select All
-                  </button>
-                  <span className="text-slate-300">|</span>
-                  <button
-                    type="button"
-                    onClick={handleClearAllCycles}
-                    className="text-[11px] font-semibold text-slate-500 hover:text-slate-700"
-                  >
-                    Clear All
-                  </button>
-                  <Badge tone={selectedCycleIds.length > 0 ? 'purple' : 'neutral'}>
-                    {selectedCycleIds.length} selected
-                  </Badge>
-                </div>
-              </div>
-
-              {/* Cycles List with Checkboxes */}
-              {yearCyclesQuery.isLoading ? (
-                <p className="p-4 text-center text-xs text-slate-400">Loading monthly fee cycles…</p>
-              ) : !yearCyclesQuery.data?.length ? (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800">
-                  No payment cycles found for {selectedEthYear} EC. You can create cycles in the Payment Cycles page.
-                </div>
-              ) : (
-                <div className="max-h-60 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
-                  {yearCyclesQuery.data.map((c) => {
-                    const cId = c._id || c.id;
-                    const isSelected = selectedCycleIds.includes(cId);
-                    return (
-                      <div
-                        key={cId}
-                        onClick={() => toggleCycle(cId)}
-                        className={`flex items-center justify-between p-3 cursor-pointer transition ${
-                          isSelected ? 'bg-purple-50/70' : 'hover:bg-slate-50'
-                        }`}
+                  <div className="flex items-center justify-between border-t border-slate-100 pt-2">
+                    <span className="text-xs font-semibold text-slate-700">
+                      Unpaid month cycles ({unpaidCharges.length}):
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSelectAllCycles}
+                        className="text-[11px] font-semibold text-purple-600 hover:text-purple-800"
                       >
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => {}}
-                            className="h-4 w-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                          />
-                          <div>
-                            <p className="text-xs font-bold text-slate-800">
-                              {c.title || `${ETH_MONTHS[(c.ethMonth || 1) - 1]} ${c.ethYear}`}
-                            </p>
-                            <p className="text-[11px] text-slate-400">
-                              Month {c.ethMonth} • Due {formatEthiopian(c.dueAt)}
+                        Select All
+                      </button>
+                      <span className="text-slate-300">|</span>
+                      <button
+                        type="button"
+                        onClick={handleClearAllCycles}
+                        className="text-[11px] font-semibold text-slate-500 hover:text-slate-700"
+                      >
+                        Clear All
+                      </button>
+                      <Badge tone={selectedCycleIds.length > 0 ? 'purple' : 'neutral'}>
+                        {selectedCycleIds.length} selected
+                      </Badge>
+                    </div>
+                  </div>
+
+                  {pickedStudentProfile.isLoading ? (
+                    <p className="p-4 text-center text-xs text-slate-400">Loading student fee account…</p>
+                  ) : unpaidCharges.length === 0 ? (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-xs text-emerald-800">
+                      Great news — {pickedStudent.fullName || 'this student'} has no unpaid monthly fees. Nothing left to waive.
+                    </div>
+                  ) : (
+                    <div className="max-h-60 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
+                      {unpaidCharges.map((c) => {
+                        const cId = c.cycle?._id;
+                        const isSelected = selectedCycleIds.includes(cId);
+                        const overdue = new Date(c.dueAt) < new Date();
+                        return (
+                          <div
+                            key={c._id || cId}
+                            onClick={() => cId && toggleCycle(cId)}
+                            className={`flex items-center justify-between p-3 cursor-pointer transition ${
+                              isSelected ? 'bg-purple-50/70' : 'hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {}}
+                                className="h-4 w-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                              />
+                              <div>
+                                <p className="text-xs font-bold text-slate-800">
+                                  {c.cycle?.title || 'Fee Cycle'}
+                                </p>
+                                <p className="text-[11px] text-slate-400">
+                                  Due {formatEthiopian(c.dueAt)}
+                                  {overdue ? <span className="font-bold text-rose-600"> • OVERDUE</span> : ''}
+                                </p>
+                              </div>
+                            </div>
+                            <p className="font-mono text-xs font-bold text-slate-700">
+                              {c.amountDueEtb || (c.amountDue / 100).toFixed(2)} ETB
                             </p>
                           </div>
-                        </div>
-                        <p className="font-mono text-xs font-bold text-slate-700">
-                          {(c.amount / 100).toFixed(2)} ETB
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* SCHOLARSHIP MODE: pick monthly cycles from the selected academic year */}
+                  {/* Academic Year Selector */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Academic Year (EC)
+                      </label>
+                      <p className="text-[11px] text-slate-400">Select year to load monthly fee cycles.</p>
+                    </div>
+                    <select
+                      value={selectedEthYear}
+                      onChange={(e) => {
+                        setSelectedEthYear(e.target.value);
+                        setSelectedCycleIds([]);
+                      }}
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm outline-none focus:border-purple-500"
+                    >
+                      {academicYears.map((y) => (
+                        <option key={y.ethYear} value={y.ethYear}>
+                          {y.ethYear} EC Academic Year
+                        </option>
+                      ))}
+                      {(!academicYears || academicYears.length === 0) && (
+                        <option value={new Date().getFullYear() - 7}>{new Date().getFullYear() - 7} EC</option>
+                      )}
+                    </select>
+                  </div>
+
+                  {/* Month cycles multi-selection toolbar */}
+                  <div className="flex items-center justify-between border-t border-slate-100 pt-2">
+                    <span className="text-xs font-semibold text-slate-700">
+                      Select month cycles to cover with scholarship:
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSelectAllCycles}
+                        className="text-[11px] font-semibold text-purple-600 hover:text-purple-800"
+                      >
+                        Select All
+                      </button>
+                      <span className="text-slate-300">|</span>
+                      <button
+                        type="button"
+                        onClick={handleClearAllCycles}
+                        className="text-[11px] font-semibold text-slate-500 hover:text-slate-700"
+                      >
+                        Clear All
+                      </button>
+                      <Badge tone={selectedCycleIds.length > 0 ? 'purple' : 'neutral'}>
+                        {selectedCycleIds.length} selected
+                      </Badge>
+                    </div>
+                  </div>
+
+                  {/* Cycles List with Checkboxes */}
+                  {yearCyclesQuery.isLoading ? (
+                    <p className="p-4 text-center text-xs text-slate-400">Loading monthly fee cycles…</p>
+                  ) : !yearCyclesQuery.data?.length ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800">
+                      No payment cycles found for {selectedEthYear} EC. You can create cycles in the Payment Cycles page.
+                    </div>
+                  ) : (
+                    <div className="max-h-60 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
+                      {yearCyclesQuery.data.map((c) => {
+                        const cId = c._id || c.id;
+                        const isSelected = selectedCycleIds.includes(cId);
+                        return (
+                          <div
+                            key={cId}
+                            onClick={() => toggleCycle(cId)}
+                            className={`flex items-center justify-between p-3 cursor-pointer transition ${
+                              isSelected ? 'bg-purple-50/70' : 'hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {}}
+                                className="h-4 w-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                              />
+                              <div>
+                                <p className="text-xs font-bold text-slate-800">
+                                  {c.title || `${ETH_MONTHS[(c.ethMonth || 1) - 1]} ${c.ethYear}`}
+                                </p>
+                                <p className="text-[11px] text-slate-400">
+                                  Month {c.ethMonth} • Due {formatEthiopian(c.dueAt)}
+                                </p>
+                              </div>
+                            </div>
+                            <p className="font-mono text-xs font-bold text-slate-700">
+                              {(c.amount / 100).toFixed(2)} ETB
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
               )}
 
               {/* Navigation buttons */}
@@ -628,16 +778,21 @@ export default function FinanceWaivers() {
                 <Button variant="outline" size="sm" onClick={() => setWizardStep(1)}>
                   Back
                 </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  disabled={selectedCycleIds.length === 0}
-                  onClick={() => setWizardStep(3)}
-                  className="bg-purple-600 text-white hover:bg-purple-700"
-                >
-                  <span>Continue to 2FA Details ({selectedCycleIds.length})</span>
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </Button>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-semibold text-slate-600">
+                    Total to waive: <span className="font-mono font-bold text-purple-700">{waivedTotalEtb.toFixed(2)} ETB</span>
+                  </span>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={selectedCycleIds.length === 0}
+                    onClick={() => setWizardStep(3)}
+                    className="bg-purple-600 text-white hover:bg-purple-700"
+                  >
+                    <span>Continue to 2FA Details ({selectedCycleIds.length})</span>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </div>
             </div>
           )}
@@ -656,7 +811,8 @@ export default function FinanceWaivers() {
                 <div>
                   <p className="text-xs font-bold text-slate-800">{pickedStudent.fullName || pickedStudent.name} ({pickedStudent.studentId})</p>
                   <p className="text-[11px] text-purple-700 font-semibold">
-                    Granting exemption for {selectedCycleIds.length} month cycle(s) in {selectedEthYear} EC
+                    {wizardMode === 'scholarship' ? 'Covering' : 'Waiving'} {selectedCycleIds.length} month cycle(s) {'—'} total{' '}
+                    <span className="font-mono font-bold">{waivedTotalEtb.toFixed(2)} ETB</span>
                   </p>
                 </div>
                 <Badge tone="purple">{selectedCycleIds.length} Months</Badge>
@@ -718,11 +874,16 @@ export default function FinanceWaivers() {
               {/* Scholarship College / Sponsor (Optional) */}
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-600">
-                  Scholarship Organization / College <span className="text-slate-400 font-normal">(Optional)</span>
+                  {wizardMode === 'scholarship' ? (
+                    <>Scholarship Organization / College <span className="text-rose-500">*</span></>
+                  ) : (
+                    <>Scholarship Organization / College <span className="text-slate-400 font-normal">(Optional)</span></>
+                  )}
                 </label>
                 <input
                   value={wScholarship}
                   onChange={(e) => setWScholarship(e.target.value)}
+                  required={wizardMode === 'scholarship'}
                   placeholder="e.g. Mekuria Scholarship Foundation / Ministry of Education"
                   className="mt-1 block w-full rounded-xl border border-slate-200 p-2.5 text-sm text-slate-800 focus:border-purple-500 focus:outline-none"
                 />
@@ -803,7 +964,7 @@ export default function FinanceWaivers() {
                 >
                   {batchWaiverMutation.isPending
                     ? 'Authorizing & Granting…'
-                    : `Verify & Grant Waivers (${selectedCycleIds.length})`}
+                    : `Verify & ${wizardMode === 'scholarship' ? 'Record Scholarships' : 'Grant Waivers'} (${selectedCycleIds.length})`}
                 </Button>
               </div>
             </form>

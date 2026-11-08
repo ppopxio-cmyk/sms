@@ -148,17 +148,27 @@ export default function FinanceAwards() {
             </button>
             {competitions.map((c) => (
               <button
-                key={c}
+                key={c?.name || c}
                 type="button"
                 onClick={() => {
-                  setCompetitionFilter(c);
+                  setCompetitionFilter(c?.name || c);
                   setPage(1);
                 }}
-                className={`max-w-[220px] truncate border-r border-slate-200 px-4 py-2.5 text-xs font-bold transition last:border-r-0 ${
-                  competitionFilter === c ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'
+                title={c?.name ? `${c.count} award(s) • ${Number(c.totalAmountEtb || 0).toFixed(2)} ETB total` : undefined}
+                className={`max-w-[240px] flex items-center gap-2 truncate border-r border-slate-200 px-4 py-2.5 text-xs font-bold transition last:border-r-0 ${
+                  competitionFilter === (c?.name || c) ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                {c}
+                <span className="truncate">{typeof c === 'string' ? c : c?.name}</span>
+                {typeof c === 'object' && (
+                  <span
+                    className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                      competitionFilter === (c?.name || c) ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {c?.count}
+                  </span>
+                )}
               </button>
             ))}
           </div>

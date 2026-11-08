@@ -21,6 +21,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
+import { printStudentFeeStatement } from '../../lib/printVoucher';
 import { downloadExport } from '../../lib/download';
 import PageHeader from '../../components/ui/PageHeader';
 import Card, { CardBody, CardHeader } from '../../components/ui/Card';
@@ -79,6 +80,22 @@ export default function StudentFinanceProfile({ readOnly = false }) {
     } finally {
       setExporting('');
     }
+  };
+
+  const handlePrintStatement = () => {
+    printStudentFeeStatement({
+      student: {
+        fullName,
+        studentId: student.studentId,
+        department: departmentName,
+        programme: programmeName,
+        batch: batchName,
+      },
+      summary,
+      charges,
+      payments,
+      printedAt: new Date().toISOString(),
+    });
   };
 
   return (
@@ -152,7 +169,7 @@ export default function StudentFinanceProfile({ readOnly = false }) {
         </div>
 
         <div className="flex flex-col items-end gap-2">
-          <Button variant="outline" size="sm" onClick={() => window.print()}>
+          <Button variant="outline" size="sm" onClick={handlePrintStatement}>
             <Printer className="h-4 w-4" />
             <span>Print Statement</span>
           </Button>
