@@ -270,6 +270,38 @@ export default function Notifications() {
                         {item.readAt ? null : <Badge tone="brand">new</Badge>}
                       </p>
                       {item.body ? <p className="mt-0.5 text-xs leading-relaxed text-slate-600">{item.body}</p> : null}
+                      {Array.isArray(item.meta?.finStudents) && item.meta.finStudents.length ? (
+                        <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white/90">
+                          <p className="border-b border-slate-100 bg-slate-50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                            {item.meta.finHeader || 'Student details'}
+                          </p>
+                          <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
+                            {item.meta.finStudents.map((s, i) => (
+                              <div key={i} className="px-3 py-2">
+                                <p className="text-xs font-semibold text-slate-800">
+                                  {s.name}
+                                  {s.studentId ? <span className="font-mono font-normal text-slate-400"> · {s.studentId}</span> : null}
+                                </p>
+                                <p className="mt-0.5 text-[11px] text-slate-500">
+                                  {[s.department, s.programme, s.batch].filter(Boolean).join(' · ')}
+                                  {s.category ? <span className="text-slate-400"> · {s.category}</span> : null}
+                                </p>
+                                {s.months ? (
+                                  <p className="mt-0.5 text-[11px] text-slate-600">
+                                    Months: {s.months}
+                                    {s.amountEtb ? <span className="font-mono font-semibold text-slate-700"> — {s.amountEtb} ETB</span> : null}
+                                  </p>
+                                ) : null}
+                                {Array.isArray(s.yourClasses) && s.yourClasses.length ? (
+                                  <p className="mt-0.5 text-[11px] text-brand-700">
+                                    Your classes: {s.yourClasses.join(', ')}
+                                  </p>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                       <p className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
                         <span>{timeAgo(item.createdAt)}</span>
                         <span className="text-slate-300">·</span>

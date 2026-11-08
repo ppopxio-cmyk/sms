@@ -6,6 +6,7 @@ import {
   getDashboard,
   listCycles,
   createCycle,
+  bulkCreateCycles,
   getCycleDetail,
   openCycleHandler,
   updateCycleHandler,
@@ -58,6 +59,7 @@ router.get('/dashboard', requirePermission('finance:view'), getDashboard);
 // Payment Cycles
 router.get('/cycles', requirePermission('finance:view'), listCycles);
 router.post('/cycles', requirePermission('finance:cycles'), createCycle);
+router.post('/cycles/bulk', requirePermission('finance:cycles'), bulkCreateCycles);
 router.get('/cycles/:id', requirePermission('finance:view'), getCycleDetail);
 router.put('/cycles/:id', requirePermission('finance:cycles'), updateCycleHandler);
 router.post('/cycles/:id/open', requirePermission('finance:cycles'), openCycleHandler);

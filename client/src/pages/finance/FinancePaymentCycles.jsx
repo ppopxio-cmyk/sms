@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   CalendarDays,
+  CalendarRange,
   Plus,
   Copy,
   Check,
@@ -119,6 +120,31 @@ export default function FinancePaymentCycles() {
   });
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
+
+  // Bulk Create modal state — one cycle per selected Ethiopian month (same year/targets)
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkForm, setBulkForm] = useState({
+    ethYear: 2019,
+    months: [1], // Meskerem pre-selected
+    openDay: 25,
+    dueDay: 30,
+    amountEtb: '1500',
+    targetAll: false,
+    departments: [],
+    autoOpen: true,
+  });
+  const toggleBulkMonth = (m) => {
+    setBulkForm((f) => ({
+      ...f,
+      months: f.months.includes(m) ? f.months.filter((x) => x !== m) : [...f.months, m],
+    }));
+  };
+  const toggleBulkDepartment = (id) => {
+    setBulkForm((f) => ({
+      ...f,
+      departments: f.departments.includes(id) ? f.departments.filter((x) => x !== id) : [...f.departments, id],
+    }));
+  };
   const [showGlobalTutorialModal, setShowGlobalTutorialModal] = useState(false);
   const [globalTutorialInput, setGlobalTutorialInput] = useState('');
   const [savingTutorial, setSavingTutorial] = useState(false);
@@ -295,6 +321,45 @@ export default function FinancePaymentCycles() {
     onError: (err) => toast.error(errorMessage(err)),
   });
 
+  // 4b. Bulk Create Cycles Mutation — one cycle per selected month, per-month dates
+  const bulkCreateMutation = useMutation({
+    mutationFn: async () => {
+      const yr = Number(bulkForm.ethYear);
+      const months = bulkForm.months.map(Number).sort((a, b) => a - b);
+      const amountSantim = Math.round(parseFloat(bulkForm.amountEtb) * 100);
+      const openDay = Number(bulkForm.openDay) || 1;
+      const dueDay = Number(bulkForm.dueDay) || 5;
+      // Same open/close day for every selected month, converted month by month.
+      const opensDates = months.map((m) => {
+        const d = fromEthiopian(yr, m, openDay);
+        return d ? d.toISOString().slice(0, 10) : undefined;
+      });
+      const dueDates = months.map((m) => {
+        const d = fromEthiopian(yr, m, dueDay);
+        return d ? d.toISOString().slice(0, 10) : undefined;
+      });
+      const res = await api.post('/finance/cycles/bulk', {
+        ethYear: yr,
+        ethMonths: months,
+        opensDates,
+        dueDates,
+        amount: amountSantim,
+        targets: {
+          all: bulkForm.targetAll,
+          departments: bulkForm.targetAll ? [] : bulkForm.departments,
+        },
+        autoOpen: bulkForm.autoOpen,
+      });
+      return res.data;
+    },
+    onSuccess: (data) => {
+      toast.success(data.message || 'Bulk cycles created.');
+      setShowBulkModal(false);
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
   const deleteAllMutation = useMutation({
     mutationFn: async () => {
       const res = await api.delete('/finance/cycles', {
@@ -430,6 +495,24 @@ export default function FinancePaymentCycles() {
             >
               <Plus className="h-4 w-4" />
               <span>Create Fee Cycle</span>
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                const preset = financeSettings?.monthlyDefaults?.amount;
+                setBulkForm((f) => ({
+                  ...f,
+                  ethYear: curEthDate.year,
+                  months: [1],
+                  amountEtb: preset ? (preset / 100).toFixed(2) : f.amountEtb,
+                  autoOpen: true,
+                }));
+                setShowBulkModal(true);
+              }}
+              title="Create one cycle per selected month in a single batch"
+            >
+              <CalendarRange className="h-4 w-4" />
+              <span>Bulk Create</span>
             </Button>
           </div>
         }
@@ -918,6 +1001,192 @@ export default function FinancePaymentCycles() {
             </Button>
             <Button type="submit" disabled={createMutation.isPending}>
               {createMutation.isPending ? 'Creating...' : 'Create Draft Cycle'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* BULK CREATE CYCLES MODAL */}
+      <Modal
+        open={showBulkModal}
+        onClose={() => setShowBulkModal(false)}
+        title="Bulk Create Monthly Cycles"
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            bulkCreateMutation.mutate();
+          }}
+          className="space-y-4"
+        >
+          <div className="rounded-xl border border-brand-200 bg-brand-50/60 p-3 text-[11px] leading-relaxed text-brand-900">
+            Creates one monthly fee cycle per selected Ethiopian month — all with the same amount and target students. Months that already have an active cycle are skipped automatically.
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
+                Year (EC)
+              </label>
+              <input
+                type="number"
+                value={bulkForm.ethYear}
+                onChange={(e) => setBulkForm({ ...bulkForm, ethYear: e.target.value })}
+                className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
+                Opens Day
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="30"
+                value={bulkForm.openDay}
+                onChange={(e) => setBulkForm({ ...bulkForm, openDay: e.target.value })}
+                className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
+                Due Day
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="30"
+                value={bulkForm.dueDay}
+                onChange={(e) => setBulkForm({ ...bulkForm, dueDay: e.target.value })}
+                className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
+                required
+              />
+            </div>
+          </div>
+          <p className="-mt-2 text-[11px] text-slate-500">
+            Due dates: {bulkForm.months.length
+              ? bulkForm.months.map((m) => `${ETH_MONTHS[m - 1] || 'Month'} ${bulkForm.dueDay}`).join(', ')
+              : '— select months below'}
+          </p>
+
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">
+              Months ({bulkForm.months.length} selected)
+            </label>
+            <div className="grid grid-cols-4 gap-1.5 rounded-xl border border-slate-200 p-2.5">
+              {ETH_MONTHS.map((name, idx) => (
+                <label
+                  key={name}
+                  className={`flex cursor-pointer items-center gap-1.5 rounded-lg px-1.5 py-1 text-[11px] font-medium transition ${
+                    bulkForm.months.includes(idx + 1)
+                      ? 'bg-brand-50 text-brand-800'
+                      : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={bulkForm.months.includes(idx + 1)}
+                    onChange={() => toggleBulkMonth(idx + 1)}
+                    className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                  />
+                  {idx + 1}. {name}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
+              Base Monthly Fee Amount (ETB)
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              value={bulkForm.amountEtb}
+              onChange={(e) => setBulkForm({ ...bulkForm, amountEtb: e.target.value })}
+              className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">
+              Target Students
+            </label>
+            <label className="flex items-center gap-2 rounded-lg px-1 py-1 text-xs font-medium text-slate-700">
+              <input
+                type="checkbox"
+                checked={bulkForm.targetAll}
+                onChange={(e) => setBulkForm({ ...bulkForm, targetAll: e.target.checked })}
+                className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              />
+              All active students
+            </label>
+            {!bulkForm.targetAll && (
+              <div className="mt-1 max-h-40 overflow-y-auto rounded-xl border border-slate-200 p-2.5">
+                <p className="mb-1.5 px-0.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  Departments
+                </p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {departments.map((d) => {
+                    const id = String(d._id || d.id || '');
+                    return (
+                      <label
+                        key={id}
+                        className={`flex cursor-pointer items-center gap-1.5 rounded-lg px-1.5 py-1 text-[11px] font-medium transition ${
+                          bulkForm.departments.includes(id)
+                            ? 'bg-brand-50 text-brand-800'
+                            : 'text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={bulkForm.departments.includes(id)}
+                          onChange={() => toggleBulkDepartment(id)}
+                          className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                        />
+                        {d.name || d.code}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <label className="flex items-start gap-2 text-xs text-slate-700">
+              <input
+                type="checkbox"
+                checked={bulkForm.autoOpen}
+                onChange={(e) => setBulkForm({ ...bulkForm, autoOpen: e.target.checked })}
+                className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              />
+              <span>
+                <strong>Open immediately &amp; generate student charges.</strong>{' '}
+                If the due day is already past, targeted students become <strong>overdue on the spot</strong> — late fees and document holds apply from day one.
+              </span>
+            </label>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3">
+            <Button variant="outline" type="button" onClick={() => setShowBulkModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                bulkCreateMutation.isPending ||
+                bulkForm.months.length === 0 ||
+                (!bulkForm.targetAll && bulkForm.departments.length === 0) ||
+                !bulkForm.amountEtb
+              }
+            >
+              {bulkCreateMutation.isPending
+                ? 'Creating...'
+                : `Create ${bulkForm.months.length} Cycle(s)`}
             </Button>
           </div>
         </form>

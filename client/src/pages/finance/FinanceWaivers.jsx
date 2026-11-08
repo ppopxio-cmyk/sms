@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
   Gift,
-  Award,
   Search,
   RefreshCw,
   RotateCcw,
@@ -11,7 +10,6 @@ import {
   Mail,
   X,
   ChevronRight,
-  ShieldCheck,
   CheckSquare,
   Square,
   Check,
@@ -25,7 +23,7 @@ import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';
-import { formatEthiopian, ETH_MONTHS, toEthiopian } from '../../lib/ethiopianDate';
+import { formatEthiopian } from '../../lib/ethiopianDate';
 import AccountantAcademicFilter, { SelectToViewCard } from '../../components/finance/AccountantAcademicFilter';
 
 export default function FinanceWaivers() {
@@ -44,52 +42,13 @@ export default function FinanceWaivers() {
   const [revokingWaiver, setRevokingWaiver] = useState(null);
   const [revokeReason, setRevokeReason] = useState('');
 
-  // New-waiver wizard state
+  // New-waiver wizard state (fee waivers only)
   const [wizardOpen, setWizardOpen] = useState(false);
-  // 'waiver' = fee exemption (only UNPAID months), 'scholarship' = sponsor-funded award
-  const [wizardMode, setWizardMode] = useState('waiver');
   const [wizardStep, setWizardStep] = useState(1);
   const [studentQuery, setStudentQuery] = useState('');
   const [pickedStudent, setPickedStudent] = useState(null);
-  const [selectedEthYear, setSelectedEthYear] = useState('');
   const [selectedCycleIds, setSelectedCycleIds] = useState([]);
-  const [wType, setWType] = useState('full');
-  const [wAmount, setWAmount] = useState('');
   const [wReason, setWReason] = useState('');
-  const [wScholarship, setWScholarship] = useState('');
-  const [verificationCode, setVerificationCode] = useState('');
-  const [codeRequested, setCodeRequested] = useState(false);
-
-  // Academic years for cycles
-  const { data: academicYears = [] } = useQuery({
-    queryKey: ['finance', 'academicYears'],
-    queryFn: async () => {
-      const res = await api.get('/finance/academic-years');
-      return res.data?.years || [];
-    },
-  });
-
-  useEffect(() => {
-    if (!selectedEthYear) {
-      if (academicYears.length) {
-        setSelectedEthYear(String(academicYears[0].ethYear));
-      } else {
-        setSelectedEthYear(String(toEthiopian(new Date()).year));
-      }
-    }
-  }, [academicYears, selectedEthYear]);
-
-  // Cycles for the selected academic year
-  const yearCyclesQuery = useQuery({
-    queryKey: ['finance', 'cyclesForWaiver', selectedEthYear],
-    queryFn: async () => {
-      const res = await api.get('/finance/cycles', {
-        params: { ethYear: selectedEthYear, limit: 50 },
-      });
-      return res.data?.cycles || [];
-    },
-    enabled: wizardOpen && Boolean(selectedEthYear),
-  });
 
   const handleApplyFilter = () => {
     setIsFilterApplied(true);
@@ -136,12 +95,7 @@ export default function FinanceWaivers() {
     enabled: wizardOpen && studentQuery.trim().length >= 2,
   });
 
-  // Finance settings (default fee amounts) + picked student's charge ledger.
-  const { data: financeSettings } = useQuery({
-    queryKey: ['finance', 'settings'],
-    queryFn: async () => (await api.get('/finance/settings')).data?.finance,
-  });
-
+  // Picked student's charge ledger.
   const pickedStudentProfile = useQuery({
     queryKey: ['finance', 'waiverStudentProfile', pickedStudent?.id || pickedStudent?._id],
     queryFn: async () => {
@@ -149,18 +103,14 @@ export default function FinanceWaivers() {
       const res = await api.get(`/finance/students/${sid}`);
       return res.data;
     },
-    enabled: wizardOpen && Boolean(pickedStudent) && wizardMode === 'waiver',
+    enabled: wizardOpen && Boolean(pickedStudent),
   });
 
-  // In waiver mode we only ever show the student's UNPAID monthly charges.
+  // We only ever show the student's UNPAID monthly charges.
   const unpaidCharges = (pickedStudentProfile.data?.charges || []).filter((c) => c.status === 'unpaid');
 
-  const openWizard = (mode) => {
+  const openWizard = () => {
     resetWizard();
-    setWizardMode(mode);
-    // Seed the default partial/fee amount from Finance Settings (stored in santim).
-    const preset = financeSettings?.monthlyDefaults?.amount;
-    if (preset) setWAmount((preset / 100).toFixed(2));
     setWizardOpen(true);
   };
 
@@ -170,40 +120,21 @@ export default function FinanceWaivers() {
     setStudentQuery('');
     setPickedStudent(null);
     setSelectedCycleIds([]);
-    setWType('full');
-    setWAmount('');
     setWReason('');
-    setWScholarship('');
-    setVerificationCode('');
-    setCodeRequested(false);
   };
 
   const handleSelectAllCycles = () => {
-    if (wizardMode === 'waiver') {
-      setSelectedCycleIds(unpaidCharges.map((c) => c.cycle?._id));
-    } else {
-      setSelectedCycleIds((yearCyclesQuery.data || []).map((c) => c._id || c.id));
-    }
+    setSelectedCycleIds(unpaidCharges.map((c) => c.cycle?._id));
   };
 
   const handleClearAllCycles = () => {
     setSelectedCycleIds([]);
   };
 
-  // Auto-computed total waived amount for the current selection.
-  const waivedTotalEtb = (() => {
-    if (wizardMode === 'waiver') {
-      const selectedCharges = unpaidCharges.filter((c) => selectedCycleIds.includes(c.cycle?._id));
-      if (wType === 'full') {
-        return selectedCharges.reduce((sum, c) => sum + c.amountDue / 100, 0);
-      }
-      return Number(wAmount || 0) * selectedCharges.length;
-    }
-    // Scholarship mode: full fee of each picked year cycle.
-    const picked = (yearCyclesQuery.data || []).filter((c) => selectedCycleIds.includes(c._id || c.id));
-    if (wType === 'full') return picked.reduce((sum, c) => sum + c.amount / 100, 0);
-    return Number(wAmount || 0) * picked.length;
-  })();
+  // Auto-computed total waived amount for the current selection (full exemptions).
+  const waivedTotalEtb = unpaidCharges
+    .filter((c) => selectedCycleIds.includes(c.cycle?._id))
+    .reduce((sum, c) => sum + c.amountDue / 100, 0);
 
   const toggleCycle = (id) => {
     setSelectedCycleIds((prev) =>
@@ -211,33 +142,15 @@ export default function FinanceWaivers() {
     );
   };
 
-  // 2FA code request mutation
-  const requestCodeMutation = useMutation({
-    mutationFn: async () => {
-      const res = await api.post('/finance/waivers/request-code');
-      return res.data;
-    },
-    onSuccess: (data) => {
-      setCodeRequested(true);
-      toast.success(data.message || 'Verification code sent to your registered accountant email.');
-    },
-    onError: (err) => toast.error(errorMessage(err, 'Could not send verification code.')),
-  });
-
-  // Batch waiver mutation
+  // Batch waiver mutation — authorizing only needs a reason; the total is automatic.
   const batchWaiverMutation = useMutation({
     mutationFn: async () => {
       const payload = {
         studentId: pickedStudent.studentId || pickedStudent._id || pickedStudent.id,
         cycleIds: selectedCycleIds,
-        type: wType,
+        type: 'full',
         reason: wReason.trim(),
-        scholarshipCollege: wScholarship.trim(),
-        verificationCode: verificationCode.trim(),
       };
-      if (wType === 'partial') {
-        payload.amount = Number(wAmount);
-      }
       const res = await api.post('/finance/waivers/batch-apply', payload);
       return res.data;
     },
@@ -272,21 +185,12 @@ export default function FinanceWaivers() {
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button
-              variant="outline"
+              variant="primary"
               size="sm"
-              className="border-purple-200 text-purple-700 hover:bg-purple-50"
-              onClick={() => openWizard('waiver')}
+              onClick={openWizard}
             >
               <Gift className="h-4 w-4" />
               <span>+ Grant Fee Waiver</span>
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => openWizard('scholarship')}
-            >
-              <Award className="h-4 w-4" />
-              <span>+ Grant Scholarship</span>
             </Button>
           </div>
         }
@@ -335,21 +239,12 @@ export default function FinanceWaivers() {
 
             <div className="flex items-center gap-2">
               <Button
-                variant="outline"
+                variant="primary"
                 size="sm"
-                className="border-purple-200 text-purple-700 hover:bg-purple-50"
-                onClick={() => openWizard('waiver')}
+                onClick={openWizard}
               >
                 <Gift className="h-4 w-4" />
                 <span>+ Grant Fee Waiver</span>
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => openWizard('scholarship')}
-              >
-                <Award className="h-4 w-4" />
-                <span>+ Grant Scholarship</span>
               </Button>
               <Button
                 variant="outline"
@@ -375,7 +270,7 @@ export default function FinanceWaivers() {
                   <EmptyState
                     icon={Gift}
                     title="No waivers found"
-                    message={'Use the "+ Grant Fee Waiver" or "+ Grant Scholarship" buttons to grant a student fee exemption for specific months.'}
+                    message={'Use the "+ Grant Fee Waiver" button to grant a student fee exemption for specific unpaid months.'}
                   />
                 </div>
               ) : (
@@ -473,11 +368,11 @@ export default function FinanceWaivers() {
         </>
       )}
 
-      {/* GRANT FEE WAIVER / SCHOLARSHIP WIZARD */}
+      {/* GRANT FEE WAIVER WIZARD */}
       <Modal
         open={wizardOpen}
         onClose={resetWizard}
-        title={wizardMode === 'scholarship' ? 'Grant Scholarship' : 'Grant Fee Waiver'}
+        title="Grant Fee Waiver"
       >
         <div className="space-y-4">
           {/* Step Indicators */}
@@ -591,11 +486,9 @@ export default function FinanceWaivers() {
               </div>
 
               {/* WAIVER MODE: only the student's UNPAID monthly charges */}
-              {wizardMode === 'waiver' ? (
-                <>
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] font-medium text-amber-800">
-                    Fee waivers apply only to <strong>unpaid months</strong> on this student's account. Paid, waived, or reversed months are hidden automatically.
-                  </div>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] font-medium text-amber-800">
+                Fee waivers apply only to <strong>unpaid months</strong> on this student's account. Paid, waived, or reversed months are hidden automatically.
+              </div>
 
                   <div className="flex items-center justify-between border-t border-slate-100 pt-2">
                     <span className="text-xs font-semibold text-slate-700">
@@ -668,110 +561,6 @@ export default function FinanceWaivers() {
                       })}
                     </div>
                   )}
-                </>
-              ) : (
-                <>
-                  {/* SCHOLARSHIP MODE: pick monthly cycles from the selected academic year */}
-                  {/* Academic Year Selector */}
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Academic Year (EC)
-                      </label>
-                      <p className="text-[11px] text-slate-400">Select year to load monthly fee cycles.</p>
-                    </div>
-                    <select
-                      value={selectedEthYear}
-                      onChange={(e) => {
-                        setSelectedEthYear(e.target.value);
-                        setSelectedCycleIds([]);
-                      }}
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm outline-none focus:border-purple-500"
-                    >
-                      {academicYears.map((y) => (
-                        <option key={y.ethYear} value={y.ethYear}>
-                          {y.ethYear} EC Academic Year
-                        </option>
-                      ))}
-                      {(!academicYears || academicYears.length === 0) && (
-                        <option value={new Date().getFullYear() - 7}>{new Date().getFullYear() - 7} EC</option>
-                      )}
-                    </select>
-                  </div>
-
-                  {/* Month cycles multi-selection toolbar */}
-                  <div className="flex items-center justify-between border-t border-slate-100 pt-2">
-                    <span className="text-xs font-semibold text-slate-700">
-                      Select month cycles to cover with scholarship:
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleSelectAllCycles}
-                        className="text-[11px] font-semibold text-purple-600 hover:text-purple-800"
-                      >
-                        Select All
-                      </button>
-                      <span className="text-slate-300">|</span>
-                      <button
-                        type="button"
-                        onClick={handleClearAllCycles}
-                        className="text-[11px] font-semibold text-slate-500 hover:text-slate-700"
-                      >
-                        Clear All
-                      </button>
-                      <Badge tone={selectedCycleIds.length > 0 ? 'purple' : 'neutral'}>
-                        {selectedCycleIds.length} selected
-                      </Badge>
-                    </div>
-                  </div>
-
-                  {/* Cycles List with Checkboxes */}
-                  {yearCyclesQuery.isLoading ? (
-                    <p className="p-4 text-center text-xs text-slate-400">Loading monthly fee cycles…</p>
-                  ) : !yearCyclesQuery.data?.length ? (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800">
-                      No payment cycles found for {selectedEthYear} EC. You can create cycles in the Payment Cycles page.
-                    </div>
-                  ) : (
-                    <div className="max-h-60 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
-                      {yearCyclesQuery.data.map((c) => {
-                        const cId = c._id || c.id;
-                        const isSelected = selectedCycleIds.includes(cId);
-                        return (
-                          <div
-                            key={cId}
-                            onClick={() => toggleCycle(cId)}
-                            className={`flex items-center justify-between p-3 cursor-pointer transition ${
-                              isSelected ? 'bg-purple-50/70' : 'hover:bg-slate-50'
-                            }`}
-                          >
-                            <div className="flex items-center gap-3">
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => {}}
-                                className="h-4 w-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                              />
-                              <div>
-                                <p className="text-xs font-bold text-slate-800">
-                                  {c.title || `${ETH_MONTHS[(c.ethMonth || 1) - 1]} ${c.ethYear}`}
-                                </p>
-                                <p className="text-[11px] text-slate-400">
-                                  Month {c.ethMonth} • Due {formatEthiopian(c.dueAt)}
-                                </p>
-                              </div>
-                            </div>
-                            <p className="font-mono text-xs font-bold text-slate-700">
-                              {(c.amount / 100).toFixed(2)} ETB
-                            </p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </>
-              )}
 
               {/* Navigation buttons */}
               <div className="flex justify-between pt-2">
@@ -797,7 +586,7 @@ export default function FinanceWaivers() {
             </div>
           )}
 
-          {/* STEP 3: Waiver Details & 2FA Authorization */}
+          {/* STEP 3: Reason & Confirmation */}
           {wizardStep === 3 && pickedStudent && (
             <form
               onSubmit={(e) => {
@@ -811,140 +600,32 @@ export default function FinanceWaivers() {
                 <div>
                   <p className="text-xs font-bold text-slate-800">{pickedStudent.fullName || pickedStudent.name} ({pickedStudent.studentId})</p>
                   <p className="text-[11px] text-purple-700 font-semibold">
-                    {wizardMode === 'scholarship' ? 'Covering' : 'Waiving'} {selectedCycleIds.length} month cycle(s) {'—'} total{' '}
+                    Waiving {selectedCycleIds.length} unpaid month cycle(s) {'—'} total{' '}
                     <span className="font-mono font-bold">{waivedTotalEtb.toFixed(2)} ETB</span>
                   </p>
                 </div>
                 <Badge tone="purple">{selectedCycleIds.length} Months</Badge>
               </div>
 
-              {/* Waiver Type: Full vs Partial */}
-              <div>
-                <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">Waiver Scope</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {['full', 'partial'].map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setWType(t)}
-                      className={`rounded-xl border px-3 py-2 text-xs font-bold uppercase transition ${
-                        wType === t
-                          ? 'border-purple-600 bg-purple-50 text-purple-800'
-                          : 'border-slate-200 text-slate-500 hover:bg-slate-50'
-                      }`}
-                    >
-                      {t === 'full' ? 'Full (100% Exemption)' : 'Partial Exemption'}
-                    </button>
-                  ))}
-                </div>
+              {/* Total (auto-computed, for clarity) */}
+              <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase text-slate-600">Total Waived Amount</span>
+                <span className="font-mono text-sm font-bold text-slate-900">{waivedTotalEtb.toFixed(2)} Birr</span>
               </div>
-
-              {wType === 'partial' && (
-                <div>
-                  <label className="block text-xs font-semibold uppercase text-slate-600">
-                    Exemption amount per cycle (ETB)
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    value={wAmount}
-                    onChange={(e) => setWAmount(e.target.value)}
-                    required
-                    placeholder="e.g. 400"
-                    className="mt-1 block w-full rounded-xl border border-slate-200 p-2.5 font-mono text-sm text-slate-800 focus:border-purple-500 focus:outline-none"
-                  />
-                </div>
-              )}
 
               {/* Reason (Required) */}
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-600">
-                  Reason for Exemption / Scholarship <span className="text-rose-500">*</span>
+                  Reason for Waiver <span className="text-rose-500">*</span>
                 </label>
-                <input
+                <textarea
+                  rows={2}
                   value={wReason}
                   onChange={(e) => setWReason(e.target.value)}
-                  placeholder="e.g. Full academic merit scholarship / Need-based college exemption"
+                  placeholder="e.g. Need-based college exemption / Full academic merit"
                   required
                   className="mt-1 block w-full rounded-xl border border-slate-200 p-2.5 text-sm text-slate-800 focus:border-purple-500 focus:outline-none"
                 />
-              </div>
-
-              {/* Scholarship College / Sponsor (Optional) */}
-              <div>
-                <label className="block text-xs font-semibold uppercase text-slate-600">
-                  {wizardMode === 'scholarship' ? (
-                    <>Scholarship Organization / College <span className="text-rose-500">*</span></>
-                  ) : (
-                    <>Scholarship Organization / College <span className="text-slate-400 font-normal">(Optional)</span></>
-                  )}
-                </label>
-                <input
-                  value={wScholarship}
-                  onChange={(e) => setWScholarship(e.target.value)}
-                  required={wizardMode === 'scholarship'}
-                  placeholder="e.g. Mekuria Scholarship Foundation / Ministry of Education"
-                  className="mt-1 block w-full rounded-xl border border-slate-200 p-2.5 text-sm text-slate-800 focus:border-purple-500 focus:outline-none"
-                />
-              </div>
-
-              {/* 2FA Authorization Security Card */}
-              <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3.5 space-y-2.5">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-indigo-600 shrink-0" />
-                  <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wide text-indigo-950">
-                      Accountant 2FA Email Authorization
-                    </h4>
-                    <p className="text-[11px] text-slate-500">
-                      Fee waivers require one-time email authorization for audit and compliance.
-                    </p>
-                  </div>
-                </div>
-
-                {!codeRequested ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => requestCodeMutation.mutate()}
-                    disabled={requestCodeMutation.isPending}
-                    className="w-full justify-center border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"
-                  >
-                    {requestCodeMutation.isPending ? 'Sending code…' : 'Send 6-Digit 2FA Code to Email'}
-                  </Button>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-[11px] font-medium text-emerald-800">
-                      A 6-digit verification code has been dispatched to your email. Valid for 10 minutes.
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
-                        Enter 6-Digit Verification Code <span className="text-rose-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        maxLength={6}
-                        value={verificationCode}
-                        onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                        placeholder="123456"
-                        required
-                        className="w-full text-center font-mono tracking-widest text-lg font-bold rounded-xl border border-slate-300 bg-white p-2 text-slate-900 focus:border-purple-500 focus:outline-none"
-                      />
-                    </div>
-                    <div className="flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => requestCodeMutation.mutate()}
-                        disabled={requestCodeMutation.isPending}
-                        className="text-[11px] text-indigo-600 hover:underline font-semibold"
-                      >
-                        {requestCodeMutation.isPending ? 'Sending...' : 'Resend code'}
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Modal Action Buttons */}
@@ -955,16 +636,14 @@ export default function FinanceWaivers() {
                 <Button
                   type="submit"
                   disabled={
-                    !codeRequested ||
-                    verificationCode.length < 6 ||
                     !wReason.trim() ||
                     batchWaiverMutation.isPending
                   }
                   className="bg-purple-600 text-white hover:bg-purple-700"
                 >
                   {batchWaiverMutation.isPending
-                    ? 'Authorizing & Granting…'
-                    : `Verify & ${wizardMode === 'scholarship' ? 'Record Scholarships' : 'Grant Waivers'} (${selectedCycleIds.length})`}
+                    ? 'Granting…'
+                    : `Grant Fee Waivers (${selectedCycleIds.length})`}
                 </Button>
               </div>
             </form>

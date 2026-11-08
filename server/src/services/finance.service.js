@@ -12,7 +12,7 @@ import { Student } from '../models/Student.js';
 import { CourseOffering, CourseRegistration } from '../models/Offering.js';
 import { SystemSetting } from '../models/SystemSetting.js';
 import { audit } from './audit.service.js';
-import { notifyUsers } from './notification.service.js';
+import { notifyUsers, notifyUser } from './notification.service.js';
 import { sendFinanceNotification } from './mail.service.js';
 import { AppError } from '../utils/AppError.js';
 import { toEthiopian, ETH_MONTHS, fromEthiopian, parseEATDate } from '../utils/ethiopianDate.js';
@@ -211,37 +211,113 @@ export async function getAssignedTeacherUserIdsForStudent(studentId) {
 /**
  * Send targeted notifications to assigned teachers when hold status changes
  */
-export async function notifyAssignedTeachersHoldStatus(studentId, { isCleared, details }) {
+function truncateBody(text, max = 300) {
+  const s = String(text || '');
+  if (s.length <= max) return s;
+  return `${s.slice(0, max - 1).trimEnd()}…`;
+}
+
+// Registrations of a student mapped per teacher: { teacherId -> [{code, title, term, level}] }
+export async function studentCoursesPerTeacher(studentId) {
+  const out = new Map();
+  if (!studentId) return out;
+  try {
+    const registrations = await CourseRegistration.find({ student: studentId, status: 'registered' })
+      .select('offering')
+      .lean();
+    const offerings = await CourseOffering.find({
+      _id: { $in: registrations.map((r) => r.offering) },
+      teacher: { $ne: null },
+    })
+      .select('teacher course term level')
+      .populate('course', 'code title')
+      .lean();
+
+    for (const o of offerings) {
+      const tid = String(o.teacher || '');
+      if (!tid) continue;
+      if (!out.has(tid)) out.set(tid, []);
+      out.get(tid).push({
+        code: o.course?.code || '',
+        title: o.course?.title || '',
+        term: o.term || '',
+        level: o.level || null,
+      });
+    }
+  } catch {
+    // The list is supplementary — looking it up must never break a notice
+  }
+  return out;
+}
+
+function describeCourses(courses, maxCodes = 4) {
+  const labels = (courses || [])
+    .map((c) => [c.code, c.title].filter(Boolean).join(' — '))
+    .filter(Boolean);
+  if (!labels.length) return '';
+  const shown = labels.slice(0, maxCodes).join(', ');
+  return labels.length <= maxCodes ? shown : `${shown} +${labels.length - maxCodes} more`;
+}
+
+export async function notifyAssignedTeachersHoldStatus(studentId, { isCleared, details } = {}) {
   try {
     const teacherIds = await getAssignedTeacherUserIdsForStudent(studentId);
     if (!teacherIds.length) return;
 
     const student = await Student.findById(studentId)
-      .select('studentId firstName lastName middleName department program batch')
+      .select('studentId firstName lastName middleName fullName studentCategory department program batch')
       .populate('department', 'name code')
       .populate('program', 'name code')
       .populate('batch', 'name code')
       .lean();
     if (!student) return;
 
-    const studentName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(' ') || student.studentId;
-    const deptName = student.department?.name || student.department?.code || '';
-    const progName = student.program?.name || student.program?.code || '';
-    const batchName = student.batch?.name || student.batch?.code || '';
+    const studentName = student.fullName
+      || [student.firstName, student.middleName, student.lastName].filter(Boolean).join(' ')
+      || student.studentId;
+    const deptName = student.department?.name || student.department?.code || '—';
+    const progName = student.program?.name || student.program?.code || '—';
+    const batchName = student.batch?.name || student.batch?.code || '—';
 
-    if (isCleared) {
-      await notifyUsers(teacherIds, {
-        title: 'Financial Hold Cleared',
-        message: `Financial clearance confirmed for ${studentName} (${student.studentId}) - ${deptName} / ${progName} ${batchName}. Academic restrictions have been lifted.`,
-        type: 'financial_clearance',
-        link: '/teacher/classes',
-      });
-    } else {
-      await notifyUsers(teacherIds, {
-        title: 'Financial Hold Active',
-        message: `Financial hold active for ${studentName} (${student.studentId}) - ${deptName} / ${progName} ${batchName}. Outstanding fee: ${details?.title || 'Monthly Fee'} (${details?.amountEtb || '0.00'} ETB). Attendance, assessments and marks continue as normal; official document issuance (transcript/certificate) stays blocked.`,
-        type: 'financial_hold',
-        link: '/teacher/classes',
+    const perTeacherCourses = await studentCoursesPerTeacher(student._id || studentId);
+
+    // Everything a teacher should read, both inline (body ≤300 chars) and structurally
+    // (meta.finStudents) so the notifications page can render the full list.
+    const metaStudent = {
+      name: studentName,
+      studentId: student.studentId || '',
+      department: deptName,
+      programme: progName,
+      batch: batchName,
+      category: student.studentCategory || '',
+      months: details?.title || 'Monthly Fee',
+      amountEtb: details?.amountEtb || '0.00',
+    };
+
+    for (const teacherId of teacherIds) {
+      const courses = perTeacherCourses.get(String(teacherId)) || [];
+      metaStudent.yourClasses = courses.map((c) => [c.code, c.title].filter(Boolean).join(' — ')).filter(Boolean);
+
+      const coursesText = describeCourses(courses);
+      const classesLine = coursesText ? ` Your classes: ${coursesText}.` : '';
+      const subjectLine = isCleared
+        ? `CLEARED. Paid: ${details?.title || 'Monthly Fee'} (${details?.amountEtb || '0.00'} ETB).`
+        : `ON HOLD. Outstanding: ${details?.title || 'Monthly Fee'} (${details?.amountEtb || '0.00'} ETB).`;
+      const intro = isCleared
+        ? 'Financial hold LIFTED — the student may attend, sit assessments and receive documents.'
+        : 'Financial hold ACTIVE — attendance/assessments continue as normal; official documents stay blocked.';
+
+      await notifyUser(teacherId, {
+        type: isCleared ? 'financial_clearance' : 'financial_hold',
+        title: truncateBody(`Fee status: ${studentName} (${student.studentId})`, 160),
+        body: truncateBody(
+          `${student.studentId} · ${deptName} · ${progName} · ${batchName}${student.studentCategory ? ` · ${student.studentCategory}` : ''} — ${subjectLine}${classesLine} ${intro}`,
+          300,
+        ),
+        meta: {
+          finStudents: [metaStudent],
+          finHeader: isCleared ? 'Fee cleared — student details' : 'Fee on hold — student details',
+        },
       });
     }
   } catch (err) {
@@ -317,6 +393,97 @@ export async function createPaymentCycle(payload, userId) {
   });
 
   return cycle;
+}
+
+/**
+ * 1b. Bulk-create payment cycles: one cycle per selected Ethiopian month
+ * (e.g. Meskerem), all sharing the year, amount, due date and target scopes.
+ * Optionally opens every created cycle immediately so student charges (and
+ * any overdue flags for past due dates) are generated in one go.
+ */
+export async function bulkCreatePaymentCycles(payload, userId) {
+  const {
+    ethYear,
+    ethMonths,
+    opensAt,
+    opensDates,
+    dueAt,
+    dueDates,
+    amount,
+    targets,
+    tutorialVideoUrl,
+    autoOpen = false,
+  } = payload;
+
+  const months = Array.isArray(ethMonths)
+    ? ethMonths.map(Number).filter((m) => Number.isInteger(m) && m >= 1 && m <= 13)
+    : [];
+  if (!months.length) {
+    throw new AppError(400, 'MONTHS_REQUIRED', 'Select at least one Ethiopian month to create cycles for.');
+  }
+  if (!ethYear || !Number.isInteger(Number(ethYear))) {
+    throw new AppError(400, 'YEAR_REQUIRED', 'A valid Ethiopian academic year is required.');
+  }
+
+  const cleanTargets = {
+    all: targets?.all ?? true,
+    departments: targets?.departments || [],
+    programmes: targets?.programmes || [],
+    batches: targets?.batches || [],
+    categories: targets?.categories || [],
+  };
+  if (!cleanTargets.all && !cleanTargets.departments.length && !cleanTargets.programmes.length && !cleanTargets.batches.length && !cleanTargets.categories.length) {
+    throw new AppError(400, 'TARGETS_REQUIRED', 'Pick at least one department, programme or batch — or target all students.');
+  }
+
+  const created = [];
+  const skipped = [];
+  for (let i = 0; i < months.length; i++) {
+    const month = months[i];
+    try {
+      const cycle = await createPaymentCycle(
+        {
+          ethYear: Number(ethYear),
+          ethMonth: month,
+          opensAt: Array.isArray(opensDates) ? opensDates[i] : opensAt,
+          dueAt: Array.isArray(dueDates) ? dueDates[i] : dueAt,
+          amount,
+          targets: cleanTargets,
+          tutorialVideoUrl,
+        },
+        userId,
+      );
+
+      let chargesGenerated = 0;
+      if (autoOpen) {
+        const openResult = await openPaymentCycle(cycle._id, userId);
+        chargesGenerated = openResult.chargesGenerated || 0;
+      }
+
+      created.push({
+        id: String(cycle._id),
+        title: cycle.title,
+        ethYear: cycle.ethYear,
+        ethMonth: cycle.ethMonth,
+        status: cycle.status,
+        amount: cycle.amount,
+        amountEtb: (cycle.amount / 100).toFixed(2),
+        dueAt: cycle.dueAt,
+        portalHash: cycle.portalHash,
+        chargesGenerated,
+      });
+    } catch (err) {
+      // A month that already has an active cycle is skipped, never fatal
+      if (err?.code === 'CYCLE_EXISTS') {
+        skipped.push({ month, message: err.message });
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  const chargesGenerated = created.reduce((sum, c) => sum + (c.chargesGenerated || 0), 0);
+  return { created, skipped, chargesGenerated };
 }
 
 /**

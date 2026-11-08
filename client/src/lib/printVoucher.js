@@ -1,6 +1,46 @@
 import { formatEthiopian } from './ethiopianDate';
 
-const DEFAULT_COLLEGE = 'HARAMAYA HEALTH SCIENCE COLLEGE';
+const DEFAULT_COLLEGE = 'COLLEGE PAYMENT PORTAL';
+
+// The college name lives in the college's system settings (Admin Settings → institution).
+// `/api/status` is public and returns `{ name: settings.institution.name }`, so every
+// role — accountant, registrar and the public payment portal — can print the letterhead.
+let cachedCollegeName = '';
+let cachedCollegeNameAt = 0;
+const COLLEGE_CACHE_TTL = 10 * 60 * 1000;
+
+export async function getCollegeName() {
+  try {
+    const stored = sessionStorage.getItem('sms-voucher-college');
+    if (stored) {
+      if (cachedCollegeName !== stored) {
+        cachedCollegeName = stored;
+        cachedCollegeNameAt = Date.now();
+      }
+      return stored;
+    }
+  } catch {
+    // private mode — fall through to the network
+  }
+  if (cachedCollegeName && Date.now() - cachedCollegeNameAt < COLLEGE_CACHE_TTL) return cachedCollegeName;
+  try {
+    const res = await fetch('/api/status');
+    const data = await res.json();
+    if (data?.name) {
+      cachedCollegeName = data.name;
+      cachedCollegeNameAt = Date.now();
+      try {
+        sessionStorage.setItem('sms-voucher-college', data.name);
+      } catch {
+        // ignore storage failures
+      }
+      return data.name;
+    }
+  } catch {
+    // offline / endpoint unavailable — use the last name or the default
+  }
+  return cachedCollegeName || DEFAULT_COLLEGE;
+}
 
 const METHOD_LABELS = {
   cash: 'Cash Settlement',
@@ -170,8 +210,8 @@ function baseFooter({ printedAt }) {
  *         amountEtb, method, bankReference, payerName, paidAt, recordedBy,
  *         chapaReference, receivingAccount, college }
  */
-export function printPaymentReceiptVoucher(data = {}) {
-  const college = data.college || DEFAULT_COLLEGE;
+export async function printPaymentReceiptVoucher(data = {}) {
+  const college = data.college || (await getCollegeName());
   const paidAtStr = data.paidAt
     ? `${formatEthiopian(data.paidAt, { time: true })} EC`
     : '—';
@@ -231,8 +271,8 @@ export function printPaymentReceiptVoucher(data = {}) {
 /**
  * Print a full student fee statement (charges + payments + summary) in the same voucher style.
  */
-export function printStudentFeeStatement({ student, summary, charges, payments, college, printedAt, isCopy }) {
-  const c = college || DEFAULT_COLLEGE;
+export async function printStudentFeeStatement({ student, summary, charges, payments, college, printedAt, isCopy }) {
+  const c = college || (await getCollegeName());
   const chargeRows = (charges || [])
     .map(
       (ch) => `<tr>

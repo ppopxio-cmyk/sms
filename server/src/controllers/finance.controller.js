@@ -3,6 +3,7 @@ import { audit } from '../services/audit.service.js';
 import { AppError } from '../utils/AppError.js';
 import {
   createPaymentCycle,
+  bulkCreatePaymentCycles,
   openPaymentCycle,
   updatePaymentCycle,
   closePaymentCycle,
@@ -17,8 +18,9 @@ import {
   getFinanceDashboardData,
   checkStudentFinancialHold,
   notifyAssignedTeachersHoldStatus,
+  studentCoursesPerTeacher,
 } from '../services/finance.service.js';
-import { notifyRole, notifyUsers } from '../services/notification.service.js';
+import { notifyRole, notifyUser } from '../services/notification.service.js';
 import mongoose from 'mongoose';
 import {
   PaymentCycle,
@@ -237,6 +239,30 @@ export const createCycle = asyncHandler(async (req, res) => {
     meta: { title: cycle.title, amount: cycle.amount, ethYear: cycle.ethYear, ethMonth: cycle.ethMonth },
   });
   res.status(201).json({ cycle });
+});
+
+// 3b. Bulk Create Cycles (one per selected Ethiopian month, same year/targets)
+export const bulkCreateCycles = asyncHandler(async (req, res) => {
+  const result = await bulkCreatePaymentCycles(req.body, req.user?.id);
+  audit({
+    req,
+    action: 'finance.cycles_bulk_created',
+    targetType: 'PaymentCycle',
+    targetId: null,
+    meta: {
+      months: (result.created || []).map((c) => c.ethMonth),
+      amount: req.body.amount,
+      autoOpen: Boolean(req.body.autoOpen),
+      chargesGenerated: result.chargesGenerated,
+    },
+  });
+  res.status(201).json({
+    ...result,
+    message:
+      `Created ${result.created.length} cycle(s)` +
+      (req.body.autoOpen ? ` and generated ${result.chargesGenerated} student charge(s)` : '') +
+      (result.skipped.length ? `; skipped ${result.skipped.length} month(s) that already had an active cycle.` : '.'),
+  });
 });
 
 // 4. Get Cycle Detail
@@ -522,21 +548,23 @@ export const batchApplyWaivers = asyncHandler(async (req, res) => {
     throw new AppError(400, 'FIELD_REQUIRED', 'Please select a student and at least one monthly cycle.');
   }
   if (!reason || !String(reason).trim()) {
-    throw new AppError(400, 'REASON_REQUIRED', 'A reason for granting the waiver/scholarship is required.');
-  }
-  if (!verificationCode || !String(verificationCode).trim()) {
-    throw new AppError(400, 'CODE_REQUIRED', 'Please enter the 6-digit verification code sent to your email.');
+    throw new AppError(400, 'REASON_REQUIRED', 'A reason for granting the waiver is required.');
   }
 
+  // 2FA email authorization is OPTIONAL now: the accountant flow only needs a reason
+  // and the auto-computed total. If a code accompanies the request, still verify it.
   const userId = String(req.user?._id || req.user?.id);
-  const record = waiverAuthCodes.get(userId);
-  if (!record || Date.now() > record.expiresAt) {
-    throw new AppError(400, 'CODE_EXPIRED', 'Verification code has expired. Please click Request Code to get a fresh code.');
-  }
+  if (verificationCode && String(verificationCode).trim()) {
+    const record = waiverAuthCodes.get(userId);
+    if (!record || Date.now() > record.expiresAt) {
+      throw new AppError(400, 'CODE_EXPIRED', 'Verification code has expired. Please click Request Code to get a fresh code.');
+    }
 
-  const inputHash = crypto.createHash('sha256').update(String(verificationCode).trim()).digest('hex');
-  if (inputHash !== record.codeHash) {
-    throw new AppError(400, 'CODE_INVALID', 'Invalid verification code. Please check your email and try again.');
+    const inputHash = crypto.createHash('sha256').update(String(verificationCode).trim()).digest('hex');
+    if (inputHash !== record.codeHash) {
+      throw new AppError(400, 'CODE_INVALID', 'Invalid verification code. Please check your email and try again.');
+    }
+    waiverAuthCodes.delete(userId);
   }
 
   // Find student
@@ -1042,10 +1070,14 @@ export const notifyProgrammeOverdueTeachers = asyncHandler(async (req, res) => {
     studentMap.get(sid).charges.push(c);
   }
 
-  let studentsNotified = 0;
-  const failed = [];
-
+  // Group everything per teacher: ONE detailed list notification each, instead of
+  // one row per student. Every teacher sees exactly their own students/classes.
+  const teacherMap = new Map(); // teacherId -> { students: [metaRow] }
   for (const [sid, item] of studentMap.entries()) {
+    const teacherIds = await getAssignedTeacherUserIdsForStudent(sid);
+    if (!teacherIds.length) continue;
+
+    const perTeacher = await studentCoursesPerTeacher(sid);
     const st = item.student || {};
     const fullName = [st.firstName, st.middleName, st.lastName].filter(Boolean).join(' ') || st.fullName || st.studentId || 'Student';
     const months = item.charges
@@ -1053,18 +1085,47 @@ export const notifyProgrammeOverdueTeachers = asyncHandler(async (req, res) => {
       .join(', ');
     const totalEtb = (item.charges.reduce((acc, c) => acc + (c.amountDue || 0), 0) / 100).toFixed(2);
 
-    try {
-      const teacherIds = await getAssignedTeacherUserIdsForStudent(sid);
-      if (!teacherIds.length) continue;
-      await notifyUsers(teacherIds, {
-        title: 'Overdue Monthly Fee Alert',
-        message: `${fullName} (${st.studentId || 'unknown ID'}) has ${item.charges.length} overdue month(s): ${months}. Total overdue: ${totalEtb} ETB. The official documents (transcript/certificate) remain blocked until cleared.`,
-        type: 'financial_hold',
-        link: '/teacher/classes',
+    for (const teacherId of teacherIds) {
+      if (!teacherMap.has(teacherId)) teacherMap.set(teacherId, []);
+      teacherMap.get(teacherId).push({
+        name: fullName,
+        studentId: st.studentId || 'unknown ID',
+        department: st.department?.name || st.department?.code || '',
+        programme: st.program?.name || item.charges[0]?.programme || '',
+        batch: st.batch?.name || st.batch?.code || '',
+        months,
+        monthsCount: item.charges.length,
+        amountEtb: totalEtb,
+        yourClasses: (perTeacher.get(teacherId) || [])
+          .map((c) => [c.code, c.title].filter(Boolean).join(' — '))
+          .filter(Boolean),
       });
-      studentsNotified++;
+    }
+  }
+
+  let studentsNotified = 0;
+  let teachersNotified = 0;
+  const failed = [];
+
+  for (const [teacherId, rows] of teacherMap.entries()) {
+    const totalAcross = rows.reduce((acc, r) => acc + (Number(r.amountEtb) || 0), 0);
+    const monthsCount = rows.reduce((acc, r) => acc + r.monthsCount, 0);
+    try {
+      const namesPreview = rows.slice(0, 4).map((r) => `${r.name} (${r.studentId})`).join('; ');
+      const preview = rows.length > 4 ? `${namesPreview}; +${rows.length - 4} more` : namesPreview;
+      await notifyUser(teacherId, {
+        type: 'financial_hold',
+        title: `Overdue Fee List — ${rows.length} student(s), ${monthsCount} month(s)`,
+        body: `Students with overdue monthly fees registered in your classes: ${preview}. Total across all: ${totalAcross.toFixed(2)} ETB. Open this notification to see the full list with details.`,
+        meta: {
+          finStudents: rows,
+          finHeader: 'Overdue monthly fees — full detail list',
+        },
+      });
+      teachersNotified++;
+      studentsNotified += rows.length;
     } catch {
-      failed.push(st.studentId || sid);
+      failed.push(...rows.map((r) => r.studentId));
     }
   }
 
@@ -1072,15 +1133,16 @@ export const notifyProgrammeOverdueTeachers = asyncHandler(async (req, res) => {
     req,
     action: 'finance.overdue_programme_teachers_notified',
     targetType: 'StudentCharge',
-    meta: { programme: programme || '', students: studentMap.size, studentsNotified },
+    meta: { programme: programme || '', students: studentMap.size, studentsNotified, teachersNotified },
   });
 
   res.json({
     success: true,
     studentsInProgramme: studentMap.size,
     studentsNotified,
+    teachersNotified,
     failed,
-    message: `Notified assigned teachers for ${studentMap.size} overdue student(s) in this programme.`,
+    message: `Sent a detailed overdue-fee list to ${teachersNotified} teacher(s), covering ${studentMap.size} student(s).`,
   });
 });
 
