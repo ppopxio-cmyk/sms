@@ -754,15 +754,6 @@ export async function recordManualPayment({
   charge.payment = payment._id;
   await charge.save();
 
-  // Notify assigned teachers if student is now fully cleared
-  const postHold = await checkStudentFinancialHold(charge.student?._id || charge.student);
-  if (!postHold.hasHold) {
-    void notifyAssignedTeachersHoldStatus(charge.student?._id || charge.student, {
-      isCleared: true,
-      details: { title: charge.cycle?.title, amountEtb: (payment.amount / 100).toFixed(2) },
-    });
-  }
-
   audit({
     actorId: userId,
     actorRole: 'ACCOUNTANT',
@@ -892,15 +883,6 @@ export async function createWaiver({ chargeId, amount, type = 'full', reason, sc
     }
   }
 
-  // Notify assigned teachers if student is now fully cleared
-  const postHold = await checkStudentFinancialHold(charge.student._id || charge.student);
-  if (!postHold.hasHold) {
-    void notifyAssignedTeachersHoldStatus(charge.student._id || charge.student, {
-      isCleared: true,
-      details: { title: 'Tuition Fee Exemption', amountEtb: (waiverAmount / 100).toFixed(2) },
-    });
-  }
-
   audit({
     actorId: userId,
     actorRole: 'ACCOUNTANT',
@@ -934,15 +916,6 @@ export async function revokeWaiver(waiverId, reason, userId) {
     charge.waiver = null;
     if (charge.cycle) charge.amountDue = charge.cycle.amount;
     await charge.save();
-
-    // Check if student now has an active hold and notify assigned teachers
-    const postHold = await checkStudentFinancialHold(charge.student);
-    if (postHold.hasHold) {
-      void notifyAssignedTeachersHoldStatus(charge.student, {
-        isCleared: false,
-        details: { title: 'Waiver Revoked', amountEtb: ((charge.amountDue || 0) / 100).toFixed(2) },
-      });
-    }
   }
 
   return waiver;
@@ -967,15 +940,6 @@ export async function extendStudentDeadline({ chargeId, extendedDueAt, reason, u
 
   charge.dueAt = new Date(extendedDueAt);
   await charge.save();
-
-  // If deadline extension lifted an active hold, notify assigned teachers
-  const postHold = await checkStudentFinancialHold(charge.student);
-  if (!postHold.hasHold) {
-    void notifyAssignedTeachersHoldStatus(charge.student, {
-      isCleared: true,
-      details: { title: 'Deadline Extended', amountEtb: ((charge.amountDue || 0) / 100).toFixed(2) },
-    });
-  }
 
   audit({
     actorId: userId,

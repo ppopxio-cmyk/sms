@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -21,6 +21,7 @@ import Button from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/StatePanel';
 import { SkeletonRows } from '../../components/ui/Skeleton';
 import { formatEthiopian } from '../../lib/ethiopianDate';
+import AccountantAcademicFilter, { SelectToViewCard } from '../../components/finance/AccountantAcademicFilter';
 
 export default function FinanceOverdueHolds() {
   const queryClient = useQueryClient();
@@ -97,37 +98,48 @@ export default function FinanceOverdueHolds() {
     <div className="space-y-6">
       <PageHeader
         title="Overdue Monthly Fees — Teacher Alerts"
-        subtitle="Students with unpaid monthly fees past the grace period. Notify the teachers assigned to a programme; document issuance (transcripts/certificates) stays blocked until cleared."
+        subtitle="Students with unpaid monthly fees past the grace period. Filter by Batch, Department, and Programme, and send overdue alerts directly to assigned teachers."
         icon={AlertTriangle}
       />
 
-      {/* Academic Filter */}
-      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="grid gap-3 md:grid-cols-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+      {/* Cascading Academic Filter: Batch -> Department -> Programme */}
+      <AccountantAcademicFilter
+        selectedBatch={selectedBatch}
+        setSelectedBatch={setSelectedBatch}
+        selectedDepartment={selectedDepartment}
+        setSelectedDepartment={setSelectedDepartment}
+        selectedProgram={selectedProgram}
+        setSelectedProgram={setSelectedProgram}
+        isApplied={isFilterApplied}
+        onApply={handleApplyFilter}
+        onReset={handleResetFilter}
+      />
+
+      {/* Search Bar & Instructions */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+          <div className="relative w-full sm:w-96">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
             <input
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
                 setPage(1);
               }}
-              placeholder="Search student ID or name…"
-              className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2.5 text-xs text-slate-800 shadow-sm focus:border-brand-500 focus:outline-none"
+              placeholder="Search by student ID or name…"
+              className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2 text-xs text-slate-800 shadow-sm focus:border-brand-500 focus:outline-none"
             />
           </div>
-          <p className="self-center text-[11px] text-slate-500 md:col-span-3">
-            Teacher alerts are sent per programme below. Overdue students can still attend classes, sit assessments, and submit
-            marks — only official documents remain blocked.
+          <p className="text-[11px] text-slate-400">
+            Overdue holds block attendance marking, assessment entry, and official clearance.
           </p>
         </div>
       </div>
 
       {!showResults ? (
-        <EmptyState
-          icon={AlertTriangle}
-          title="Search or apply academic filter"
-          message="Type a student ID or name in the box above to see overdue months, or select an academic batch/department."
+        <SelectToViewCard
+          title="Select to View Overdue Records"
+          message="Please select a Batch, Department, or Programme above and click 'View Records', or type a student ID / name in the search box."
         />
       ) : (
         <>
@@ -143,7 +155,7 @@ export default function FinanceOverdueHolds() {
               <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-rose-600">
                 <DollarSign className="h-4 w-4" /> Total Overdue ETB
               </div>
-              <p className="mt-2 font-mono text-3xl font-black text-rose-700">{summary.totalOverdueEtb ?? '0.00'}</p>
+              <p className="mt-2 font-mono text-3xl font-black text-rose-700">{summary.totalOverdueEtb ?? '0.00'} ETB</p>
             </div>
             <div className="rounded-3xl border border-rose-100 bg-rose-50 p-5">
               <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-rose-600">
@@ -154,16 +166,16 @@ export default function FinanceOverdueHolds() {
           </div>
 
           {/* Teacher alert toolbar */}
-          <div className="flex flex-wrap items-center gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-600">
-              <Bell className="h-4 w-4 text-amber-500" /> Notify Teachers
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-700">
+              <Bell className="h-4 w-4 text-amber-500" /> Notify Programme Teachers
             </div>
             <select
               value={notifyProgramme}
               onChange={(e) => setNotifyProgramme(e.target.value)}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-800 shadow-sm focus:border-brand-500 focus:outline-none"
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 shadow-sm focus:border-brand-500 focus:outline-none"
             >
-              <option value="">All programmes (current filter)</option>
+              <option value="">All programmes in current filter</option>
               {programmes.map((p) => (
                 <option key={p} value={p}>
                   {p}
@@ -173,18 +185,24 @@ export default function FinanceOverdueHolds() {
             <Button
               variant="primary"
               size="sm"
-              disabled={notifyMutation.isPending}
+              disabled={notifyMutation.isPending || (!students.length && !notifyProgramme)}
               onClick={() => notifyMutation.mutate()}
             >
               <Send className="h-4 w-4" />
-              <span>{notifyMutation.isPending ? 'Notifying…' : 'Send Alerts'}</span>
+              <span>
+                {notifyMutation.isPending
+                  ? 'Sending Alerts…'
+                  : notifyProgramme
+                    ? `Notify ${notifyProgramme} Teachers`
+                    : 'Notify Programme Teachers'}
+              </span>
             </Button>
             <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
               <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
               <span>Refresh</span>
             </Button>
-            <p className="text-[11px] text-slate-400">
-              Alerts go only to the teachers assigned to the selected programme — never to the registrar or the student.
+            <p className="text-[11px] text-slate-400 ml-auto">
+              Alerts are sent exclusively to teachers of the selected programme.
             </p>
           </div>
 
@@ -221,14 +239,25 @@ export default function FinanceOverdueHolds() {
                         <tr key={s.studentId} className="transition hover:bg-slate-50/70">
                           <td className="py-3.5 pl-6 pr-4">
                             <div className="flex items-center gap-3">
-                              <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200">
+                              <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200">
                                 {s.photoUrl ? (
-                                  <img src={s.photoUrl} alt={s.fullName} className="h-full w-full object-cover" />
-                                ) : (
-                                  <div className="flex h-full w-full items-center justify-center bg-brand-50 text-xs font-bold text-brand-700">
-                                    {(s.fullName || 'S')[0]}
-                                  </div>
-                                )}
+                                  <img
+                                    src={s.photoUrl}
+                                    alt={s.fullName}
+                                    className="h-full w-full object-cover"
+                                    onError={(e) => {
+                                      e.currentTarget.style.display = 'none';
+                                      const fb = e.currentTarget.parentElement.querySelector('.avatar-fallback');
+                                      if (fb) fb.style.display = 'flex';
+                                    }}
+                                  />
+                                ) : null}
+                                <div
+                                  className="avatar-fallback flex h-full w-full items-center justify-center bg-rose-50 text-xs font-bold text-rose-700"
+                                  style={{ display: s.photoUrl ? 'none' : 'flex' }}
+                                >
+                                  {(s.fullName || 'S')[0]}
+                                </div>
                               </div>
                               <div>
                                 <Link

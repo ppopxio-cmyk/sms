@@ -635,15 +635,6 @@ export async function verifyCbeReceipt({
   charge.lockedAt = null;
   await charge.save();
 
-  // Notify assigned teachers if student is now fully cleared
-  const postHold = await checkStudentFinancialHold(student._id);
-  if (!postHold.hasHold) {
-    void notifyAssignedTeachersHoldStatus(student._id, {
-      isCleared: true,
-      details: { title: cycle.title, amountEtb: ((cycle.amount || 0) / 100).toFixed(2) },
-    });
-  }
-
   // Log successful attempt
   await PaymentAttempt.create({
     charge: charge._id,

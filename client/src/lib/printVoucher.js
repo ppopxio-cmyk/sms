@@ -1,4 +1,4 @@
-import { formatEthiopian } from './ethiopianDate';
+import { formatEthiopian, ETH_MONTHS } from './ethiopianDate';
 
 const DEFAULT_COLLEGE = 'COLLEGE PAYMENT PORTAL';
 
@@ -360,6 +360,176 @@ export async function printStudentFeeStatement({ student, summary, charges, paym
       ${baseFooter({ printedAt })}`,
     `Fee Statement — ${student?.fullName || student?.studentId || ''}`
   );
+}
+
+/**
+ * Print an official executive finance report voucher with black top-band letterhead,
+ * KPI summary cards, monthly collection performance, and programme breakdown.
+ */
+export async function printFinancialReport({ reportData, selectedYear, selectedMonth, printedAt }) {
+  const c = await getCollegeName();
+  const totals = reportData?.totals || {};
+  const monthRows = reportData?.monthRows || [];
+  const programmeRows = reportData?.programmeRows || [];
+  const methodRows = reportData?.methodRows || [];
+
+  const money = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const billed = Number(totals.billed || 0);
+  const paid = Number(totals.paid || 0);
+  const outstanding = Number(totals.outstanding || 0);
+  const recoveryRate = billed > 0 ? ((paid / billed) * 100).toFixed(1) + '%' : '0.0%';
+
+  const periodLabel = selectedMonth
+    ? `${ETH_MONTHS[Number(selectedMonth) - 1] || 'Month ' + selectedMonth} — ${selectedYear} EC`
+    : `Academic Year ${selectedYear} EC (Full 12 Months)`;
+
+  const mRowsHtml = monthRows
+    .map(
+      (m) => `<tr>
+        <td style="padding:6px 9px;font-weight:600">${esc(m.month)}. ${esc(ETH_MONTHS[Number(m.month) - 1] || '—')}</td>
+        <td style="padding:6px 9px;text-align:center">${esc(m.charges)}</td>
+        <td style="padding:6px 9px;text-align:center">${esc(m.paidCount)}</td>
+        <td style="padding:6px 9px;text-align:right;font-family:'Consolas',monospace">${esc(money(m.billed || (Number(m.paid || 0) + Number(m.outstanding || 0))))}</td>
+        <td style="padding:6px 9px;text-align:right;font-family:'Consolas',monospace;font-weight:700;color:#047857">${esc(money(m.paid))}</td>
+        <td style="padding:6px 9px;text-align:right;font-family:'Consolas',monospace;color:#b91c1c">${esc(money(m.outstanding || (Number(m.billed || 0) - Number(m.paid || 0))))}</td>
+        <td style="padding:6px 9px;text-align:center;font-weight:700">${esc(m.rate || (Number(m.billed) > 0 ? ((Number(m.paid)/Number(m.billed))*100).toFixed(1)+'%' : '—'))}</td>
+      </tr>`
+    )
+    .join('');
+
+  const pRowsHtml = programmeRows
+    .map(
+      (p) => `<tr>
+        <td style="padding:6px 9px;font-weight:600">${esc(p.programme)}</td>
+        <td style="padding:6px 9px;text-align:center">${esc(p.charges)}</td>
+        <td style="padding:6px 9px;text-align:right;font-family:'Consolas',monospace">${esc(money(p.billed))}</td>
+        <td style="padding:6px 9px;text-align:right;font-family:'Consolas',monospace;font-weight:700;color:#047857">${esc(money(p.paid))}</td>
+        <td style="padding:6px 9px;text-align:right;font-family:'Consolas',monospace;color:#b91c1c">${esc(money(p.outstanding))}</td>
+      </tr>`
+    )
+    .join('');
+
+  const methRowsHtml = methodRows
+    .map(
+      (m) => `<tr>
+        <td style="padding:6px 9px;font-weight:600">${esc(m.method)}</td>
+        <td style="padding:6px 9px;text-align:right;font-family:'Consolas',monospace;font-weight:700">${esc(money(m.amount))} ETB</td>
+      </tr>`
+    )
+    .join('');
+
+  const nowEth = formatEthiopian(new Date(), { time: true });
+
+  const innerHtml = `
+    ${baseHeader({
+      college: c,
+      receiptNumber: `${selectedYear}-EC-AUDIT`,
+      label: 'Annual Financial Audit Report',
+      status: 'confirmed',
+    })}
+    <main>
+      <div class="grid">
+        <div class="field"><div class="k">Reporting Period</div><div class="v">${esc(periodLabel)}</div></div>
+        <div class="field"><div class="k">Calendar System</div><div class="v">Ethiopian Academic Calendar</div></div>
+        <div class="field"><div class="k">Audit Generated Date</div><div class="v">${esc(nowEth)} EC</div></div>
+        <div class="field"><div class="k">Cycles Audited</div><div class="v mono">${esc(totals.cycles || monthRows.length)} Fee Cycles (${esc(totals.charges || 0)} charges)</div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0 12px;">
+        <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:10px 12px;">
+          <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:#4338ca;text-transform:uppercase;">Total Billed</div>
+          <div style="font-family:'Consolas',monospace;font-size:16px;font-weight:800;color:#312e81;margin-top:2px;">${esc(money(billed))} ETB</div>
+        </div>
+        <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:10px 12px;">
+          <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:#047857;text-transform:uppercase;">Total Collected</div>
+          <div style="font-family:'Consolas',monospace;font-size:16px;font-weight:800;color:#065f46;margin-top:2px;">${esc(money(paid))} ETB</div>
+        </div>
+        <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;">
+          <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:#b91c1c;text-transform:uppercase;">Outstanding Due</div>
+          <div style="font-family:'Consolas',monospace;font-size:16px;font-weight:800;color:#991b1b;margin-top:2px;">${esc(money(outstanding))} ETB</div>
+        </div>
+        <div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;">
+          <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:#0f172a;text-transform:uppercase;">Recovery Rate</div>
+          <div style="font-family:'Consolas',monospace;font-size:16px;font-weight:800;color:#0f172a;margin-top:2px;">${esc(recoveryRate)}</div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px;">
+        <div style="font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#0f172a;margin-bottom:6px;">12-Month Ethiopian Calendar Performance</div>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <thead>
+            <tr style="background:#0f172a;color:#fff;">
+              <th style="text-align:left;padding:6px 9px;">Month</th>
+              <th style="text-align:center;padding:6px 9px;">Charges</th>
+              <th style="text-align:center;padding:6px 9px;">Payments</th>
+              <th style="text-align:right;padding:6px 9px;">Billed (ETB)</th>
+              <th style="text-align:right;padding:6px 9px;">Paid (ETB)</th>
+              <th style="text-align:right;padding:6px 9px;">Overdue (ETB)</th>
+              <th style="text-align:center;padding:6px 9px;">Rate</th>
+            </tr>
+          </thead>
+          <tbody style="border:1px solid #cbd5e1;">
+            ${mRowsHtml || '<tr><td colspan="7" style="text-align:center;padding:12px;color:#94a3b8">No records.</td></tr>'}
+            <tr style="background:#e2e8f0;font-weight:700;">
+              <td style="padding:6px 9px;">TOTAL / SUMMARY</td>
+              <td style="padding:6px 9px;text-align:center">${esc(totals.charges || 0)}</td>
+              <td style="padding:6px 9px;text-align:center">${esc(totals.payments || 0)}</td>
+              <td style="padding:6px 9px;text-align:right;font-family:'Consolas',monospace">${esc(money(billed))}</td>
+              <td style="padding:6px 9px;text-align:right;font-family:'Consolas',monospace;color:#047857">${esc(money(paid))}</td>
+              <td style="padding:6px 9px;text-align:right;font-family:'Consolas',monospace;color:#b91c1c">${esc(money(outstanding))}</td>
+              <td style="padding:6px 9px;text-align:center">${esc(recoveryRate)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:16px;margin-top:16px;">
+        <div>
+          <div style="font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#0f172a;margin-bottom:6px;">Academic Programme Performance</div>
+          <table style="width:100%; border-collapse:collapse; font-size:10.5px;">
+            <thead>
+              <tr style="background:#334155;color:#fff;">
+                <th style="text-align:left;padding:6px 9px;">Programme</th>
+                <th style="text-align:center;padding:6px 9px;">Charges</th>
+                <th style="text-align:right;padding:6px 9px;">Billed</th>
+                <th style="text-align:right;padding:6px 9px;">Paid</th>
+                <th style="text-align:right;padding:6px 9px;">Overdue</th>
+              </tr>
+            </thead>
+            <tbody style="border:1px solid #cbd5e1;">
+              ${pRowsHtml || '<tr><td colspan="5" style="text-align:center;padding:12px;color:#94a3b8">No data.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+
+        <div>
+          <div style="font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#0f172a;margin-bottom:6px;">Settlement Channels</div>
+          <table style="width:100%; border-collapse:collapse; font-size:10.5px;">
+            <thead>
+              <tr style="background:#334155;color:#fff;">
+                <th style="text-align:left;padding:6px 9px;">Channel</th>
+                <th style="text-align:right;padding:6px 9px;">Volume</th>
+              </tr>
+            </thead>
+            <tbody style="border:1px solid #cbd5e1;">
+              ${methRowsHtml || '<tr><td colspan="2" style="text-align:center;padding:12px;color:#94a3b8">No payments.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+
+    <div class="note">This document is the official executive financial audit report generated by the College Management System. Reconciled and archived for institutional inspection.</div>
+    <div class="sign" style="margin-top:20px;">
+      <div class="sig">Prepared By — College Accountant</div>
+      <div class="sig">Verified By — Chief Internal Auditor</div>
+      <div class="sig">Approved By — Dean of Administration</div>
+    </div>
+    <div class="stamp"><span>OFFICIALLY AUDITED</span></div>
+    ${baseFooter({ printedAt })}
+  `;
+
+  printHtml(innerHtml, `Finance-Report-${selectedYear}-EC`);
 }
 
 function wordsFromAmount(etbValue) {

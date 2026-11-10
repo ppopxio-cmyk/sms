@@ -14,6 +14,7 @@ import {
   WidthType,
   BorderStyle,
 } from 'docx';
+import { formatEthiopian } from '../utils/ethiopianDate.js';
 
 const PAGE = { margin: 42, width: 511, x0: 42 };
 const BRAND = '#4338ca';
@@ -75,7 +76,7 @@ function statementRows(snapshot) {
     ethMonth: c.cycle?.ethMonth ?? '',
     amountDueEtb: money(c.amountDue),
     status: (c.status || '').toUpperCase(),
-    paidAt: c.paidAt ? new Date(c.paidAt).toISOString().slice(0, 10) : '',
+    paidAt: c.paidAt ? formatEthiopian(c.paidAt) : '',
     reference: c.payment?.receiptNumber || (c.waiver?.reason ? `Waiver (${c.waiver.reason})` : '-'),
   }));
 }
@@ -86,7 +87,7 @@ function paymentRows(snapshot) {
     cycle: p.cycle?.title || '-',
     amountEtb: money(p.amount),
     method: String(p.method || '').replace(/_/g, ' ').toUpperCase(),
-    paidAt: p.paidAt ? new Date(p.paidAt).toISOString().slice(0, 10) : '',
+    paidAt: p.paidAt ? formatEthiopian(p.paidAt) : '',
     reference: p.bankReference || p.chapaReference || '-',
   }));
 }
@@ -793,4 +794,467 @@ export async function buildCollectionsMonthlyExportPdf({ title, meta, monthsData
       reject(err);
     }
   });
+}
+
+// ------------------------------------------------------------ Executive Summary Yearly Report Exports
+
+export async function buildYearlySummaryPdf(summaryData) {
+  const { title, ethYear, periodTitle, totals, monthRows, programmeRows, methodRows } = summaryData;
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 36 });
+      const chunks = [];
+      doc.on('data', (c) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      const pageW = doc.page.width;
+      const pageH = doc.page.height;
+      const margin = 36;
+      const usableW = pageW - margin * 2;
+
+      // 1. Top Executive Banner (Navy / Dark Slate #0f172a)
+      doc.rect(margin, 24, usableW, 44).fill('#0f172a');
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(13).text('COLLEGE MANAGEMENT SYSTEM — EXECUTIVE FINANCIAL REPORT', margin + 14, 32);
+      doc.fillColor('#94a3b8').font('Helvetica').fontSize(8.5).text(
+        `${periodTitle} • Generated: ${formatEthiopian(new Date(), { time: true })} EC (Addis Ababa Time)`,
+        margin + 14,
+        49
+      );
+
+      // 2. KPI Cards Row (4 cards)
+      const cardY = 76;
+      const cardW = (usableW - 30) / 4;
+      const cardH = 46;
+      const kpis = [
+        { label: 'TOTAL BILLED', value: `${Number(totals.billed).toLocaleString('en-US', { minimumFractionDigits: 2 })} ETB`, sub: `${totals.charges} student charges`, color: '#4338ca', bg: '#eef2ff' },
+        { label: 'TOTAL COLLECTED', value: `${Number(totals.paid).toLocaleString('en-US', { minimumFractionDigits: 2 })} ETB`, sub: `${totals.payments} payments recorded`, color: '#047857', bg: '#ecfdf5' },
+        { label: 'OUTSTANDING / OVERDUE', value: `${Number(totals.outstanding).toLocaleString('en-US', { minimumFractionDigits: 2 })} ETB`, sub: 'Unpaid fee balance', color: '#b91c1c', bg: '#fef2f2' },
+        { label: 'COLLECTION RECOVERY RATE', value: totals.rate, sub: 'Revenue recovery index', color: '#0f172a', bg: '#f8fafc' },
+      ];
+
+      kpis.forEach((kpi, i) => {
+        const x = margin + i * (cardW + 10);
+        doc.roundedRect(x, cardY, cardW, cardH, 5).fillAndStroke(kpi.bg, '#cbd5e1');
+        doc.fillColor('#64748b').font('Helvetica-Bold').fontSize(7).text(kpi.label, x + 8, cardY + 6);
+        doc.fillColor(kpi.color).font('Helvetica-Bold').fontSize(11).text(kpi.value, x + 8, cardY + 17);
+        doc.fillColor('#64748b').font('Helvetica').fontSize(6.5).text(kpi.sub, x + 8, cardY + 32);
+      });
+
+      // 3. Vector Chart: Monthly Revenue & Collection Analysis
+      const chartY = 130;
+      const chartH = 120;
+      doc.roundedRect(margin, chartY, usableW, chartH, 6).fillAndStroke('#ffffff', '#e2e8f0');
+
+      // Chart Title & Legend
+      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(8.5).text('MONTHLY BILLED VS COLLECTED REVENUE COMPARISON (ETB)', margin + 14, chartY + 8);
+
+      const legX = margin + usableW - 220;
+      doc.rect(legX, chartY + 9, 9, 7).fill('#6366f1');
+      doc.fillColor('#334155').font('Helvetica').fontSize(7.5).text('Billed Tuition', legX + 13, chartY + 9);
+      doc.rect(legX + 90, chartY + 9, 9, 7).fill('#10b981');
+      doc.fillColor('#334155').font('Helvetica').fontSize(7.5).text('Collected Revenue', legX + 103, chartY + 9);
+
+      // Draw bars
+      const plotX = margin + 45;
+      const plotW = usableW - 65;
+      const plotY = chartY + 26;
+      const plotH = 72;
+
+      const maxVal = Math.max(1, ...monthRows.map((m) => Math.max(Number(m.billed) || 0, Number(m.paid) || 0)));
+
+      // Draw gridlines
+      [0, 0.5, 1].forEach((fraction) => {
+        const gy = plotY + plotH - fraction * plotH;
+        doc.moveTo(plotX, gy).lineTo(plotX + plotW, gy).lineWidth(0.5).strokeColor('#f1f5f9').stroke();
+        const tickVal = Math.round((fraction * maxVal) / 1000);
+        doc.fillColor('#94a3b8').font('Helvetica').fontSize(6.5).text(`${tickVal}k`, plotX - 26, gy - 3, { width: 22, align: 'right' });
+      });
+
+      // Baseline
+      doc.moveTo(plotX, plotY + plotH).lineTo(plotX + plotW, plotY + plotH).lineWidth(1).strokeColor('#cbd5e1').stroke();
+
+      const numMonths = monthRows.length;
+      const slotW = plotW / Math.max(1, numMonths);
+      const barW = Math.min(16, (slotW - 10) / 2);
+
+      monthRows.forEach((m, idx) => {
+        const cx = plotX + idx * slotW + slotW / 2;
+        const bHeight = ((Number(m.billed) || 0) / maxVal) * plotH;
+        const pHeight = ((Number(m.paid) || 0) / maxVal) * plotH;
+
+        if (bHeight > 0) {
+          doc.rect(cx - barW - 1, plotY + plotH - bHeight, barW, bHeight).fill('#6366f1');
+        }
+        if (pHeight > 0) {
+          doc.rect(cx + 1, plotY + plotH - pHeight, barW, pHeight).fill('#10b981');
+        }
+
+        const shortName = (m.monthName || '').slice(0, 3);
+        doc.fillColor('#475569').font('Helvetica-Bold').fontSize(6.5).text(shortName, cx - slotW / 2, plotY + plotH + 5, { width: slotW, align: 'center' });
+      });
+
+      // 4. Monthly Breakdown Table
+      let tableY = chartY + chartH + 12;
+      doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#0f172a').text('Ethiopian Calendar Monthly Fee Performance', margin, tableY);
+      tableY += 14;
+
+      const mCols = ['Month', 'Monthly Charges', 'Payments Settled', 'Billed (ETB)', 'Collected (ETB)', 'Outstanding (ETB)', 'Recovery Rate'];
+      const mWidths = [110, 95, 95, 120, 120, 120, 105];
+
+      doc.rect(margin, tableY, usableW, 15).fill('#f1f5f9');
+      let hx = margin + 6;
+      mCols.forEach((col, ci) => {
+        doc.fillColor('#334155').font('Helvetica-Bold').fontSize(7.5).text(col, hx, tableY + 3.5, { width: mWidths[ci] });
+        hx += mWidths[ci];
+      });
+      tableY += 15;
+
+      monthRows.forEach((r, ri) => {
+        if (ri % 2 === 1) {
+          doc.rect(margin, tableY, usableW, 13).fill('#f8fafc');
+        }
+        let rx = margin + 6;
+        const rowData = [
+          `${r.monthIndex}. ${r.monthName}`,
+          String(r.charges),
+          String(r.payments),
+          Number(r.billed).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+          Number(r.paid).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+          Number(r.outstanding).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+          r.rate,
+        ];
+        rowData.forEach((val, vi) => {
+          doc.fillColor('#0f172a').font('Helvetica').fontSize(7).text(val, rx, tableY + 2.5, { width: mWidths[vi] });
+          rx += mWidths[vi];
+        });
+        tableY += 13;
+      });
+
+      // Totals row
+      doc.rect(margin, tableY, usableW, 15).fill('#e2e8f0');
+      let tx = margin + 6;
+      [
+        'TOTAL / SUMMARY',
+        String(totals.charges),
+        String(totals.payments),
+        Number(totals.billed).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+        Number(totals.paid).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+        Number(totals.outstanding).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+        totals.rate,
+      ].forEach((val, ti) => {
+        doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(7.5).text(val, tx, tableY + 3.5, { width: mWidths[ti] });
+        tx += mWidths[ti];
+      });
+
+      // PAGE 2: Programme Performance, Payment Methods, and Official Signatures
+      doc.addPage();
+
+      doc.rect(margin, 24, usableW, 36).fill('#0f172a');
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(12).text('ACADEMIC PROGRAMME RECOVERY & PAYMENT SETTLEMENT CHANNELS', margin + 14, 31);
+      doc.fillColor('#94a3b8').font('Helvetica').fontSize(8).text(`Academic Year: ${ethYear} EC • Page 2 of 2`, margin + 14, 46);
+
+      let p2Y = 70;
+
+      // Table A: Programme Recovery
+      doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#0f172a').text('Programme Recovery Breakdown', margin, p2Y);
+      p2Y += 13;
+
+      const pCols = ['Academic Programme', 'Student Charges', 'Billed (ETB)', 'Collected (ETB)', 'Outstanding (ETB)', 'Recovery Rate'];
+      const pWidths = [230, 95, 115, 115, 115, 95];
+
+      doc.rect(margin, p2Y, usableW, 15).fill('#f1f5f9');
+      let phx = margin + 6;
+      pCols.forEach((col, ci) => {
+        doc.fillColor('#334155').font('Helvetica-Bold').fontSize(7.5).text(col, phx, p2Y + 3.5, { width: pWidths[ci] });
+        phx += pWidths[ci];
+      });
+      p2Y += 15;
+
+      programmeRows.slice(0, 15).forEach((r, ri) => {
+        if (ri % 2 === 1) doc.rect(margin, p2Y, usableW, 13).fill('#f8fafc');
+        let prx = margin + 6;
+        [
+          r.programme,
+          String(r.charges),
+          Number(r.billed).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+          Number(r.paid).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+          Number(r.outstanding).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+          r.rate,
+        ].forEach((val, vi) => {
+          doc.fillColor('#0f172a').font('Helvetica').fontSize(7).text(val, prx, p2Y + 2.5, { width: pWidths[vi] });
+          prx += pWidths[vi];
+        });
+        p2Y += 13;
+      });
+
+      p2Y += 16;
+
+      // Table B: Payment Methods
+      doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#0f172a').text('Settlement Channels Breakdown', margin, p2Y);
+      p2Y += 13;
+
+      const mthCols = ['Settlement Channel', 'Transactions', 'Total Volume (ETB)', 'Channel Share'];
+      const mthWidths = [260, 140, 200, 165];
+
+      doc.rect(margin, p2Y, usableW, 15).fill('#f1f5f9');
+      let mhx = margin + 6;
+      mthCols.forEach((col, ci) => {
+        doc.fillColor('#334155').font('Helvetica-Bold').fontSize(7.5).text(col, mhx, p2Y + 3.5, { width: mthWidths[ci] });
+        mhx += mthWidths[ci];
+      });
+      p2Y += 15;
+
+      methodRows.forEach((r, ri) => {
+        if (ri % 2 === 1) doc.rect(margin, p2Y, usableW, 13).fill('#f8fafc');
+        let mrx = margin + 6;
+        [
+          r.method,
+          String(r.count),
+          Number(r.amount).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+          r.share,
+        ].forEach((val, vi) => {
+          doc.fillColor('#0f172a').font('Helvetica').fontSize(7).text(val, mrx, p2Y + 2.5, { width: mthWidths[vi] });
+          mrx += mthWidths[vi];
+        });
+        p2Y += 13;
+      });
+
+      // Sign-off / Certification Block at bottom of Page 2
+      const sigY = pageH - 75;
+      const sigW = (usableW - 40) / 3;
+
+      ['Prepared By: Finance Office', 'Verified By: Chief Internal Auditor', 'Approved By: College Dean / President'].forEach((sigTitle, idx) => {
+        const sx = margin + idx * (sigW + 20);
+        doc.moveTo(sx, sigY).lineTo(sx + sigW, sigY).lineWidth(1).strokeColor('#0f172a').stroke();
+        doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(7.5).text(sigTitle, sx, sigY + 4, { width: sigW, align: 'center' });
+        doc.fillColor('#64748b').font('Helvetica').fontSize(6.5).text('Signature & Official Date', sx, sigY + 14, { width: sigW, align: 'center' });
+      });
+
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+export async function buildYearlySummaryXlsx(summaryData) {
+  const { title, periodTitle, totals, monthRows, programmeRows, methodRows } = summaryData;
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'College Finance Office';
+
+  const ws = wb.addWorksheet('Executive Financial Summary');
+  ws.columns = [
+    { width: 28 },
+    { width: 16 },
+    { width: 16 },
+    { width: 22 },
+    { width: 22 },
+    { width: 22 },
+    { width: 18 },
+  ];
+
+  ws.addRow([title]).font = { bold: true, size: 14, color: { argb: 'FF4338CA' } };
+  ws.addRow([`Period: ${periodTitle}`]).font = { bold: true, size: 10, color: { argb: 'FF475569' } };
+  ws.addRow([`Generated: ${formatEthiopian(new Date(), { time: true })} EC`]).font = { size: 9, color: { argb: 'FF64748B' } };
+  ws.addRow([]);
+
+  ws.addRow(['KEY FINANCIAL INDICATORS']).font = { bold: true, size: 10, color: { argb: 'FF0F172A' } };
+  ws.addRow(['Total Billed (ETB)', Number(totals.billed).toLocaleString('en-US', { minimumFractionDigits: 2 })]);
+  ws.addRow(['Total Collected (ETB)', Number(totals.paid).toLocaleString('en-US', { minimumFractionDigits: 2 })]);
+  ws.addRow(['Outstanding / Overdue (ETB)', Number(totals.outstanding).toLocaleString('en-US', { minimumFractionDigits: 2 })]);
+  ws.addRow(['Collection Recovery Rate', totals.rate]);
+  ws.addRow(['Total Student Charges', totals.charges]);
+  ws.addRow(['Total Payments Recorded', totals.payments]);
+  ws.addRow([]);
+
+  ws.addRow(['ETHIOPIAN CALENDAR MONTHLY COLLECTIONS']).font = { bold: true, size: 11, color: { argb: 'FF4338CA' } };
+  const mHdr = ws.addRow(['Month', 'Charges', 'Payments', 'Billed (ETB)', 'Collected (ETB)', 'Outstanding (ETB)', 'Recovery Rate']);
+  mHdr.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  mHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4338CA' } };
+
+  monthRows.forEach((m) => {
+    ws.addRow([
+      `${m.monthIndex}. ${m.monthName}`,
+      m.charges,
+      m.payments,
+      Number(m.billed).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+      Number(m.paid).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+      Number(m.outstanding).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+      m.rate,
+    ]);
+  });
+  const mTot = ws.addRow([
+    'TOTAL / SUMMARY',
+    totals.charges,
+    totals.payments,
+    Number(totals.billed).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    Number(totals.paid).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    Number(totals.outstanding).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    totals.rate,
+  ]);
+  mTot.font = { bold: true };
+  ws.addRow([]);
+
+  ws.addRow(['ACADEMIC PROGRAMME RECOVERY BREAKDOWN']).font = { bold: true, size: 11, color: { argb: 'FF4338CA' } };
+  const pHdr = ws.addRow(['Programme', 'Charges', 'Billed (ETB)', 'Collected (ETB)', 'Outstanding (ETB)', 'Recovery Rate']);
+  pHdr.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  pHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+
+  programmeRows.forEach((p) => {
+    ws.addRow([
+      p.programme,
+      p.charges,
+      Number(p.billed).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+      Number(p.paid).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+      Number(p.outstanding).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+      p.rate,
+    ]);
+  });
+  ws.addRow([]);
+
+  ws.addRow(['SETTLEMENT CHANNELS BREAKDOWN']).font = { bold: true, size: 11, color: { argb: 'FF4338CA' } };
+  const chHdr = ws.addRow(['Channel / Method', 'Transactions', 'Total Volume (ETB)', 'Share (%)']);
+  chHdr.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  chHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+
+  methodRows.forEach((ch) => {
+    ws.addRow([
+      ch.method,
+      ch.count,
+      Number(ch.amount).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+      ch.share,
+    ]);
+  });
+
+  return wb.xlsx.writeBuffer();
+}
+
+export async function buildYearlySummaryDocx(summaryData) {
+  const { title, periodTitle, totals, monthRows, programmeRows, methodRows } = summaryData;
+  const children = [
+    new Paragraph({
+      heading: HeadingLevel.HEADING_1,
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: title, bold: true, color: '0f172a' })],
+    }),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: `${periodTitle} • Generated: ${formatEthiopian(new Date(), { time: true })} EC`, size: 18, color: SLATE })],
+    }),
+    new Paragraph({ text: '' }),
+  ];
+
+  children.push(
+    new Paragraph({
+      heading: HeadingLevel.HEADING_2,
+      children: [new TextRun({ text: 'Executive Key Indicators', bold: true, color: '4338ca' })],
+    }),
+    docxTable(
+      ['Financial Metric', 'Value'],
+      [
+        ['Total Billed (ETB)', `${Number(totals.billed).toLocaleString('en-US', { minimumFractionDigits: 2 })} ETB`],
+        ['Total Collected (ETB)', `${Number(totals.paid).toLocaleString('en-US', { minimumFractionDigits: 2 })} ETB`],
+        ['Outstanding / Overdue (ETB)', `${Number(totals.outstanding).toLocaleString('en-US', { minimumFractionDigits: 2 })} ETB`],
+        ['Collection Recovery Rate', totals.rate],
+        ['Total Student Charges', String(totals.charges)],
+        ['Total Payments Settled', String(totals.payments)],
+      ],
+      [40, 60]
+    ),
+    new Paragraph({ text: '' })
+  );
+
+  children.push(
+    new Paragraph({
+      heading: HeadingLevel.HEADING_2,
+      children: [new TextRun({ text: 'Ethiopian Calendar Monthly Collections', bold: true, color: '4338ca' })],
+    }),
+    docxTable(
+      ['Month', 'Charges', 'Payments', 'Billed (ETB)', 'Collected (ETB)', 'Outstanding (ETB)', 'Rate'],
+      monthRows.map((m) => [
+        `${m.monthIndex}. ${m.monthName}`,
+        String(m.charges),
+        String(m.payments),
+        Number(m.billed).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+        Number(m.paid).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+        Number(m.outstanding).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+        m.rate,
+      ]),
+      [22, 11, 11, 16, 16, 16, 8]
+    ),
+    new Paragraph({ text: '' })
+  );
+
+  children.push(
+    new Paragraph({
+      heading: HeadingLevel.HEADING_2,
+      children: [new TextRun({ text: 'Academic Programme Recovery Breakdown', bold: true, color: '4338ca' })],
+    }),
+    docxTable(
+      ['Programme', 'Charges', 'Billed (ETB)', 'Collected (ETB)', 'Outstanding (ETB)', 'Rate'],
+      programmeRows.map((p) => [
+        p.programme,
+        String(p.charges),
+        Number(p.billed).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+        Number(p.paid).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+        Number(p.outstanding).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+        p.rate,
+      ]),
+      [30, 12, 16, 16, 16, 10]
+    ),
+    new Paragraph({ text: '' })
+  );
+
+  children.push(
+    new Paragraph({
+      heading: HeadingLevel.HEADING_2,
+      children: [new TextRun({ text: 'Settlement Channels Breakdown', bold: true, color: '4338ca' })],
+    }),
+    docxTable(
+      ['Channel / Method', 'Transactions', 'Total Volume (ETB)', 'Share (%)'],
+      methodRows.map((ch) => [
+        ch.method,
+        String(ch.count),
+        Number(ch.amount).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+        ch.share,
+      ]),
+      [35, 20, 25, 20]
+    ),
+    new Paragraph({ text: '' })
+  );
+
+  const doc = new Document({ sections: [{ children }] });
+  return Packer.toBuffer(doc);
+}
+
+export function buildYearlySummaryCsv(summaryData) {
+  const { title, periodTitle, totals, monthRows, programmeRows, methodRows } = summaryData;
+  const lines = [
+    `"${title}"`,
+    `"Period: ${periodTitle}"`,
+    `"Generated: ${formatEthiopian(new Date(), { time: true })} EC"`,
+    '',
+    '"KEY METRICS"',
+    '"Metric","Value"',
+    `"Total Billed ETB","${totals.billed}"`,
+    `"Total Collected ETB","${totals.paid}"`,
+    `"Total Outstanding ETB","${totals.outstanding}"`,
+    `"Collection Rate","${totals.rate}"`,
+    `"Total Charges","${totals.charges}"`,
+    `"Total Payments","${totals.payments}"`,
+    '',
+    '"MONTHLY PERFORMANCE"',
+    '"Month","Charges","Payments","Billed (ETB)","Collected (ETB)","Outstanding (ETB)","Recovery Rate"',
+    ...monthRows.map((m) => `"${m.monthIndex}. ${m.monthName}",${m.charges},${m.payments},"${m.billed}","${m.paid}","${m.outstanding}","${m.rate}"`),
+    '',
+    '"PROGRAMME PERFORMANCE"',
+    '"Programme","Charges","Billed (ETB)","Collected (ETB)","Outstanding (ETB)","Recovery Rate"',
+    ...programmeRows.map((p) => `"${p.programme}",${p.charges},"${p.billed}","${p.paid}","${p.outstanding}","${p.rate}"`),
+    '',
+    '"PAYMENT CHANNELS"',
+    '"Channel","Transactions","Total Volume (ETB)","Share"',
+    ...methodRows.map((ch) => `"${ch.method}",${ch.count},"${ch.amount}","${ch.share}"`),
+  ];
+  return '\uFEFF' + lines.join('\n');
 }

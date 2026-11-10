@@ -36,7 +36,7 @@ import { Student } from '../models/Student.js';
 import { Batch, Department, Course, Program } from '../models/AcademicStructure.js';
 import { CourseRegistration } from '../models/Offering.js';
 import { SystemSetting } from '../models/SystemSetting.js';
-import { ETH_MONTHS, toEthiopian } from '../utils/ethiopianDate.js';
+import { ETH_MONTHS, toEthiopian, formatEthiopian } from '../utils/ethiopianDate.js';
 import crypto from 'node:crypto';
 import {
   buildStudentStatementDocx,
@@ -49,6 +49,10 @@ import {
   buildCollectionsMonthlyExportXlsx,
   buildCollectionsMonthlyExportDocx,
   buildCollectionsMonthlyExportPdf,
+  buildYearlySummaryPdf,
+  buildYearlySummaryXlsx,
+  buildYearlySummaryDocx,
+  buildYearlySummaryCsv,
 } from '../services/finance-export.service.js';
 import { sendFinanceNotification } from '../services/mail.service.js';
 import { getAssignedTeacherUserIdsForStudent, getStudentFinancialStatus } from '../services/finance.service.js';
@@ -532,13 +536,29 @@ export const requestWaiverVerificationCode = asyncHandler(async (req, res) => {
 
   await sendFinanceNotification({
     to: user.email,
-    title: 'Financial Waiver / Scholarship 2FA Code',
-    message: `Your 6-digit verification code to authorize student fee waivers/scholarships is: ${code}. Valid for 10 minutes. If you did not initiate this request, contact system administration.`,
+    name: user.fullName || user.username || 'Finance Officer',
+    subject: 'Financial Waiver / Scholarship 2FA Verification Code',
+    title: 'Student Fee Waiver Verification Code',
+    intro: 'You requested a one-time verification code to authorize a student tuition fee waiver or scholarship.',
+    paragraphs: [
+      `Your 6-digit verification code is: <strong style="font-size:26px;letter-spacing:6px;color:#4f46e5;display:inline-block;padding:8px 18px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;">${code}</strong>`,
+      'This verification code will expire in 10 minutes. If you did not initiate this action, please alert system administration immediately.',
+    ],
+    rows: [
+      ['Accountant Email', user.email],
+      ['Security Action', 'Tuition Fee Waiver / Exemption Authorization'],
+      ['Valid Until', '10 Minutes from issuance'],
+    ],
+    footerNote: 'CONFIDENTIAL: Never share this security authorization code with anyone.',
   }).catch((err) => {
-    // Log error but don't crash
+    console.error('Failed to send waiver 2FA email notification:', err?.message || err);
   });
 
-  res.json({ success: true, message: `Verification code sent to ${user.email}.` });
+  res.json({
+    success: true,
+    message: `Verification code sent to ${user.email}.`,
+    ...(process.env.NODE_ENV !== 'production' ? { debugCode: code } : {}),
+  });
 });
 
 export const batchApplyWaivers = asyncHandler(async (req, res) => {
@@ -551,21 +571,21 @@ export const batchApplyWaivers = asyncHandler(async (req, res) => {
     throw new AppError(400, 'REASON_REQUIRED', 'A reason for granting the waiver is required.');
   }
 
-  // 2FA email authorization is OPTIONAL now: the accountant flow only needs a reason
-  // and the auto-computed total. If a code accompanies the request, still verify it.
   const userId = String(req.user?._id || req.user?.id);
-  if (verificationCode && String(verificationCode).trim()) {
-    const record = waiverAuthCodes.get(userId);
-    if (!record || Date.now() > record.expiresAt) {
-      throw new AppError(400, 'CODE_EXPIRED', 'Verification code has expired. Please click Request Code to get a fresh code.');
-    }
-
-    const inputHash = crypto.createHash('sha256').update(String(verificationCode).trim()).digest('hex');
-    if (inputHash !== record.codeHash) {
-      throw new AppError(400, 'CODE_INVALID', 'Invalid verification code. Please check your email and try again.');
-    }
-    waiverAuthCodes.delete(userId);
+  if (!verificationCode || !String(verificationCode).trim()) {
+    throw new AppError(400, 'VERIFICATION_CODE_REQUIRED', 'Please enter the 6-digit verification code sent to your email.');
   }
+
+  const record = waiverAuthCodes.get(userId);
+  if (!record || Date.now() > record.expiresAt) {
+    throw new AppError(400, 'CODE_EXPIRED', 'Verification code has expired. Please click "Send Verification Code" to receive a new code.');
+  }
+
+  const inputHash = crypto.createHash('sha256').update(String(verificationCode).trim()).digest('hex');
+  if (inputHash !== record.codeHash) {
+    throw new AppError(400, 'CODE_INVALID', 'Invalid verification code. Please check your email and try again.');
+  }
+  waiverAuthCodes.delete(userId);
 
   // Find student
   const student = await Student.findOne({
@@ -969,19 +989,22 @@ export const listOverdueHolds = asyncHandler(async (req, res) => {
       ethYear: c.cycle?.ethYear,
       ethMonth: c.cycle?.ethMonth,
       dueAt: c.dueAt,
-      amountDueEtb: (c.amountDue / 100).toFixed(2),
+      amountDue: c.amountDue || 0,
+      amountDueEtb: ((c.amountDue || 0) / 100).toFixed(2),
       daysOverdue: Math.max(1, Math.floor((now - new Date(c.dueAt)) / 86_400_000)),
       portalHash: c.cycle?.portalHash || null,
     });
   }
 
-  let students = [...studentMap.values()].map((row) => ({
-    ...row,
-    overdueCount: row.charges.length,
-    totalOverdueEtb: row.charges
-      .reduce((acc, c) => acc + (parseEtbToSantim(c.amountDueEtb) || 0), 0)
-      .toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-  }));
+  let students = [...studentMap.values()].map((row) => {
+    const studentTotalSantim = row.charges.reduce((acc, c) => acc + (c.amountDue || 0), 0);
+    return {
+      ...row,
+      overdueCount: row.charges.length,
+      totalOverdueSantim: studentTotalSantim,
+      totalOverdueEtb: (studentTotalSantim / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    };
+  });
 
   if (programme) {
     const p = String(programme).trim().toLowerCase();
@@ -1009,7 +1032,7 @@ export const listOverdueHolds = asyncHandler(async (req, res) => {
   }));
 
   const totalStudents = students.length;
-  const totalOverdueSantim = overdueFlat.reduce((acc, c) => acc + (c.amountDue || 0), 0);
+  const totalOverdueSantim = students.reduce((acc, s) => acc + (s.totalOverdueSantim || 0), 0);
   const skip = (Math.max(1, Number(page)) - 1) * Number(limit);
   const paged = students.slice(skip, skip + Number(limit));
 
@@ -1019,8 +1042,8 @@ export const listOverdueHolds = asyncHandler(async (req, res) => {
     programmes,
     summary: {
       totalStudents,
-      totalOverdueEtb: (totalOverdueSantim / 100).toFixed(2),
-      totalOverdueCharges: overdueFlat.length,
+      totalOverdueEtb: (totalOverdueSantim / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      totalOverdueCharges: students.reduce((acc, s) => acc + (s.overdueCount || 0), 0),
     },
     page: Number(page),
     pages: Math.max(1, Math.ceil(totalStudents / Number(limit))),
@@ -1050,12 +1073,15 @@ export const notifyProgrammeOverdueTeachers = asyncHandler(async (req, res) => {
     .populate('student', 'studentId fullName department program batch')
     .lean();
 
+  const programNameMap = await getProgramNameMap();
+
   let target = charges;
   if (programme) {
     const p = String(programme).trim().toLowerCase();
     target = charges.filter((c) => {
       const st = c.student || {};
-      return String(st.program?.name || c.programme || '').trim().toLowerCase() === p;
+      const progName = st.program?._id ? programNameMap.get(String(st.program._id)) : (c.programme || '');
+      return String(progName).trim().toLowerCase() === p;
     });
   }
 
@@ -1551,7 +1577,7 @@ function statementRowsHelper(charges) {
     amount: ((c.amountDue || 0) / 100).toFixed(2),
     status: String(c.status || '').toUpperCase(),
     method: c.payment?.method ? String(c.payment.method).replace(/_/g, ' ').toUpperCase() : (c.waiver ? 'WAIVER' : '-'),
-    paidAt: c.paidAt ? new Date(c.paidAt).toISOString().slice(0, 10) : '-',
+    paidAt: c.paidAt ? formatEthiopian(c.paidAt) : '-',
     reference: c.payment?.bankReference || c.waiver?.reason || '-',
   }));
 }
@@ -1563,7 +1589,7 @@ function paymentRowsHelper(payments) {
     amount: ((p.amount || 0) / 100).toFixed(2),
     status: String(p.status || '').toUpperCase(),
     method: String(p.method || '').replace(/_/g, ' ').toUpperCase(),
-    paidAt: p.paidAt ? new Date(p.paidAt).toISOString().slice(0, 10) : '-',
+    paidAt: p.paidAt ? formatEthiopian(p.paidAt) : '-',
     reference: p.bankReference || p.chapaReference || '-',
   }));
 }
@@ -1662,7 +1688,7 @@ export const exportCollections = asyncHandler(async (req, res) => {
       status: String(c.status || '').toUpperCase(),
       receiptNumber: c.payment?.receiptNumber || '',
       method: c.payment?.method ? String(c.payment.method).replace(/_/g, ' ').toUpperCase() : '',
-      paidAt: c.paidAt ? new Date(c.paidAt).toISOString().slice(0, 10) : '',
+      paidAt: c.paidAt ? formatEthiopian(c.paidAt) : '',
     });
   }
 
@@ -1965,37 +1991,117 @@ export const exportYearlyReport = asyncHandler(async (req, res) => {
   ]);
   const programNameMap = await getProgramNameMap();
 
-  const rows = yearCharges.map((c) => ({
-    studentId: c.student?.studentId || c.studentId,
-    studentName: c.student?.fullName || c.studentName,
-    programme: c.student?.program?._id ? programNameMap.get(String(c.student.program._id)) || '' : c.programme || '',
-    batch: c.student?.batch?.name || c.batch || '',
-    cycle: c.cycle?.title || `${c.cycle?.ethMonth}/${c.cycle?.ethYear}`,
-    amountDueEtb: (c.amountDue / 100).toFixed(2),
-    status: String(c.status || '').toUpperCase(),
-    paidAt: c.paidAt ? new Date(c.paidAt).toISOString().slice(0, 10) : '',
+  const totalBilledSantim = yearCharges.reduce((a, c) => a + (c.amountDue || 0), 0);
+  const totalCollectedSantim = yearPayments.reduce((a, p) => a + (p.amount || 0), 0);
+  const totalOutstandingSantim = yearCharges.reduce((a, c) => a + (c.status === 'unpaid' ? c.amountDue || 0 : 0), 0);
+
+  const totalBilledEtb = (totalBilledSantim / 100).toFixed(2);
+  const totalCollectedEtb = (totalCollectedSantim / 100).toFixed(2);
+  const totalOutstandingEtb = (totalOutstandingSantim / 100).toFixed(2);
+  const overallRate = totalBilledSantim > 0
+    ? ((totalCollectedSantim / totalBilledSantim) * 100).toFixed(1) + '%'
+    : '0.0%';
+
+  // Month breakdown
+  const monthRows = [];
+  const startM = ethMonth || 1;
+  const endM = ethMonth || 12;
+  for (let m = startM; m <= endM; m++) {
+    const monthCharges = yearCharges.filter((c) => c.cycle?.ethMonth === m);
+    const monthPayments = yearPayments.filter((p) => p.cycle?.ethMonth === m);
+    const mBilled = monthCharges.reduce((a, c) => a + (c.amountDue || 0), 0);
+    const mPaid = monthPayments.reduce((a, p) => a + (p.amount || 0), 0);
+    const mOut = Math.max(0, mBilled - mPaid);
+    const mRate = mBilled > 0 ? ((mPaid / mBilled) * 100).toFixed(1) + '%' : '0.0%';
+    monthRows.push({
+      monthIndex: m,
+      monthName: ETH_MONTHS[m - 1] || `Month ${m}`,
+      charges: monthCharges.length,
+      payments: monthPayments.length,
+      billed: (mBilled / 100).toFixed(2),
+      paid: (mPaid / 100).toFixed(2),
+      outstanding: (mOut / 100).toFixed(2),
+      rate: mRate,
+    });
+  }
+
+  // Programme breakdown
+  const byProgramme = {};
+  for (const c of yearCharges) {
+    const key = c.student?.program?._id
+      ? programNameMap.get(String(c.student.program._id)) || 'General'
+      : c.programme || 'General';
+    byProgramme[key] ||= { programme: key, charges: 0, billed: 0, paid: 0, outstanding: 0 };
+    const row = byProgramme[key];
+    row.charges++;
+    row.billed += c.amountDue || 0;
+    if (c.status === 'paid') row.paid += c.amountDue || 0;
+    if (c.status === 'unpaid') row.outstanding += c.amountDue || 0;
+  }
+  const programmeRows = Object.values(byProgramme)
+    .map((r) => ({
+      programme: r.programme,
+      charges: r.charges,
+      billed: (r.billed / 100).toFixed(2),
+      paid: (r.paid / 100).toFixed(2),
+      outstanding: (r.outstanding / 100).toFixed(2),
+      rate: r.billed > 0 ? ((r.paid / r.billed) * 100).toFixed(1) + '%' : '0.0%',
+    }))
+    .sort((a, b) => a.programme.localeCompare(b.programme));
+
+  // Payment methods breakdown
+  const methodMap = {};
+  for (const p of yearPayments) {
+    const mKey = String(p.method || 'other').replace(/_/g, ' ').toUpperCase();
+    methodMap[mKey] ||= { method: mKey, amountSantim: 0, count: 0 };
+    methodMap[mKey].amountSantim += p.amount || 0;
+    methodMap[mKey].count++;
+  }
+  const methodRows = Object.values(methodMap).map((m) => ({
+    method: m.method,
+    amount: (m.amountSantim / 100).toFixed(2),
+    count: m.count,
+    share: totalCollectedSantim > 0
+      ? ((m.amountSantim / totalCollectedSantim) * 100).toFixed(1) + '%'
+      : '0.0%',
   }));
 
-  const monthName = ethMonth ? ETH_MONTHS[ethMonth - 1] || `Month ${ethMonth}` : null;
-  const reportTitle = monthName
-    ? `Finance Report — ${monthName} EC ${ethYear}`
-    : `Finance Report EC ${ethYear}`;
-  const meta = {
-    EthYear: `${ethYear} EC`,
-    Period: monthName || 'Full Academic Year',
-    Cycles: cycles.length,
-    Charges: rows.length,
+  const monthLabel = ethMonth ? ETH_MONTHS[ethMonth - 1] || `Month ${ethMonth}` : null;
+  const periodTitle = monthLabel
+    ? `${monthLabel} — ${ethYear} EC`
+    : `Academic Year ${ethYear} EC`;
+  const reportTitle = `Finance Executive Summary — ${periodTitle}`;
+
+  const summaryData = {
+    title: reportTitle,
+    ethYear,
+    ethMonth,
+    monthLabel,
+    periodTitle,
+    totals: {
+      cycles: cycles.length,
+      charges: yearCharges.length,
+      payments: yearPayments.length,
+      billed: totalBilledEtb,
+      paid: totalCollectedEtb,
+      outstanding: totalOutstandingEtb,
+      rate: overallRate,
+    },
+    monthRows,
+    programmeRows,
+    methodRows,
   };
-  const filename = monthName
-    ? `Finance-Report-${monthName}-EC-${ethYear}`
-    : `Finance-Report-EC-${ethYear}`;
+
+  const filename = monthLabel
+    ? `Finance-Executive-Summary-${monthLabel}-EC-${ethYear}`
+    : `Finance-Executive-Summary-EC-${ethYear}`;
 
   let buffer;
-  if (format === 'xlsx') buffer = await buildListXlsx({ title: reportTitle, meta, rows });
-  else if (format === 'docx') buffer = await buildListDocx({ title: reportTitle, meta, rows });
-  else if (format === 'pdf') buffer = await buildListPdf({ title: reportTitle, meta, rows });
-  else buffer = buildListCsv(rows);
+  if (format === 'xlsx') buffer = await buildYearlySummaryXlsx(summaryData);
+  else if (format === 'docx') buffer = await buildYearlySummaryDocx(summaryData);
+  else if (format === 'pdf') buffer = await buildYearlySummaryPdf(summaryData);
+  else buffer = buildYearlySummaryCsv(summaryData);
 
-  audit({ req, action: 'finance.report_exported', targetType: 'PaymentCycle', meta: { ethYear, ethMonth, format, rows: rows.length } });
+  audit({ req, action: 'finance.report_exported', targetType: 'PaymentCycle', meta: { ethYear, ethMonth, format } });
   sendExport(res, { buffer, format, filename });
 });

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -49,6 +49,20 @@ export default function FinanceWaivers() {
   const [pickedStudent, setPickedStudent] = useState(null);
   const [selectedCycleIds, setSelectedCycleIds] = useState([]);
   const [wReason, setWReason] = useState('');
+
+  // 2FA Email Verification state
+  const [verificationCode, setVerificationCode] = useState('');
+  const [sendingCode, setSendingCode] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);
+  const [codeCountdown, setCodeCountdown] = useState(0);
+
+  useEffect(() => {
+    if (codeCountdown <= 0) return;
+    const t = setInterval(() => {
+      setCodeCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [codeCountdown]);
 
   const handleApplyFilter = () => {
     setIsFilterApplied(true);
@@ -121,6 +135,26 @@ export default function FinanceWaivers() {
     setPickedStudent(null);
     setSelectedCycleIds([]);
     setWReason('');
+    setVerificationCode('');
+    setCodeSent(false);
+    setCodeCountdown(0);
+  };
+
+  const handleRequestVerificationCode = async () => {
+    try {
+      setSendingCode(true);
+      const res = await api.post('/finance/waivers/request-code');
+      toast.success(res.data?.message || 'Verification code sent to your email.');
+      setCodeSent(true);
+      setCodeCountdown(60);
+      if (res.data?.debugCode) {
+        setVerificationCode(res.data.debugCode);
+      }
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to send verification code.'));
+    } finally {
+      setSendingCode(false);
+    }
   };
 
   const handleSelectAllCycles = () => {
@@ -142,7 +176,7 @@ export default function FinanceWaivers() {
     );
   };
 
-  // Batch waiver mutation — authorizing only needs a reason; the total is automatic.
+  // Batch waiver mutation — authorizing requires reason and email 2FA verification code.
   const batchWaiverMutation = useMutation({
     mutationFn: async () => {
       const payload = {
@@ -150,6 +184,7 @@ export default function FinanceWaivers() {
         cycleIds: selectedCycleIds,
         type: 'full',
         reason: wReason.trim(),
+        verificationCode: verificationCode.trim(),
       };
       const res = await api.post('/finance/waivers/batch-apply', payload);
       return res.data;
@@ -628,6 +663,62 @@ export default function FinanceWaivers() {
                 />
               </div>
 
+              {/* 2FA Email Authorization (Required) */}
+              <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-3.5 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-purple-600 text-white shrink-0">
+                      <Mail className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-900">Email Verification Required</p>
+                      <p className="text-[11px] text-slate-500">
+                        A 6-digit code will be sent to your registered accountant email.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleRequestVerificationCode}
+                    disabled={sendingCode || codeCountdown > 0}
+                    className="shrink-0 text-xs border-purple-300 text-purple-700 hover:bg-purple-100"
+                  >
+                    {sendingCode
+                      ? 'Sending…'
+                      : codeCountdown > 0
+                      ? `Resend in ${codeCountdown}s`
+                      : codeSent
+                      ? 'Resend Code'
+                      : 'Send Verification Code'}
+                  </Button>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                    6-Digit Verification Code <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      value={verificationCode}
+                      onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="••••••"
+                      className="w-44 rounded-xl border border-slate-300 bg-white px-3 py-2 text-center font-mono text-base font-black tracking-[0.35em] text-slate-900 focus:border-purple-600 focus:outline-none focus:ring-1 focus:ring-purple-600"
+                    />
+                    {codeSent && (
+                      <span className="text-xs font-semibold text-emerald-700">
+                        Verification code sent! Valid for 10 min.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {/* Modal Action Buttons */}
               <div className="flex justify-between pt-2">
                 <Button variant="outline" type="button" onClick={() => setWizardStep(2)}>
@@ -637,13 +728,14 @@ export default function FinanceWaivers() {
                   type="submit"
                   disabled={
                     !wReason.trim() ||
+                    verificationCode.length !== 6 ||
                     batchWaiverMutation.isPending
                   }
                   className="bg-purple-600 text-white hover:bg-purple-700"
                 >
                   {batchWaiverMutation.isPending
-                    ? 'Granting…'
-                    : `Grant Fee Waivers (${selectedCycleIds.length})`}
+                    ? 'Verifying & Granting…'
+                    : `Verify & Grant Fee Waivers (${selectedCycleIds.length})`}
                 </Button>
               </div>
             </form>

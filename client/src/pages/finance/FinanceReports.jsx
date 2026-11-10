@@ -20,6 +20,7 @@ import StatCard from '../../components/ui/StatCard';
 import Button from '../../components/ui/Button';
 import { SkeletonPage } from '../../components/ui/Skeleton';
 import { ETH_MONTHS } from '../../lib/ethiopianDate';
+import { printFinancialReport } from '../../lib/printVoucher';
 
 const money = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -112,7 +113,13 @@ export default function FinanceReports() {
         ))}
       </select>
 
-      <Button size="sm" onClick={() => window.print()}>
+      <Button
+        size="sm"
+        onClick={() => {
+          if (!data) return;
+          printFinancialReport({ reportData: data, selectedYear, selectedMonth });
+        }}
+      >
         <Printer className="h-4 w-4" />
         <span>Print Official Report</span>
       </Button>
