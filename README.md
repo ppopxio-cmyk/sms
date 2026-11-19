@@ -406,5 +406,9 @@ This project is licensed under the **ISC License**.
 ---
 
 <div align="center">
+<<<<<<< HEAD
   <sub>Built with ❤️ for modern academic excellence in Ethiopia.</sub>
+=======
+  <sub>Built with  for modern academic excellence in Ethiopia.</sub>
+>>>>>>> a25947ff67c75ad7f1b81a3610051497085bc0e4
 </div>
